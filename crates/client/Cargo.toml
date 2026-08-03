@@ -1,0 +1,17 @@
+[package]
+name = "orion-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+orion-sim = { path = "../sim" }
+winit = "0.30"
+wgpu = "24"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+env_logger = "0.11"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+ron = "0.8"
+rodio = { version = "0.19", default-features = false }
