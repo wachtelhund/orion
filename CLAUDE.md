@@ -163,6 +163,14 @@ tier-0/1 production by requires-chain) so new races need data + sprites
 only. Balance workflow: run the `balance` example (matchups x seeds with
 bot personality styles) before and after any numbers change.
 
+## CI / releases
+
+`.github/workflows/ci.yml` runs tests + an 8-game soak + the stress budget
+on every push/PR, and builds all three platforms. `release.yml` triggers on
+`v*` tags: macOS universal (lipo), Linux x86_64, Windows x86_64, attached to
+the GitHub release. Linux builds need `libasound2-dev` (rodio/ALSA) — that
+is the only system dependency.
+
 ## Known gaps / next milestones (see SPEC.md for full list)
 
 1. Matchmaker service (queue, password lobbies, relay) from SPEC — current

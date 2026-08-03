@@ -2,6 +2,37 @@
 
 A StarCraft-style RTS built from scratch in Rust. No game engine — a
 purpose-built deterministic simulation with a wgpu isometric renderer.
+Two asymmetric races, skirmish AI, and online multiplayer via lobby codes.
+All art and audio are procedurally generated at startup: zero asset files.
+
+![Orion gameplay](docs/media/orion.gif)
+
+| ![Battle](docs/media/battle.png) | ![Kyth Assembly](docs/media/kyth-assembly.png) |
+|---|---|
+| *Vanguard Combine massing for a push* | *The Kyth Assembly swarm* |
+
+## Install
+
+Grab the latest build from **[Releases](../../releases)**:
+
+| OS | File | Steps |
+|---|---|---|
+| macOS (Apple Silicon + Intel) | `orion-macos-universal.tar.gz` | `tar xzf`, then first launch: right-click `orion` → Open (unsigned binary), or `xattr -d com.apple.quarantine ./orion` |
+| Windows 10/11 | `orion-windows-x86_64.zip` | Unzip, run `orion.exe`. If SmartScreen objects: More info → Run anyway |
+| Linux (x86_64) | `orion-linux-x86_64.tar.gz` | `tar xzf && ./orion`. Needs Vulkan drivers + ALSA (`libasound2`) at runtime |
+
+Multiplayer needs no setup: HOST ONLINE gives you a 5-letter lobby code,
+your opponent picks JOIN CODE. Settings live in `~/.orion-settings.ron`.
+
+**Build from source** (any platform, Rust 1.80+):
+
+```sh
+# Linux build deps: sudo apt-get install libasound2-dev
+cargo run --release -p orion-client
+```
+
+Releases are cut by pushing a tag: `git tag v0.x.y && git push origin v0.x.y`
+— CI builds all three platforms and attaches them to the GitHub release.
 
 See [SPEC.md](SPEC.md) for the full product specification and
 [CLAUDE.md](CLAUDE.md) for architecture.

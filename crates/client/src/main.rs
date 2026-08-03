@@ -35,6 +35,8 @@ struct Shell {
     shot_reveal: bool,
     menu_shot: Option<(String, String)>,
     mp_auto: Option<String>,
+    record: Option<(String, u32, u32, u32)>,
+    shot_cross: bool,
 }
 
 impl ApplicationHandler for Shell {
@@ -64,6 +66,11 @@ impl ApplicationHandler for Shell {
         }
         app.shot_reveal = self.shot_reveal;
         app.menu_shot = self.menu_shot.clone();
+        app.record = self.record.clone();
+        app.shot_cross = self.shot_cross;
+        if app.record.is_some() {
+            app.shot_bot0 = Some(app::Bot2::new(0));
+        }
         let headless = self.smoke
             || self.shot.is_some()
             || self.script.is_some()
@@ -159,6 +166,21 @@ fn main() {
         .and_then(|i| args.get(i + 1))
         .cloned();
     let shot_reveal = args.iter().any(|a| a == "--shot-reveal");
+    // --record prefix:start:frames:every — frame sequence for GIFs.
+    let record = args
+        .iter()
+        .position(|a| a == "--record")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|s| {
+            let p: Vec<&str> = s.split(':').collect();
+            Some((
+                p.first()?.to_string(),
+                p.get(1)?.parse().ok()?,
+                p.get(2)?.parse().ok()?,
+                p.get(3)?.parse().ok()?,
+            ))
+        });
+    let shot_cross = args.iter().any(|a| a == "--shot-cross");
     let mp_auto = args
         .iter()
         .position(|a| a == "--mp-auto")
@@ -184,6 +206,8 @@ fn main() {
         shot_reveal,
         menu_shot,
         mp_auto,
+        record,
+        shot_cross,
         ..Default::default()
     };
     event_loop.run_app(&mut shell).expect("run app");

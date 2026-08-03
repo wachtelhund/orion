@@ -26,6 +26,8 @@ pub const TICK_DT: f64 = 1.0 / 24.0;
 
 pub const BOT: u8 = 1;
 
+pub use orion_sim::ai::Bot as Bot2;
+
 pub const TEAM_COLORS: [[f32; 3]; 2] = [[0.30, 0.58, 1.0], [1.0, 0.38, 0.30]];
 pub const MINERAL_COLOR: [f32; 3] = [0.35, 0.85, 0.95];
 pub const GAS_COLOR: [f32; 3] = [0.35, 0.95, 0.85];
@@ -105,6 +107,11 @@ pub struct App {
     pub shot_reveal: bool,
     /// Render a menu page once, capture, exit: "main" | "settings" | "esc".
     pub menu_shot: Option<(String, String)>,
+    /// Frame-sequence recorder: (prefix, start_tick, frames, every_ticks).
+    pub record: Option<(String, u32, u32, u32)>,
+    pub record_done: u32,
+    /// Shot/record modes play cross-race (VC vs Kyth) instead of a mirror.
+    pub shot_cross: bool,
     pub finished: bool,
 
     // Session flow.
@@ -235,6 +242,9 @@ impl App {
             mp_auto: None,
             shot_reveal: false,
             menu_shot: None,
+            record: None,
+            record_done: 0,
+            shot_cross: false,
             finished: false,
             human: 0,
             in_game: headless,
@@ -1718,7 +1728,62 @@ impl App {
             self.run_script(&prefix);
             return;
         }
+        if let Some((prefix, start, frames, every)) = self.record.clone() {
+            if self.shot_cross && self.state.tick == 0 {
+                self.state = new_game_with(0, 1);
+            }
+            self.in_game = true;
+            self.page = MenuPage::None;
+            // Fast-forward to the start.
+            while self.state.tick < start && self.state.winner.is_none() {
+                let mut cmds = Vec::new();
+                if let Some(b0) = self.shot_bot0.as_mut() {
+                    cmds.extend(b0.think(&self.state));
+                }
+                cmds.extend(self.bot.think(&self.state));
+                self.step_sim(cmds);
+                for e in &mut self.effects {
+                    e.age += TICK_DT as f32;
+                }
+                self.effects.retain(|e| e.age < e.ttl);
+            }
+            if self.record_done >= frames || self.state.winner.is_some() {
+                self.finished = true;
+                return;
+            }
+            // Advance `every` ticks, then capture one frame.
+            for _ in 0..every {
+                let mut cmds = Vec::new();
+                if let Some(b0) = self.shot_bot0.as_mut() {
+                    cmds.extend(b0.think(&self.state));
+                }
+                cmds.extend(self.bot.think(&self.state));
+                self.step_sim(cmds);
+                for e in &mut self.effects {
+                    e.age += TICK_DT as f32 * (every as f32).recip().max(0.04);
+                }
+                self.effects.retain(|e| e.age < e.ttl);
+                for r in &mut self.recoil {
+                    *r = (*r - TICK_DT as f32).max(0.0);
+                }
+            }
+            if let Some((fx_, fy_)) = self.shot_focus {
+                let (ix, iy) = iso::world_to_iso(fx_, fy_);
+                self.cam.cx = ix;
+                self.cam.cy = iy;
+            }
+            if let Some(z) = self.shot_zoom {
+                self.cam.zoom = z;
+            }
+            self.gfx.capture = Some(format!("{prefix}_{:04}.ppm", self.record_done));
+            self.render();
+            self.record_done += 1;
+            return;
+        }
         if let Some((target, path)) = self.shot.clone() {
+            if self.shot_cross && self.state.tick == 0 {
+                self.state = new_game_with(0, 1);
+            }
             let chunk = 48u32;
             for _ in 0..chunk {
                 if self.state.tick >= target || self.state.winner.is_some() {
