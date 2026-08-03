@@ -76,6 +76,9 @@ impl Difficulty {
 pub struct Bot {
     pub player: u8,
     pub difficulty: Difficulty,
+    /// Personality: small deterministic offsets to timings/caps so games
+    /// against (and between) bots vary run to run.
+    pub style: u64,
     last_attack_tick: u32,
 }
 
@@ -85,25 +88,70 @@ impl Bot {
     }
 
     pub fn with(player: u8, difficulty: Difficulty) -> Bot {
-        Bot { player, difficulty, last_attack_tick: 0 }
+        Bot { player, difficulty, style: 0, last_attack_tick: 0 }
+    }
+
+    pub fn with_style(player: u8, difficulty: Difficulty, style: u64) -> Bot {
+        Bot { player, difficulty, style, last_attack_tick: 0 }
     }
 
     pub fn think(&mut self, s: &State) -> Vec<(u8, Command)> {
-        let prm = self.difficulty.params();
-        if s.tick % prm.think_interval != 0 {
+        let mut prm = self.difficulty.params();
+        // Personality offsets.
+        prm.attack_supply += (self.style % 5) as u32;
+        prm.reattack_interval += ((self.style / 5) % 7) as u32 * 24;
+        prm.max_workers += ((self.style / 35) % 3) as usize;
+        // Escalation: as the game drags on, mass BIGGER decisive pushes
+        // (small-wave attrition stalls games), and push more often late.
+        let esc = (s.tick / (24 * 120)) * 3;
+        prm.attack_supply = (prm.attack_supply + esc).min(36);
+        if s.tick > 24 * 60 * 12 {
+            prm.reattack_interval /= 2;
+        }
+        // Phase-shift think ticks by style so two bots' decision points
+        // interleave differently per game — decorrelates mirror matches.
+        let phase = (self.style % prm.think_interval as u64) as u32;
+        if (s.tick + phase) % prm.think_interval != 0 {
             return Vec::new();
         }
         let p = self.player;
+        let race = s.players[p as usize].race;
         let mut cmds: Vec<Command> = Vec::new();
 
-        let worker_def = s.data.unit_tag("fabricator");
-        let trooper_def = s.data.unit_tag("trooper");
-        let vanguard_def = s.data.unit_tag("vanguard");
-        let depot_def = s.data.building_tag("depot");
-        let barracks_def = s.data.building_tag("barracks");
-        let condenser_def = s.data.building_tag("condenser");
-        let forge_def = s.data.building_tag("forge");
-        let breaker_def = s.data.unit_tag("breaker");
+        // Capability-driven role lookup: works for any race in the data.
+        let worker_def = s.data.worker_of_race(race);
+        let depot_def = s
+            .data
+            .buildings
+            .iter()
+            .position(|b| b.race == race && b.supply_provided > 0 && !b.headquarters)
+            .expect("race has no supply building") as DefId;
+        let condenser_def = s
+            .data
+            .buildings
+            .iter()
+            .position(|b| b.race == race && b.gas_extractor)
+            .expect("race has no extractor") as DefId;
+        // Tier-0 production: trains combat units, no tech requirement.
+        let barracks_def = s
+            .data
+            .buildings
+            .iter()
+            .position(|b| {
+                b.race == race && !b.headquarters && !b.trains.is_empty() && b.requires.is_none()
+            })
+            .expect("race has no basic production") as DefId;
+        // Tier-1 production: cheapest one gated behind tech.
+        let forge_def = s
+            .data
+            .buildings
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| {
+                b.race == race && !b.trains.is_empty() && b.requires == Some(barracks_def)
+            })
+            .min_by_key(|(_, b)| b.cost_minerals + b.cost_gas)
+            .map(|(i, _)| i as DefId);
 
         // ---- census ----
         let mut workers: Vec<u32> = Vec::new();
@@ -153,7 +201,7 @@ impl Bot {
                         hq = Some(i as u32);
                     } else if e.def == barracks_def {
                         barracks.push(i as u32);
-                    } else if e.def == forge_def {
+                    } else if Some(e.def) == forge_def {
                         forge.push(i as u32);
                     } else if e.def == condenser_def {
                         condenser = Some(i as u32);
@@ -205,45 +253,70 @@ impl Bot {
         let want_condenser =
             condenser.is_none() && !barracks.is_empty() && workers.len() >= 10;
         let want_forge = prm.use_forge
+            && forge_def.is_some()
             && forge.is_empty()
             && !barracks.is_empty()
             && condenser.is_some()
             && workers.len() >= 12;
+        let depot_cost = s.data.buildings[depot_def as usize].cost_minerals;
+        let cond_cost = s.data.buildings[condenser_def as usize].cost_minerals;
+        let rax_cost = s.data.buildings[barracks_def as usize].cost_minerals;
         if constructing == 0 && !building_worker_busy {
-            if want_depot && minerals >= 100 {
+            if want_depot && minerals >= depot_cost {
                 self.order_build(s, &workers, depot_def, &mut cmds);
-            } else if want_condenser && minerals >= 75 {
+            } else if want_condenser && minerals >= cond_cost {
                 self.order_build_extractor(s, &workers, condenser_def, &mut cmds);
-            } else if want_barracks && minerals >= 150 {
+            } else if want_barracks && minerals >= rax_cost {
                 self.order_build(s, &workers, barracks_def, &mut cmds);
-            } else if want_forge && minerals >= 230 && gas >= 50 {
-                self.order_build(s, &workers, forge_def, &mut cmds);
-            }
-        }
-
-        // ---- army production: vanguards whenever gas allows ----
-        let mut gas_left = gas;
-        for &b in &barracks {
-            let e = &s.entities[b as usize];
-            if e.queue.len() < 2 {
-                let pick = if gas_left >= 50 { vanguard_def } else { trooper_def };
-                let cost = s.data.units[pick as usize].cost_minerals;
-                if minerals >= cost + prm.mineral_buffer {
-                    if pick == vanguard_def {
-                        gas_left -= 50;
-                    }
-                    cmds.push(Command::Train { building: s.id_of(b), unit: pick });
+            } else if want_forge {
+                let fd = forge_def.unwrap();
+                let f = &s.data.buildings[fd as usize];
+                if minerals >= f.cost_minerals + 50 && gas >= f.cost_gas {
+                    self.order_build(s, &workers, fd, &mut cmds);
                 }
             }
         }
 
-        // ---- tanks from the forge ----
-        let mut gas_after = gas_left;
-        for &f in &forge {
-            let e = &s.entities[f as usize];
-            if e.queue.len() < 2 && minerals >= 150 + prm.mineral_buffer && gas_after >= 100 {
-                gas_after -= 100;
-                cmds.push(Command::Train { building: s.id_of(f), unit: breaker_def });
+        // ---- army production: each production building trains the most
+        // expensive combat unit it can afford right now ----
+        let mut gas_left = gas;
+        let mut min_left = minerals;
+        for &b in barracks.iter().chain(forge.iter()) {
+            let e = &s.entities[b as usize];
+            if e.queue.len() >= 2 {
+                continue;
+            }
+            let affordable: Vec<DefId> = s.data.buildings[e.def as usize]
+                .trains
+                .iter()
+                .copied()
+                .filter(|&u| {
+                    let d = &s.data.units[u as usize];
+                    !d.harvester
+                        && d.energy_max == 0 // bot skips casters
+                        && s.requirement_met(p, d.requires)
+                        && min_left >= d.cost_minerals + prm.mineral_buffer
+                        && gas_left >= d.cost_gas
+                })
+                .collect();
+            // Mix compositions: mostly the best unit, every third the
+            // cheapest — swarm filler screens the expensive core.
+            let pick = if (army.len() + e.queue.len()) % 3 == 2 {
+                affordable.iter().copied().min_by_key(|&u| {
+                    let d = &s.data.units[u as usize];
+                    (d.cost_minerals + d.cost_gas, u)
+                })
+            } else {
+                affordable.iter().copied().max_by_key(|&u| {
+                    let d = &s.data.units[u as usize];
+                    (d.cost_minerals + d.cost_gas, u)
+                })
+            };
+            if let Some(pick) = pick {
+                let d = &s.data.units[pick as usize];
+                min_left -= d.cost_minerals;
+                gas_left -= d.cost_gas;
+                cmds.push(Command::Train { building: s.id_of(b), unit: pick });
             }
         }
 
@@ -264,16 +337,21 @@ impl Bot {
     }
 
     /// Pick a builder and a site near the HQ, spiral-scanned deterministically.
+    /// The scan is mirrored so both players prefer sites on the far side of
+    /// their HQ from the enemy — symmetric behavior on a mirrored map.
     fn order_build(&self, s: &State, workers: &[u32], def: DefId, cmds: &mut Vec<Command>) {
         let Some(builder) = self.pick_builder(s, workers) else { return };
         let Some(hq_tile) = self.hq_tile(s) else { return };
+        let enemy = s.map.starts[(1 - self.player as usize).min(s.map.starts.len() - 1)];
+        let sx: i32 = if enemy.x >= hq_tile.x { 1 } else { -1 };
+        let sy: i32 = if enemy.y >= hq_tile.y { 1 } else { -1 };
         for r in 3i32..14 {
             for dy in -r..=r {
                 for dx in -r..=r {
                     if dx.abs() != r && dy.abs() != r {
                         continue;
                     }
-                    let site = TilePos::new(hq_tile.x + dx, hq_tile.y + dy);
+                    let site = TilePos::new(hq_tile.x + dx * sx, hq_tile.y + dy * sy);
                     if s.valid_building_site(def, site, Some(builder)) {
                         cmds.push(Command::Build {
                             worker: s.id_of(builder),

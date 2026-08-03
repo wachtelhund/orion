@@ -116,6 +116,9 @@ impl State {
                     return;
                 }
                 let udef = &self.data.units[*unit as usize];
+                if udef.race != self.players[player as usize].race {
+                    return;
+                }
                 if !self.requirement_met(player, udef.requires) {
                     return;
                 }
@@ -231,6 +234,11 @@ impl State {
                 // when it was started).
                 let resuming = self.unfinished_building_at(player, *building, *site).is_some();
                 if !resuming {
+                    if self.data.buildings[*building as usize].race
+                        != self.players[player as usize].race
+                    {
+                        return;
+                    }
                     if !self.valid_building_site(*building, *site, Some(worker.idx)) {
                         return;
                     }
@@ -363,7 +371,14 @@ impl State {
                 continue;
             }
             let origin = self.footprint_origin(def, pos);
-            let Some(spawn) = self.spawn_tile_near(def, origin) else { continue };
+            // No rally set: spawn on the home side (symmetric on mirrored
+            // maps) instead of an arbitrary compass corner.
+            let toward = if rally != pos {
+                rally
+            } else {
+                self.map.starts[(owner as usize).min(self.map.starts.len() - 1)].center()
+            };
+            let Some(spawn) = self.spawn_tile_near(def, origin, toward) else { continue };
             self.entities[i].progress = 0;
             self.entities[i].queue.remove(0);
             let unit_def = front;

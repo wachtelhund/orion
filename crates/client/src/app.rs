@@ -9,6 +9,7 @@ use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 use orion_sim::ai::{Bot, Difficulty};
+use orion_sim::net::{Lockstep, Started};
 use orion_sim::data::DefId;
 use orion_sim::map::{meridian, TileKind, TilePos};
 use orion_sim::state::{SimEvent, NEUTRAL, RES_GEYSER, RES_MINERALS};
@@ -22,7 +23,7 @@ use crate::iso::{self, Camera};
 use crate::menu::MenuPage;
 
 pub const TICK_DT: f64 = 1.0 / 24.0;
-pub const HUMAN: u8 = 0;
+
 pub const BOT: u8 = 1;
 
 pub const TEAM_COLORS: [[f32; 3]; 2] = [[0.30, 0.58, 1.0], [1.0, 0.38, 0.30]];
@@ -67,7 +68,7 @@ pub struct Effect {
 
 /// Building sprite anchor: canvas point that sits on the building's world
 /// center. [type] -> (x, y) in canvas px. hq, depot, barracks, condenser.
-pub const BUILDING_ANCHOR: [(f32, f32); 7] = [
+pub const BUILDING_ANCHOR: [(f32, f32); 14] = [
     (50.0, 54.0), // hq
     (34.0, 46.0), // depot
     (50.0, 50.0), // barracks
@@ -75,6 +76,13 @@ pub const BUILDING_ANCHOR: [(f32, f32); 7] = [
     (50.0, 50.0), // forge
     (50.0, 48.0), // aerie
     (35.0, 46.0), // archive
+    (50.0, 52.0), // hive
+    (32.0, 46.0), // spire
+    (34.0, 40.0), // sapwell
+    (48.0, 44.0), // warren
+    (48.0, 50.0), // incubator
+    (42.0, 56.0), // roost
+    (33.0, 42.0), // cortex
 ];
 
 pub struct App {
@@ -91,13 +99,28 @@ pub struct App {
     pub shot_focus: Option<(f32, f32)>,
     pub shot_zoom: Option<f32>,
     pub script: Option<String>,
+    /// Automated MP smoke: "host" or "join" — connects on localhost, plays
+    /// ~10s of lockstep, exits 0.
+    pub mp_auto: Option<String>,
     pub shot_reveal: bool,
     /// Render a menu page once, capture, exit: "main" | "settings" | "esc".
     pub menu_shot: Option<(String, String)>,
     pub finished: bool,
 
     // Session flow.
+    /// Local player index: 0 in single player / hosting, 1 when joining.
+    pub human: u8,
     pub in_game: bool,
+    // Multiplayer session.
+    pub mp: Option<Lockstep>,
+    pub mp_waiting: Option<std::sync::mpsc::Receiver<std::io::Result<Started>>>,
+    pub mp_error: Option<String>,
+    pub ip_input: String,
+    /// Set while hosting through the relay: show this code to the opponent.
+    pub mp_lobby_code: Option<String>,
+    /// Race picked for the human, and the enemy choice (0/1, 2 = random).
+    pub chosen_race: u8,
+    pub enemy_race_choice: u8,
     pub page: MenuPage,
     pub rebinding: Option<Action>,
     pub settings: Settings,
@@ -121,6 +144,8 @@ pub struct App {
 
     // Render-side caches (never touch sim state).
     pub facings: Vec<u8>,
+    /// Seconds of attack-recoil animation left, per entity index.
+    pub recoil: Vec<f32>,
     pub effects: Vec<Effect>,
     pub unit_type: Vec<usize>,
     pub building_type: Vec<usize>,
@@ -143,7 +168,7 @@ pub struct App {
 impl App {
     pub fn new(gfx: Gfx, smoke: bool, shot: Option<(u32, String)>, scale_factor: f32) -> App {
         let state = new_game();
-        let start = state.map.starts[HUMAN as usize];
+        let start = state.map.starts[0];
         let (cx, cy) = iso::world_to_iso(start.x as f32 + 0.5, start.y as f32 + 0.5);
         let cam = Camera {
             cx,
@@ -162,7 +187,13 @@ impl App {
                 "vanguard" => 2,
                 "breaker" => 3,
                 "skywing" => 4,
-                _ => 5,
+                "stormcaller" => 5,
+                "kdrone" => 7,
+                "skitter" => 8,
+                "spitter" => 9,
+                "ravager" => 10,
+                "wisp" => 11,
+                _ => 12,
             })
             .collect();
         let building_type = state
@@ -176,7 +207,14 @@ impl App {
                 "condenser" => 3,
                 "forge" => 4,
                 "aerie" => 5,
-                _ => 6,
+                "archive" => 6,
+                "hive" => 7,
+                "spire" => 8,
+                "sapwell" => 9,
+                "warren" => 10,
+                "incubator" => 11,
+                "roost" => 12,
+                _ => 13,
             })
             .collect();
         let headless = smoke || shot.is_some();
@@ -189,15 +227,24 @@ impl App {
             acc: 0.0,
             last: Instant::now(),
             smoke_deadline: smoke.then(|| Instant::now() + std::time::Duration::from_secs(3)),
-            shot_bot0: shot.is_some().then(|| Bot::new(HUMAN)),
+            shot_bot0: shot.is_some().then(|| Bot::new(0)),
             shot,
             shot_focus: None,
             shot_zoom: None,
             script: None,
+            mp_auto: None,
             shot_reveal: false,
             menu_shot: None,
             finished: false,
+            human: 0,
             in_game: headless,
+            mp: None,
+            mp_waiting: None,
+            mp_error: None,
+            ip_input: "127.0.0.1".into(),
+            mp_lobby_code: None,
+            chosen_race: 0,
+            enemy_race_choice: 2,
             page: if headless { MenuPage::None } else { MenuPage::MainRoot },
             rebinding: None,
             settings: Settings::load(),
@@ -218,6 +265,7 @@ impl App {
             fps: 60.0,
             frame_t: Instant::now(),
             facings: Vec::new(),
+            recoil: Vec::new(),
             effects: Vec::new(),
             unit_type,
             building_type,
@@ -255,7 +303,7 @@ impl App {
         let mut v: Vec<(EntityKind, DefId)> = Vec::new();
         for id in &self.selection {
             if let Some(e) = self.state.get(*id) {
-                if e.owner == HUMAN
+                if e.owner == self.human
                     && matches!(e.kind, EntityKind::Unit | EntityKind::Building)
                     && !v.contains(&(e.kind, e.def))
                 {
@@ -283,7 +331,7 @@ impl App {
         if let Some((kind, def)) = self.active_type() {
             for id in &self.selection {
                 if let Some(e) = self.state.get(*id) {
-                    if e.kind == kind && e.def == def && e.owner == HUMAN {
+                    if e.kind == kind && e.def == def && e.owner == self.human {
                         return Some(*id);
                     }
                 }
@@ -334,8 +382,26 @@ impl App {
     }
 
     pub fn start_game(&mut self, difficulty: Difficulty) {
-        self.state = new_game();
-        self.bot = Bot::with(BOT, difficulty);
+        self.mp = None;
+        self.mp_waiting = None;
+        self.human = 0;
+        let enemy = match self.enemy_race_choice {
+            2 => {
+                // Pre-game choice, not sim: wall clock is fine here.
+                (std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.subsec_nanos())
+                    .unwrap_or(0)
+                    % 2) as u8
+            }
+            r => r,
+        };
+        self.state = new_game_with(self.chosen_race, enemy);
+        let style = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        self.bot = Bot::with_style(BOT, difficulty, style);
         self.difficulty = difficulty;
         self.pending.clear();
         self.selection.clear();
@@ -347,10 +413,107 @@ impl App {
         self.acc = 0.0;
         self.in_game = true;
         self.page = MenuPage::None;
-        let start = self.state.map.starts[HUMAN as usize];
+        let start = self.state.map.starts[self.human as usize];
         let (cx, cy) = iso::world_to_iso(start.x as f32 + 0.5, start.y as f32 + 0.5);
         self.cam.cx = cx;
         self.cam.cy = cy;
+    }
+
+    pub fn start_mp_game(&mut self, started: Started) {
+        self.mp_lobby_code = None;
+        self.state = new_game_mp(started.seed, started.races[0], started.races[1]);
+        self.human = started.local_player;
+        self.mp = Some(Lockstep::new(started.net, started.local_player));
+        self.mp_waiting = None;
+        self.mp_error = None;
+        self.pending.clear();
+        self.selection.clear();
+        self.groups = Default::default();
+        self.mode = Mode::Normal;
+        self.effects.clear();
+        self.facings.clear();
+        self.subgroup_offset = 0;
+        self.acc = 0.0;
+        self.in_game = true;
+        self.page = MenuPage::None;
+        let start = self.state.map.starts[self.human as usize];
+        let (cx, cy) = iso::world_to_iso(start.x as f32 + 0.5, start.y as f32 + 0.5);
+        self.cam.cx = cx;
+        self.cam.cy = cy;
+        self.clamp_camera();
+    }
+
+    /// Shared camera input (keyboard pan + edge scroll).
+    fn camera_input(&mut self, dt: f64) {
+        let pan = 700.0 * dt as f32 / self.cam.zoom;
+        if self.keys_down.contains(&KeyCode::ArrowLeft) {
+            self.cam.cx -= pan;
+        }
+        if self.keys_down.contains(&KeyCode::ArrowRight) {
+            self.cam.cx += pan;
+        }
+        if self.keys_down.contains(&KeyCode::ArrowUp) {
+            self.cam.cy -= pan;
+        }
+        if self.keys_down.contains(&KeyCode::ArrowDown) {
+            self.cam.cy += pan;
+        }
+        if self.settings.edge_scroll
+            && self.cursor_in
+            && self.panning.is_none()
+            && self.page == MenuPage::None
+        {
+            let m = 10.0 * self.base_scale;
+            let es = 900.0 * dt as f32 / self.cam.zoom;
+            if self.mouse.0 <= m {
+                self.cam.cx -= es;
+            }
+            if self.mouse.0 >= self.cam.screen_w - m {
+                self.cam.cx += es;
+            }
+            if self.mouse.1 <= m {
+                self.cam.cy -= es;
+            }
+            if self.mouse.1 >= self.cam.screen_h - m {
+                self.cam.cy += es;
+            }
+        }
+    }
+
+    /// Multiplayer frame: lockstep-driven stepping, menus never pause.
+    fn mp_frame(&mut self, dt: f64) {
+        self.camera_input(dt);
+        if self.state.winner.is_none() {
+            self.acc += dt; // speed is locked to 1.0 in multiplayer
+            let mut steps = 0;
+            while self.acc >= TICK_DT && steps < 8 {
+                let mut pend: Vec<Command> =
+                    self.pending.drain(..).map(|(_, c)| c).collect();
+                let mut mp = self.mp.take().unwrap();
+                let stepped = mp.try_step(&mut self.state, &mut pend);
+                self.mp = Some(mp);
+                if !pend.is_empty() {
+                    let h = self.human;
+                    self.pending.extend(pend.into_iter().map(|c| (h, c)));
+                }
+                if stepped {
+                    self.step_post();
+                    self.acc -= TICK_DT;
+                    steps += 1;
+                } else {
+                    // Waiting on the peer: don't accumulate a debt.
+                    self.acc = self.acc.min(TICK_DT);
+                    break;
+                }
+            }
+        }
+        for e in &mut self.effects {
+            e.age += dt as f32;
+        }
+        self.effects.retain(|e| e.age < e.ttl);
+        for r in &mut self.recoil {
+            *r = (*r - dt as f32).max(0.0);
+        }
     }
 
     // ---------------------------------------------------------- events ----
@@ -375,8 +538,15 @@ impl App {
                         MouseScrollDelta::LineDelta(_, y) => *y,
                         MouseScrollDelta::PixelDelta(p) => p.y as f32 / 40.0,
                     };
+                    // Zoom anchored on the cursor: the world point under the
+                    // mouse stays under the mouse.
+                    let (wx, wy) = self.cam.screen_to_world(self.mouse.0, self.mouse.1);
                     self.cam.zoom =
                         (self.cam.zoom * (1.0 + dy * 0.1)).clamp(1.0, 4.0 * self.base_scale);
+                    let (ix, iy) = iso::world_to_iso(wx, wy);
+                    self.cam.cx = ix - (self.mouse.0 - self.cam.screen_w * 0.5) / self.cam.zoom;
+                    self.cam.cy = iy - (self.mouse.1 - self.cam.screen_h * 0.5) / self.cam.zoom;
+                    self.clamp_camera();
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
@@ -400,6 +570,31 @@ impl App {
                 self.ctrl = m.state().control_key() || m.state().super_key();
             }
             WindowEvent::KeyboardInput { event, .. } => {
+                // IP entry on the multiplayer page.
+                if self.page == MenuPage::Multiplayer
+                    && self.mp_waiting.is_none()
+                    && event.state == ElementState::Pressed
+                {
+                    if event.physical_key == PhysicalKey::Code(KeyCode::Backspace) {
+                        self.ip_input.pop();
+                        return;
+                    }
+                    if let Some(text) = &event.text {
+                        let mut used = false;
+                        for ch in text.chars() {
+                            if ch.is_ascii_alphanumeric() || ch == '.' || ch == ':' || ch == '-'
+                            {
+                                if self.ip_input.len() < 24 {
+                                    self.ip_input.push(ch.to_ascii_lowercase());
+                                }
+                                used = true;
+                            }
+                        }
+                        if used {
+                            return;
+                        }
+                    }
+                }
                 if let PhysicalKey::Code(code) = event.physical_key {
                     if event.state == ElementState::Pressed {
                         self.keys_down.insert(code);
@@ -526,6 +721,15 @@ impl App {
         self.settings.action_for(code)
     }
 
+    /// The human race's buildable structures, in data order — the build
+    /// menu grid, mapped onto Place1..Place7.
+    pub(crate) fn build_menu_defs(&self) -> Vec<DefId> {
+        let race = self.state.players[self.human as usize].race;
+        (0..self.state.data.buildings.len() as DefId)
+            .filter(|&d| self.state.data.buildings[d as usize].race == race)
+            .collect()
+    }
+
     pub(crate) fn any_selected_siege(&self) -> bool {
         self.own_selected_units().any(|id| {
             let e = &self.state.entities[id.idx as usize];
@@ -569,14 +773,14 @@ impl App {
             Action::Stop => {
                 let units: Vec<_> = self.own_selected_units().collect();
                 if !units.is_empty() {
-                    self.pending.push((HUMAN, Command::Stop { units }));
+                    self.pending.push((self.human, Command::Stop { units }));
                 }
                 self.mode = Mode::Normal;
             }
             Action::Hold => {
                 let units: Vec<_> = self.own_selected_units().collect();
                 if !units.is_empty() {
-                    self.pending.push((HUMAN, Command::Hold { units }));
+                    self.pending.push((self.human, Command::Hold { units }));
                 }
                 self.mode = Mode::Normal;
             }
@@ -595,19 +799,19 @@ impl App {
             | Action::Place6
             | Action::Place7 => {
                 if self.mode == Mode::BuildMenu {
-                    let tag = match action {
-                        Action::Place1 => "depot",
-                        Action::Place2 => "barracks",
-                        Action::Place3 => "hq",
-                        Action::Place4 => "condenser",
-                        Action::Place5 => "forge",
-                        Action::Place6 => "aerie",
-                        _ => "archive",
+                    let slot = match action {
+                        Action::Place1 => 0,
+                        Action::Place2 => 1,
+                        Action::Place3 => 2,
+                        Action::Place4 => 3,
+                        Action::Place5 => 4,
+                        Action::Place6 => 5,
+                        _ => 6,
                     };
-                    let def = self.state.data.building_tag(tag);
+                    let Some(&def) = self.build_menu_defs().get(slot) else { return };
                     // Only enter placement if the tech requirement is met.
                     let requires = self.state.data.buildings[def as usize].requires;
-                    if self.state.requirement_met(HUMAN, requires) {
+                    if self.state.requirement_met(self.human, requires) {
                         self.mode = Mode::Placing(def);
                     } else {
                         let req =
@@ -626,7 +830,7 @@ impl App {
                     })
                     .collect();
                 if !units.is_empty() {
-                    self.pending.push((HUMAN, Command::Siege { units }));
+                    self.pending.push((self.human, Command::Siege { units }));
                 }
             }
             Action::CastStorm => {
@@ -647,7 +851,7 @@ impl App {
                 let idle = (0..self.state.entities.len() as u32).find(|&i| {
                     let e = &self.state.entities[i as usize];
                     e.alive
-                        && e.owner == HUMAN
+                        && e.owner == self.human
                         && e.kind == EntityKind::Unit
                         && self.state.data.units[e.def as usize].harvester
                         && matches!(e.order, Order::Idle)
@@ -670,7 +874,7 @@ impl App {
                     .filter(|&i| {
                         let e = &self.state.entities[i as usize];
                         e.alive
-                            && e.owner == HUMAN
+                            && e.owner == self.human
                             && e.kind == EntityKind::Building
                             && self.state.data.buildings[e.def as usize].headquarters
                     })
@@ -694,7 +898,7 @@ impl App {
                     let e = &self.state.entities[id.idx as usize];
                     if e.construction.is_some() {
                         self.pending
-                            .push((HUMAN, Command::CancelConstruction { building: id }));
+                            .push((self.human, Command::CancelConstruction { building: id }));
                     }
                 }
             }
@@ -729,7 +933,7 @@ impl App {
                     let units: Vec<_> = self.own_selected_units().collect();
                     if !units.is_empty() {
                         self.pending.push((
-                            HUMAN,
+                            self.human,
                             Command::AttackMove {
                                 units,
                                 target: fx(wx, wy),
@@ -754,7 +958,7 @@ impl App {
                         });
                     if let Some(caster) = caster {
                         self.pending
-                            .push((HUMAN, Command::Cast { caster, target: fx(wx, wy) }));
+                            .push((self.human, Command::Cast { caster, target: fx(wx, wy) }));
                         self.ping(wx, wy, 1);
                     }
                     self.mode = Mode::Normal;
@@ -793,14 +997,14 @@ impl App {
                 // buildings of the same type on screen (SC2 behavior).
                 let e = &self.state.entities[idx as usize];
                 if (self.ctrl || double)
-                    && e.owner == HUMAN
+                    && e.owner == self.human
                     && (e.kind == EntityKind::Unit || e.kind == EntityKind::Building)
                 {
                     let def = e.def;
                     let kind = e.kind;
                     for i in 0..self.state.entities.len() {
                         let o = &self.state.entities[i];
-                        if o.alive && o.owner == HUMAN && o.kind == kind && o.def == def {
+                        if o.alive && o.owner == self.human && o.kind == kind && o.def == def {
                             let (sx, sy) = self.entity_screen_pos(i);
                             if sx >= 0.0
                                 && sx <= self.cam.screen_w
@@ -826,7 +1030,7 @@ impl App {
         } else {
             for i in 0..self.state.entities.len() {
                 let e = &self.state.entities[i];
-                if !e.alive || e.owner != HUMAN || e.kind != EntityKind::Unit {
+                if !e.alive || e.owner != self.human || e.kind != EntityKind::Unit {
                     continue;
                 }
                 let (sx, sy) = self.entity_screen_pos(i);
@@ -873,7 +1077,7 @@ impl App {
             if !ralliers.is_empty() {
                 for bid in ralliers {
                     self.pending
-                        .push((HUMAN, Command::SetRally { building: bid, target: fx(wx, wy) }));
+                        .push((self.human, Command::SetRally { building: bid, target: fx(wx, wy) }));
                 }
                 self.ping(wx, wy, 2);
                 return;
@@ -906,14 +1110,14 @@ impl App {
         if let Some(t) = under {
             let e = &self.state.entities[t as usize];
             let tid = self.state.id_of(t);
-            let gatherable = self.state.gatherable(HUMAN, tid);
+            let gatherable = self.state.gatherable(self.human, tid);
             if gatherable {
                 let (harv, rest): (Vec<_>, Vec<_>) = units.into_iter().partition(|id| {
                     let u = &self.state.entities[id.idx as usize];
                     self.state.data.units[u.def as usize].harvester
                 });
                 if !harv.is_empty() {
-                    self.pending.push((HUMAN, Command::Gather {
+                    self.pending.push((self.human, Command::Gather {
                         units: harv,
                         resource: tid,
                         queued,
@@ -921,7 +1125,7 @@ impl App {
                     self.ping(wx, wy, 2);
                 }
                 if !rest.is_empty() {
-                    self.pending.push((HUMAN, Command::Move {
+                    self.pending.push((self.human, Command::Move {
                         units: rest,
                         target: fx(wx, wy),
                         queued,
@@ -929,13 +1133,13 @@ impl App {
                 }
                 return;
             }
-            if e.owner != HUMAN && e.owner != NEUTRAL {
-                self.pending.push((HUMAN, Command::AttackTarget { units, target: tid }));
+            if e.owner != self.human && e.owner != NEUTRAL {
+                self.pending.push((self.human, Command::AttackTarget { units, target: tid }));
                 self.ping(wx, wy, 1);
                 return;
             }
             // Right-click own unfinished building with a builder: resume it.
-            if e.owner == HUMAN && e.kind == EntityKind::Building && e.construction.is_some() {
+            if e.owner == self.human && e.kind == EntityKind::Building && e.construction.is_some() {
                 let def = e.def;
                 let site = self.state.footprint_origin(def, e.pos);
                 if let Some(builder) = units.iter().copied().find(|id| {
@@ -943,10 +1147,10 @@ impl App {
                     self.state.data.units[u.def as usize].builder
                 }) {
                     self.pending
-                        .push((HUMAN, Command::Build { worker: builder, building: def, site, queued }));
+                        .push((self.human, Command::Build { worker: builder, building: def, site, queued }));
                     let rest: Vec<_> = units.into_iter().filter(|id| *id != builder).collect();
                     if !rest.is_empty() {
-                        self.pending.push((HUMAN, Command::Move {
+                        self.pending.push((self.human, Command::Move {
                             units: rest,
                             target: fx(wx, wy),
                             queued,
@@ -957,7 +1161,7 @@ impl App {
                 }
             }
         }
-        self.pending.push((HUMAN, Command::Move { units, target: fx(wx, wy), queued }));
+        self.pending.push((self.human, Command::Move { units, target: fx(wx, wy), queued }));
         self.ping(wx, wy, 0);
         self.sfx(Sfx::Ping);
     }
@@ -985,7 +1189,7 @@ impl App {
             return;
         }
         let d = &self.state.data.buildings[def as usize];
-        let p = &self.state.players[HUMAN as usize];
+        let p = &self.state.players[self.human as usize];
         if p.minerals < d.cost_minerals {
             self.deny("NOT ENOUGH MINERALS");
             return;
@@ -995,7 +1199,7 @@ impl App {
             return;
         }
         // Shift both chains placement mode and queues the build order.
-        self.pending.push((HUMAN, Command::Build {
+        self.pending.push((self.human, Command::Build {
             worker: builder,
             building: def,
             site,
@@ -1013,12 +1217,12 @@ impl App {
         let Some(&unit) = trains.get(slot) else { return };
         // Understandable failure feedback before the sim silently drops it.
         let d = &self.state.data.units[unit as usize];
-        if !self.state.requirement_met(HUMAN, d.requires) {
+        if !self.state.requirement_met(self.human, d.requires) {
             let req = self.state.data.buildings[d.requires.unwrap() as usize].name.clone();
             self.deny(&format!("REQUIRES {}", req.to_uppercase()));
             return;
         }
-        let p = &self.state.players[HUMAN as usize];
+        let p = &self.state.players[self.human as usize];
         if p.minerals < d.cost_minerals {
             self.deny("NOT ENOUGH MINERALS");
             return;
@@ -1027,7 +1231,7 @@ impl App {
             self.deny("NOT ENOUGH PLASMA");
             return;
         }
-        let (used, provided) = self.state.supply(HUMAN);
+        let (used, provided) = self.state.supply(self.human);
         if used + d.supply > provided {
             self.deny("NOT ENOUGH SUPPLY - BUILD SUPPLY PYLONS");
             return;
@@ -1045,7 +1249,7 @@ impl App {
                 self.deny("PRODUCTION QUEUE FULL");
                 return;
             }
-            self.pending.push((HUMAN, Command::Train { building: bid, unit }));
+            self.pending.push((self.human, Command::Train { building: bid, unit }));
             self.sfx(Sfx::Click);
         }
     }
@@ -1053,7 +1257,7 @@ impl App {
     pub(crate) fn cancel_train(&mut self, slot: usize) {
         if let Some(bid) = self.primary_selected_building() {
             self.pending
-                .push((HUMAN, Command::CancelTrain { building: bid, slot: slot as u8 }));
+                .push((self.human, Command::CancelTrain { building: bid, slot: slot as u8 }));
         }
     }
 
@@ -1063,7 +1267,7 @@ impl App {
         self.selection.iter().copied().filter(|id| {
             self.state
                 .get(*id)
-                .is_some_and(|e| e.owner == HUMAN && e.kind == EntityKind::Unit)
+                .is_some_and(|e| e.owner == self.human && e.kind == EntityKind::Unit)
         })
     }
 
@@ -1083,7 +1287,7 @@ impl App {
             .filter(|id| {
                 self.state
                     .get(*id)
-                    .is_some_and(|e| e.owner == HUMAN && e.kind == EntityKind::Building)
+                    .is_some_and(|e| e.owner == self.human && e.kind == EntityKind::Building)
             })
             .collect()
     }
@@ -1149,10 +1353,10 @@ impl App {
             if !e.alive {
                 continue;
             }
-            if e.owner != HUMAN
+            if e.owner != self.human
                 && e.kind != EntityKind::Resource
                 && !self.reveal_all
-                && !self.state.visible_to(HUMAN, i as u32)
+                && !self.state.visible_to(self.human, i as u32)
             {
                 continue;
             }
@@ -1217,7 +1421,13 @@ impl App {
 
     pub(crate) fn step_sim(&mut self, cmds: Vec<(u8, Command)>) {
         self.state.step(&cmds);
+        self.step_post();
+    }
+
+    /// Render-side bookkeeping after any sim step (SP or lockstep).
+    pub(crate) fn step_post(&mut self) {
         self.facings.resize(self.state.entities.len(), 2);
+        self.recoil.resize(self.state.entities.len(), 0.0);
         for i in 0..self.state.entities.len() {
             let e = &self.state.entities[i];
             if !e.alive || e.kind != EntityKind::Unit {
@@ -1247,7 +1457,7 @@ impl App {
                     let ft = TilePos::of(f.pos);
                     let tt = TilePos::of(t.pos);
                     // Under-attack minimap alert for own stuff.
-                    if t.owner == HUMAN {
+                    if t.owner == self.human {
                         let (tx_, ty_) = (t.pos.x.to_f32(), t.pos.y.to_f32());
                         let dup = self.effects.iter().any(|e| {
                             e.kind == EffKind::MapPing
@@ -1274,8 +1484,8 @@ impl App {
                         self.last_alert = Some((tx_, ty_));
                     }
                     let seen = self.reveal_all
-                        || self.state.fog[HUMAN as usize].visible(&self.state.map, ft)
-                        || self.state.fog[HUMAN as usize].visible(&self.state.map, tt);
+                        || self.state.fog[self.human as usize].visible(&self.state.map, ft)
+                        || self.state.fog[self.human as usize].visible(&self.state.map, tt);
                     if !seen {
                         continue;
                     }
@@ -1285,6 +1495,9 @@ impl App {
                     let r = self.state.radius_of(from).to_f32() + 0.2;
                     let mx = fx_ + (tx_ - fx_) / d * r;
                     let my = fy_ + (ty_ - fy_) / d * r;
+                    if let Some(r) = self.recoil.get_mut(from as usize) {
+                        *r = 0.14;
+                    }
                     if combat_sounds < 3 {
                         combat_sounds += 1;
                         let sieged = self.state.entities[from as usize].sieged;
@@ -1321,17 +1534,17 @@ impl App {
                     });
                 }
                 SimEvent::Ready { pos: _, owner } => {
-                    if owner == HUMAN {
+                    if owner == self.human {
                         self.sfx(Sfx::UnitReady);
                     }
                 }
                 SimEvent::BuildingDone { pos: _, owner } => {
-                    if owner == HUMAN {
+                    if owner == self.human {
                         self.sfx(Sfx::BuildDone);
                     }
                 }
                 SimEvent::ResearchDone { owner } => {
-                    if owner == HUMAN {
+                    if owner == self.human {
                         self.sfx(Sfx::ResearchDone);
                     }
                 }
@@ -1351,7 +1564,7 @@ impl App {
                 SimEvent::Death { pos, kind, .. } => {
                     let t = TilePos::of(pos);
                     let seen = self.reveal_all
-                        || self.state.fog[HUMAN as usize].visible(&self.state.map, t);
+                        || self.state.fog[self.human as usize].visible(&self.state.map, t);
                     if !seen {
                         continue;
                     }
@@ -1395,6 +1608,8 @@ impl App {
         if let Some((page, path)) = self.menu_shot.clone() {
             match page.as_str() {
                 "settings" => self.page = MenuPage::Settings { from_game: false },
+                "difficulty" => self.page = MenuPage::Difficulty,
+                "mp" => self.page = MenuPage::Multiplayer,
                 "esc" => {
                     self.in_game = true;
                     self.page = MenuPage::EscRoot;
@@ -1405,7 +1620,7 @@ impl App {
                     self.page = MenuPage::None;
                     let worker = (0..self.state.entities.len() as u32).find(|&i| {
                         let e = &self.state.entities[i as usize];
-                        e.alive && e.owner == HUMAN && e.kind == EntityKind::Unit
+                        e.alive && e.owner == self.human && e.kind == EntityKind::Unit
                     });
                     if let Some(w) = worker {
                         self.selection = vec![self.state.id_of(w)];
@@ -1420,10 +1635,10 @@ impl App {
                     // tooltip, for UI verification.
                     self.in_game = true;
                     self.page = MenuPage::None;
-                    let start = self.state.map.starts[HUMAN as usize];
+                    let start = self.state.map.starts[self.human as usize];
                     let archive = self.state.data.building_tag("archive");
                     let a = self.state.spawn_building(
-                        HUMAN,
+                        self.human,
                         archive,
                         TilePos::new(start.x + 5, start.y + 3),
                         false,
@@ -1434,29 +1649,59 @@ impl App {
                         self.mouse = (b.x + b.w * 0.5, b.y + b.h * 0.5);
                     }
                 }
+                "kyth" => {
+                    // Kyth Assembly showcase: one of each unit + structures.
+                    self.state = new_game_with(1, 0);
+                    self.in_game = true;
+                    self.page = MenuPage::None;
+                    let s = &mut self.state;
+                    let start = s.map.starts[self.human as usize];
+                    let (bx, by) = (start.x + 4, start.y + 2);
+                    let mut sel = Vec::new();
+                    for (k, tag) in ["skitter", "spitter", "ravager", "wisp", "weaver"]
+                        .iter()
+                        .enumerate()
+                    {
+                        let def = s.data.unit_tag(tag);
+                        let id = s.spawn_unit(
+                            self.human,
+                            def,
+                            orion_sim::FxVec2::from_int(bx + (k as i32 % 3) * 2, by + (k as i32 / 3) * 2),
+                        );
+                        sel.push(id);
+                    }
+                    let warren = s.data.building_tag("warren");
+                    s.spawn_building(self.human, warren, TilePos::new(bx + 2, by + 5), false);
+                    let spire = s.data.building_tag("spire");
+                    s.spawn_building(self.human, spire, TilePos::new(bx - 3, by + 5), false);
+                    s.step(&[]);
+                    self.selection = sel;
+                    let start = self.state.map.starts[self.human as usize];
+                    self.look_at(start.x as f32 + 4.0, start.y as f32 + 3.0);
+                }
                 "units" => {
                     // Showcase: one of each new unit + a storm, selected.
                     self.in_game = true;
                     self.page = MenuPage::None;
                     let s = &mut self.state;
-                    let start = s.map.starts[HUMAN as usize];
+                    let start = s.map.starts[self.human as usize];
                     let (bx, by) = (start.x + 4, start.y + 2);
                     let breaker = s.data.unit_tag("breaker");
                     let sky = s.data.unit_tag("skywing");
                     let caster = s.data.unit_tag("stormcaller");
-                    let b1 = s.spawn_unit(HUMAN, breaker, orion_sim::FxVec2::from_int(bx, by));
+                    let b1 = s.spawn_unit(self.human, breaker, orion_sim::FxVec2::from_int(bx, by));
                     let b2 =
-                        s.spawn_unit(HUMAN, breaker, orion_sim::FxVec2::from_int(bx + 3, by));
+                        s.spawn_unit(self.human, breaker, orion_sim::FxVec2::from_int(bx + 3, by));
                     s.entities[b2.idx as usize].sieged = true;
                     let f1 =
-                        s.spawn_unit(HUMAN, sky, orion_sim::FxVec2::from_int(bx + 1, by + 3));
+                        s.spawn_unit(self.human, sky, orion_sim::FxVec2::from_int(bx + 1, by + 3));
                     let c1 =
-                        s.spawn_unit(HUMAN, caster, orion_sim::FxVec2::from_int(bx - 2, by + 2));
+                        s.spawn_unit(self.human, caster, orion_sim::FxVec2::from_int(bx - 2, by + 2));
                     s.entities[c1.idx as usize].energy = 143;
                     s.storms.push(orion_sim::state::Storm {
                         pos: orion_sim::FxVec2::from_int(bx + 6, by + 4),
                         ticks_left: 60,
-                        owner: HUMAN,
+                        owner: self.human,
                     });
                     s.step(&[]);
                     self.selection =
@@ -1518,40 +1763,88 @@ impl App {
         self.frame_t = now;
         self.fps = self.fps * 0.95 + (1.0 / fdt) * 0.05;
 
+        // Automated MP smoke driver.
+        if let Some(role) = self.mp_auto.clone() {
+            if self.mp.is_none() && self.mp_waiting.is_none() {
+                if let Some(code) = role.strip_prefix("host-relay:") {
+                    let (shown, rx) = crate::relay::host_relay_async_with_code(
+                        self.settings.relay_url.clone(),
+                        code.to_string(),
+                        0,
+                    );
+                    self.mp_lobby_code = Some(shown);
+                    self.mp_waiting = Some(rx);
+                } else if let Some(code) = role.strip_prefix("join-relay:") {
+                    self.mp_waiting = Some(crate::relay::join_relay_async(
+                        self.settings.relay_url.clone(),
+                        code.to_string(),
+                        1,
+                    ));
+                } else if role == "host" {
+                    match orion_sim::net::host_async(0, orion_sim::net::DEFAULT_PORT) {
+                        Ok(rx) => self.mp_waiting = Some(rx),
+                        Err(e) => {
+                            eprintln!("mp-auto host failed: {e}");
+                            self.finished = true;
+                            return;
+                        }
+                    }
+                } else {
+                    self.mp_waiting = Some(orion_sim::net::join_async(
+                        format!("127.0.0.1:{}", orion_sim::net::DEFAULT_PORT),
+                        1,
+                    ));
+                }
+            }
+            if self.mp.is_some() && self.state.tick >= 24 * 10 {
+                let ok = self
+                    .mp
+                    .as_ref()
+                    .map(|m| !m.desync && !m.disconnected)
+                    .unwrap_or(false);
+                println!(
+                    "mp-auto {role}: tick {} desync={} -> {}",
+                    self.state.tick,
+                    self.mp.as_ref().map(|m| m.desync).unwrap_or(true),
+                    if ok { "OK" } else { "FAIL" }
+                );
+                self.finished = true;
+                return;
+            }
+        }
+
+        // Pending host/join attempt resolved?
+        if let Some(rx) = &self.mp_waiting {
+            match rx.try_recv() {
+                Ok(Ok(started)) => self.start_mp_game(started),
+                Ok(Err(e)) => {
+                    self.mp_error = Some(format!("CONNECTION FAILED: {e}"));
+                    self.mp_waiting = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.mp_waiting = None;
+                }
+            }
+        }
+
+        if self.in_game && self.mp.is_some() {
+            self.mp_frame(dt);
+            if let Some((_, t0)) = &self.error_flash {
+                if t0.elapsed().as_secs_f32() > 1.8 {
+                    self.error_flash = None;
+                }
+            }
+            self.clamp_camera();
+            self.selection.retain(|id| self.state.get(*id).is_some());
+            self.render();
+            return;
+        }
+
         let playing = self.in_game && self.page == MenuPage::None;
 
         if playing {
-            // Keyboard pan.
-            let pan = 700.0 * dt as f32 / self.cam.zoom;
-            if self.keys_down.contains(&KeyCode::ArrowLeft) {
-                self.cam.cx -= pan;
-            }
-            if self.keys_down.contains(&KeyCode::ArrowRight) {
-                self.cam.cx += pan;
-            }
-            if self.keys_down.contains(&KeyCode::ArrowUp) {
-                self.cam.cy -= pan;
-            }
-            if self.keys_down.contains(&KeyCode::ArrowDown) {
-                self.cam.cy += pan;
-            }
-            // Edge scroll.
-            if self.settings.edge_scroll && self.cursor_in && self.panning.is_none() {
-                let m = 10.0 * self.base_scale;
-                let es = 900.0 * dt as f32 / self.cam.zoom;
-                if self.mouse.0 <= m {
-                    self.cam.cx -= es;
-                }
-                if self.mouse.0 >= self.cam.screen_w - m {
-                    self.cam.cx += es;
-                }
-                if self.mouse.1 <= m {
-                    self.cam.cy -= es;
-                }
-                if self.mouse.1 >= self.cam.screen_h - m {
-                    self.cam.cy += es;
-                }
-            }
+            self.camera_input(dt);
 
             if self.state.winner.is_none() {
                 self.acc += dt * self.settings.game_speed as f64;
@@ -1567,6 +1860,9 @@ impl App {
                 e.age += dt as f32;
             }
             self.effects.retain(|e| e.age < e.ttl);
+            for r in &mut self.recoil {
+                *r = (*r - dt as f32).max(0.0);
+            }
         }
 
         if let Some((_, t0)) = &self.error_flash {
@@ -1612,16 +1908,16 @@ impl App {
             .state
             .entities
             .iter()
-            .filter(|e| e.alive && e.owner == HUMAN && e.kind == EntityKind::Building)
+            .filter(|e| e.alive && e.owner == self.human && e.kind == EntityKind::Building)
             .count();
         assert!(own_buildings >= 4, "script: expected HQ+depot+condenser+barracks, got {own_buildings}");
         assert!(
-            self.state.players[HUMAN as usize].gas > 0
+            self.state.players[self.human as usize].gas > 0
                 || self
                     .state
                     .entities
                     .iter()
-                    .any(|e| e.alive && e.owner == HUMAN && e.carry_gas),
+                    .any(|e| e.alive && e.owner == self.human && e.carry_gas),
             "script: gas never flowed"
         );
         println!("script OK: {own_buildings} buildings standing, gas flowing");
@@ -1634,7 +1930,7 @@ impl App {
             24 => {
                 let workers = self.own_units_of(|d| d.harvester);
                 if let Some(res) = self.nearest_mineral_to_start() {
-                    cmds.push((HUMAN, Command::Gather {
+                    cmds.push((self.human, Command::Gather {
                         units: workers,
                         resource: res,
                         queued: false,
@@ -1644,7 +1940,7 @@ impl App {
             30 | 31 => {
                 if let Some(hq) = self.own_building_tagged("hq") {
                     let w = self.state.data.unit_tag("fabricator");
-                    cmds.push((HUMAN, Command::Train { building: hq, unit: w }));
+                    cmds.push((self.human, Command::Train { building: hq, unit: w }));
                 }
             }
             360 => self.script_build("depot", cmds),
@@ -1653,11 +1949,11 @@ impl App {
             // Staff the condenser once it should be done.
             1500 => {
                 if let Some(c) = self.own_building_tagged("condenser") {
-                    if self.state.gatherable(HUMAN, c) {
+                    if self.state.gatherable(self.human, c) {
                         let workers = self.own_units_of(|d| d.harvester);
                         let staff: Vec<_> = workers.into_iter().take(2).collect();
                         if !staff.is_empty() {
-                            cmds.push((HUMAN, Command::Gather {
+                            cmds.push((self.human, Command::Gather {
                                 units: staff,
                                 resource: c,
                                 queued: false,
@@ -1669,13 +1965,13 @@ impl App {
             2500 | 2540 | 2580 | 2620 => {
                 if let Some(b) = self.own_building_tagged("barracks") {
                     let tr = self.state.data.unit_tag("trooper");
-                    cmds.push((HUMAN, Command::Train { building: b, unit: tr }));
+                    cmds.push((self.human, Command::Train { building: b, unit: tr }));
                 }
             }
             3150 => {
                 let army = self.own_units_of(|d| !d.harvester);
                 if !army.is_empty() {
-                    cmds.push((HUMAN, Command::AttackMove {
+                    cmds.push((self.human, Command::AttackMove {
                         units: army,
                         target: FxVec2::from_int(40, 40),
                         queued: false,
@@ -1699,7 +1995,7 @@ impl App {
                     }
                     let site = TilePos::new(hq_tile.x + dx, hq_tile.y + dy);
                     if self.state.valid_building_site(def, site, Some(worker.idx)) {
-                        cmds.push((HUMAN, Command::Build { worker, building: def, site, queued: false }));
+                        cmds.push((self.human, Command::Build { worker, building: def, site, queued: false }));
                         return;
                     }
                 }
@@ -1714,7 +2010,7 @@ impl App {
             if self.state.geyser_at(origin).is_some()
                 && self.state.valid_building_site(def, origin, Some(worker.idx))
             {
-                cmds.push((HUMAN, Command::Build { worker, building: def, site: origin, queued: false }));
+                cmds.push((self.human, Command::Build { worker, building: def, site: origin, queued: false }));
                 return;
             }
         }
@@ -1746,7 +2042,7 @@ impl App {
             .filter(|&i| {
                 let e = &self.state.entities[i as usize];
                 e.alive
-                    && e.owner == HUMAN
+                    && e.owner == self.human
                     && e.kind == EntityKind::Unit
                     && f(&self.state.data.units[e.def as usize])
             })
@@ -1758,13 +2054,13 @@ impl App {
         let def = self.state.data.building_tag(tag);
         (0..self.state.entities.len() as u32).find_map(|i| {
             let e = &self.state.entities[i as usize];
-            (e.alive && e.owner == HUMAN && e.kind == EntityKind::Building && e.def == def)
+            (e.alive && e.owner == self.human && e.kind == EntityKind::Building && e.def == def)
                 .then(|| self.state.id_of(i))
         })
     }
 
     fn nearest_mineral_to_start(&self) -> Option<EntityId> {
-        let start = self.state.map.starts[HUMAN as usize].center();
+        let start = self.state.map.starts[self.human as usize].center();
         let mut best: Option<(i64, u32)> = None;
         for (j, e) in self.state.entities.iter().enumerate() {
             if e.alive && e.kind == EntityKind::Resource && e.def == RES_MINERALS {
@@ -1795,11 +2091,11 @@ impl App {
     }
 
     pub(crate) fn visible(&self, t: TilePos) -> bool {
-        self.reveal_all || self.state.fog[HUMAN as usize].visible(&self.state.map, t)
+        self.reveal_all || self.state.fog[self.human as usize].visible(&self.state.map, t)
     }
 
     pub(crate) fn explored(&self, t: TilePos) -> bool {
-        self.reveal_all || self.state.fog[HUMAN as usize].explored(&self.state.map, t)
+        self.reveal_all || self.state.fog[self.human as usize].explored(&self.state.map, t)
     }
 
     /// SC2-style fog tint: terrain is always drawn — bright when visible,
@@ -1896,7 +2192,7 @@ impl App {
             let t = TilePos::of(e.pos);
             let vis = match e.kind {
                 EntityKind::Resource => true, // terrain-like: visible through fog
-                _ if e.owner == HUMAN => true,
+                _ if e.owner == self.human => true,
                 _ => self.visible(t),
             };
             if !vis {
@@ -1913,7 +2209,7 @@ impl App {
             let (sx, sy) = self.entity_screen_pos(i as usize);
             let selected = self.selection.contains(&self.state.id_of(i));
             let t = TilePos::of(e.pos);
-            let dim = if e.owner == HUMAN { 1.0 } else { self.fog_tint(t) };
+            let dim = if e.owner == self.human { 1.0 } else { self.fog_tint(t) };
             let tint = [dim, dim, dim, 1.0];
             match e.kind {
                 EntityKind::Resource => {
@@ -1977,8 +2273,12 @@ impl App {
                     let team = (e.owner as usize).min(1);
                     let facing = self.facings.get(i as usize).copied().unwrap_or(2) as usize;
                     let moving = e.pos != e.prev_pos;
-                    let frame = if moving || d.fly {
-                        ((self.state.tick / 4) % 2) as usize
+                    // Walk cycle speed scales with movement speed; flyers and
+                    // casters idle-animate too.
+                    let rate = (10.0 / (d.step.to_f32() * 24.0).max(1.0)).round().clamp(2.0, 5.0)
+                        as u32;
+                    let frame = if moving || d.fly || d.energy_max > 0 {
+                        ((self.state.tick / rate) % 2) as usize
                     } else {
                         0
                     };
@@ -1998,14 +2298,23 @@ impl App {
                         let rw = sw + 8.0 * zoom;
                         self.gfx.sprite(out, book.ring, sx, sy + 2.0 * zoom, rw, rw * 0.5, [0.35, 1.0, 0.35, 0.9]);
                     }
+                    // Attack recoil: kick back along facing + brief flash.
+                    let rec = self.recoil.get(i as usize).copied().unwrap_or(0.0);
+                    let (rx_off, ry_off, flash) = if rec > 0.0 {
+                        let a = facing as f32 * std::f32::consts::FRAC_PI_4;
+                        let k = (rec / 0.14) * 2.5 * zoom;
+                        (-a.cos() * k, -a.sin() * k * 0.5, 1.0 + rec * 2.0)
+                    } else {
+                        (0.0, 0.0, 1.0)
+                    };
                     self.gfx.sprite(
                         out,
                         r,
-                        sx,
-                        sy - (r.h as f32 * 0.5 - 4.0) * zoom - hover,
+                        sx + rx_off,
+                        sy - (r.h as f32 * 0.5 - 4.0) * zoom - hover + ry_off,
                         r.w as f32 * zoom,
                         r.h as f32 * zoom,
-                        tint,
+                        [tint[0] * flash, tint[1] * flash, tint[2] * flash, tint[3]],
                     );
                     if e.amount > 0 {
                         let c = if e.carry_gas { GAS_COLOR } else { MINERAL_COLOR };
@@ -2100,7 +2409,7 @@ impl App {
         let zoom = self.cam.zoom;
         let mut sites: Vec<(DefId, TilePos)> = Vec::new();
         for e in &self.state.entities {
-            if !e.alive || e.owner != HUMAN || e.kind != EntityKind::Unit {
+            if !e.alive || e.owner != self.human || e.kind != EntityKind::Unit {
                 continue;
             }
             for order in std::iter::once(&e.order).chain(e.order_queue.iter()) {
@@ -2120,7 +2429,7 @@ impl App {
         for (def, site) in sites {
             let (fw, fh) = self.state.data.buildings[def as usize].footprint;
             let btype = self.building_type[def as usize];
-            let r = self.gfx.book.building(btype, HUMAN as usize);
+            let r = self.gfx.book.building(btype, self.human as usize);
             let (ax, ay) = BUILDING_ANCHOR[btype];
             let (cx, cy) = self.cam.world_to_screen(
                 site.x as f32 + fw as f32 * 0.5,
@@ -2145,7 +2454,7 @@ impl App {
         let book = &self.gfx.book;
         for id in &self.selection {
             let Some(e) = self.state.get(*id) else { continue };
-            if e.owner != HUMAN {
+            if e.owner != self.human {
                 continue;
             }
             if e.kind == EntityKind::Unit {
@@ -2207,7 +2516,7 @@ impl App {
             }
         }
         let btype = self.building_type[def as usize];
-        let r = self.gfx.book.building(btype, HUMAN as usize);
+        let r = self.gfx.book.building(btype, self.human as usize);
         let (ax, ay) = BUILDING_ANCHOR[btype];
         let (cx, cy) = self.cam.world_to_screen(
             site.x as f32 + fw as f32 * 0.5,
@@ -2240,8 +2549,15 @@ impl App {
 }
 
 pub fn new_game() -> State {
-    // Seed fixed for now; multiplayer will exchange one in the lobby.
     State::new(GameData::load_default(), meridian(), 0xC0FFEE)
+}
+
+pub fn new_game_with(race0: u8, race1: u8) -> State {
+    State::new_with_races(GameData::load_default(), meridian(), 0xC0FFEE, &[race0, race1])
+}
+
+pub fn new_game_mp(seed: u64, race0: u8, race1: u8) -> State {
+    State::new_with_races(GameData::load_default(), meridian(), seed, &[race0, race1])
 }
 
 pub fn fx(x: f32, y: f32) -> FxVec2 {

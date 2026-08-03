@@ -214,6 +214,9 @@ pub fn key_label(code: KeyCode) -> String {
         .to_string()
 }
 
+fn default_relay() -> String {
+    "wss://orion-relay.wachtelbruno.workers.dev".into()
+}
 fn default_music() -> f32 {
     0.5
 }
@@ -231,6 +234,9 @@ pub struct Settings {
     pub music_volume: f32,
     #[serde(default = "default_sfx")]
     pub sfx_volume: f32,
+    /// Lobby relay endpoint (Cloudflare worker). Empty disables online play.
+    #[serde(default = "default_relay")]
+    pub relay_url: String,
     /// action name -> key name; missing entries use defaults.
     pub binds: BTreeMap<String, String>,
 }
@@ -244,6 +250,7 @@ impl Default for Settings {
             game_speed: 1.0,
             music_volume: default_music(),
             sfx_volume: default_sfx(),
+            relay_url: default_relay(),
             binds: BTreeMap::new(),
         }
     }

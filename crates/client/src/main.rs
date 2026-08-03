@@ -10,6 +10,7 @@ mod gfx;
 mod hud;
 mod iso;
 mod menu;
+mod relay;
 
 use std::sync::Arc;
 
@@ -33,6 +34,7 @@ struct Shell {
     script: Option<String>,
     shot_reveal: bool,
     menu_shot: Option<(String, String)>,
+    mp_auto: Option<String>,
 }
 
 impl ApplicationHandler for Shell {
@@ -55,6 +57,11 @@ impl ApplicationHandler for Shell {
         app.shot_focus = self.shot_focus;
         app.shot_zoom = self.shot_zoom.map(|z| z * sf);
         app.script = self.script.clone();
+        app.mp_auto = self.mp_auto.clone();
+        if app.mp_auto.is_some() {
+            app.in_game = false;
+            app.page = crate::menu::MenuPage::MainRoot;
+        }
         app.shot_reveal = self.shot_reveal;
         app.menu_shot = self.menu_shot.clone();
         let headless = self.smoke
@@ -111,6 +118,8 @@ impl ApplicationHandler for Shell {
 
 fn main() {
     env_logger::init();
+    // rustls 0.23 needs a process-wide crypto provider before any TLS use.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let args: Vec<String> = std::env::args().collect();
     let smoke = args.iter().any(|a| a == "--smoke");
     // --shot out.ppm [--shot-ticks N]: bot-vs-bot fast-forward, capture one
@@ -150,6 +159,11 @@ fn main() {
         .and_then(|i| args.get(i + 1))
         .cloned();
     let shot_reveal = args.iter().any(|a| a == "--shot-reveal");
+    let mp_auto = args
+        .iter()
+        .position(|a| a == "--mp-auto")
+        .and_then(|i| args.get(i + 1))
+        .cloned();
     // --menu-shot page:path — capture a menu page (main/settings/esc).
     let menu_shot = args
         .iter()
@@ -169,6 +183,7 @@ fn main() {
         script,
         shot_reveal,
         menu_shot,
+        mp_auto,
         ..Default::default()
     };
     event_loop.run_app(&mut shell).expect("run app");

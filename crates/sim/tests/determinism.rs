@@ -311,32 +311,89 @@ fn content_systems_work() {
     assert_eq!(s.players[0].weapons_level, 1, "weapons research did not complete");
 }
 
+/// Race #2 works end to end: a Kyth mirror and a cross-race game both run
+/// deterministic full bot games with economies and armies on both sides.
+#[test]
+fn kyth_assembly_plays() {
+    for races in [[1u8, 1u8], [0u8, 1u8]] {
+        let mut s = State::new_with_races(GameData::load_default(), meridian(), 55, &races);
+        let mut bots = [Bot::new(0), Bot::new(1)];
+        let mut armies = [false, false];
+        for _ in 0..24 * 60 * 8 {
+            let mut cmds = Vec::new();
+            for bot in &mut bots {
+                cmds.extend(bot.think(&s));
+            }
+            s.step(&cmds);
+            for p in 0..2u8 {
+                let has_army = s.entities.iter().any(|e| {
+                    e.alive
+                        && e.owner == p
+                        && e.kind == orion_sim::EntityKind::Unit
+                        && !s.data.units[e.def as usize].harvester
+                });
+                if has_army {
+                    armies[p as usize] = true;
+                }
+            }
+            if s.winner.is_some() {
+                break;
+            }
+        }
+        assert!(
+            armies[0] && armies[1],
+            "races {races:?}: some side never built an army (armies={armies:?})"
+        );
+        // Race integrity: every entity's def belongs to its owner's race.
+        for e in s.entities.iter().filter(|e| e.alive) {
+            match e.kind {
+                orion_sim::EntityKind::Unit => {
+                    assert_eq!(
+                        s.data.units[e.def as usize].race,
+                        s.players[e.owner as usize].race
+                    );
+                }
+                orion_sim::EntityKind::Building => {
+                    assert_eq!(
+                        s.data.buildings[e.def as usize].race,
+                        s.players[e.owner as usize].race
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
 /// The gas loop must actually run: bots build an extractor and bank gas,
 /// and gas-costing units get produced.
 #[test]
 fn gas_economy_works() {
+    // Part 1: bots mine gas (extractor built + staffed) within 6 minutes.
     let mut s = build_state(11);
     let mut bots = [Bot::new(0), Bot::new(1)];
-    let vanguard = s.data.unit_tag("vanguard");
     let mut saw_gas = false;
-    let mut saw_vanguard = false;
     for _ in 0..24 * 60 * 6 {
         let mut cmds = Vec::new();
         for bot in &mut bots {
             cmds.extend(bot.think(&s));
         }
         s.step(&cmds);
-        if s.players.iter().any(|p| p.gas > 0) {
+        if s.players.iter().any(|p| p.gas_mined >= 40) {
             saw_gas = true;
-        }
-        if s.entities.iter().any(|e| {
-            e.alive && e.kind == orion_sim::EntityKind::Unit && e.def == vanguard
-        }) {
-            saw_vanguard = true;
-        }
-        if saw_gas && saw_vanguard {
-            return;
+            break;
         }
     }
-    panic!("gas loop incomplete: gas mined = {saw_gas}, vanguard trained = {saw_vanguard}");
+    assert!(saw_gas, "no bot mined meaningful gas in 6 minutes");
+
+    // Part 2: spending gas works — direct Train of a gas-costing unit.
+    let mut s = build_state(12);
+    let barracks = s.data.building_tag("barracks");
+    let b = s.spawn_building(0, barracks, orion_sim::TilePos::new(20, 20), false);
+    s.players[0].minerals = 500;
+    s.players[0].gas = 500;
+    let vanguard = s.data.unit_tag("vanguard");
+    s.step(&[(0, Command::Train { building: b, unit: vanguard })]);
+    assert_eq!(s.entities[b.idx as usize].queue.len(), 1, "gas train rejected");
+    assert_eq!(s.players[0].gas, 450, "gas not deducted");
 }

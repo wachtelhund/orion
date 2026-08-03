@@ -128,15 +128,47 @@ attack-move — captures a frame series at each stage, and asserts the base
 actually got built. It caught the resume-construction bug; keep it passing.
 Convert captures with `sips -s format png s.ppm --out s.png`.
 
+## Automated QA (use this instead of manual playtesting)
+
+`sim/qa.rs` + the `soak` example play N full bot games headless with
+invariant checks (bounds, walkability, hp caps, resource overflow, field
+leaks, economy stalls), shadow-determinism runs, and per-game metrics CSV.
+`small_soak_is_clean` keeps a CI-sized version in `cargo test`. Workflow for
+any gameplay change: run `soak -- 32` before and after; a violation or a
+win-rate cliff is the signal. The `balance` example is the quick matchup
+summary. Client-side verification stays `--script` / `--shot` /
+`--mp-auto`.
+
+## Multiplayer
+
+`sim/net.rs`: lockstep over newline-framed RON, transport-agnostic `Net`
+(TCP threads, or WebSocket via `client/relay.rs`). The **lobby relay** is a
+Cloudflare Worker + Durable Object (`relay/` dir, `wrangler deploy`; one DO
+per 5-letter code relays frames between exactly two peers). The client's
+`Settings.relay_url` points at the deployed worker. Host binds DEFAULT_PORT,
+handshake exchanges seed + races, then both sides run `Lockstep::try_step`:
+local commands schedule INPUT_DELAY ticks ahead; a tick steps only when both
+players' command lists for it are present; checksums cross-check every 24
+ticks (desync = detected, not prevented). The loopback test
+(`net::tests::lockstep_over_tcp_stays_in_sync`) and the two-process client
+smoke (`orion-client --mp-auto host` / `--mp-auto join`) must stay green.
+In MP the client never pauses, forces speed 1.0, runs no bot, and the local
+player may be 1 (`App.human` — never hardcode player 0 in client code).
+
+## Races
+
+Defs carry `race: u8`; players pick races; Train/Build validate race. The
+bot is capability-driven (worker = harvester, supply = supply_provided,
+tier-0/1 production by requires-chain) so new races need data + sprites
+only. Balance workflow: run the `balance` example (matchups x seeds with
+bot personality styles) before and after any numbers change.
+
 ## Known gaps / next milestones (see SPEC.md for full list)
 
-1. **Netcode**: lockstep transport + input delay, thin matchmaker (axum +
-   SQLite), P2P with relay fallback. The sim is already shaped for it.
-2. **Replays**: serialize seed + command stream; nearly free, huge desync-
-   debugging value. Do this *before* netcode.
-3. Sprite pipeline: runtime consumes an atlas format; AI-generated sheets vs
-   Blender renders is an open experiment (SPEC risk #5).
-4. Bot reads map start locations (fair) but its difficulty tiers, scouting,
-   and defense reactions are thin.
-5. Balance is placeholder. Bot-vs-bot currently favors player 1 slightly —
-   unexplained; investigate before reading anything into balance changes.
+1. Matchmaker service (queue, password lobbies, relay) from SPEC — current
+   MP is direct connect only; NAT traversal is the player's problem.
+2. **Replays**: serialize seed + command stream; nearly free.
+3. Kyth mirror has a spawn-position bias (SE favored, see balance example) —
+   suspect flow-field DIRS tie-break direction; investigate in pathing.
+4. Bot doesn't siege tanks, cast, or scout; casters are human-only tools.
+5. Sprite pipeline experiment (AI sheets vs Blender renders) still open.

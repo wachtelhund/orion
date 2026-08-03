@@ -81,8 +81,10 @@ impl State {
                     let cargo = self.entities[i].amount as u32;
                     if self.entities[i].carry_gas {
                         self.players[owner as usize].gas += cargo;
+                        self.players[owner as usize].gas_mined += cargo;
                     } else {
                         self.players[owner as usize].minerals += cargo;
+                        self.players[owner as usize].minerals_mined += cargo;
                     }
                     self.entities[i].amount = 0;
                     self.entities[i].carry_gas = false;

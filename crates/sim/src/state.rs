@@ -149,6 +149,13 @@ pub struct Player {
     pub minerals: u32,
     pub gas: u32,
     pub defeated: bool,
+    pub race: u8,
+    // End-of-game stats (deterministic, checksummed).
+    pub units_built: u32,
+    pub units_lost: u32,
+    pub buildings_lost: u32,
+    pub minerals_mined: u32,
+    pub gas_mined: u32,
     /// Upgrade levels from research (add to damage / subtract from taken).
     pub weapons_level: u8,
     pub armor_level: u8,
@@ -158,7 +165,7 @@ pub struct Player {
 
 /// Player-issued commands. The only mutation channel into the sim — in
 /// multiplayer these are exactly what goes over the wire.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Command {
     Move { units: Vec<EntityId>, target: FxVec2, queued: bool },
     AttackMove { units: Vec<EntityId>, target: FxVec2, queued: bool },
@@ -228,23 +235,33 @@ pub struct State {
 
 impl State {
     pub fn new(data: GameData, map: Map, seed: u64) -> State {
+        let n = map.starts.len();
+        Self::new_with_races(data, map, seed, &vec![0u8; n])
+    }
+
+    pub fn new_with_races(data: GameData, map: Map, seed: u64, races: &[u8]) -> State {
         let n_tiles = (map.width * map.height) as usize;
         let n_players = map.starts.len();
         let mut s = State {
             tick: 0,
             entities: Vec::new(),
             free: Vec::new(),
-            players: vec![
-                Player {
+            players: (0..n_players)
+                .map(|p| Player {
                     minerals: START_MINERALS,
                     gas: 0,
                     defeated: false,
+                    race: races.get(p).copied().unwrap_or(0),
+                    units_built: 0,
+                    units_lost: 0,
+                    buildings_lost: 0,
+                    minerals_mined: 0,
+                    gas_mined: 0,
                     weapons_level: 0,
                     armor_level: 0,
                     research_done: vec![false; data.research.len()],
-                };
-                n_players
-            ],
+                })
+                .collect(),
             fields: FieldPool::default(),
             blocked: vec![false; n_tiles],
             fog: (0..n_players).map(|_| FogGrid::new(map.width, map.height)).collect(),
@@ -267,10 +284,10 @@ impl State {
             s.spawn_resource(RES_GEYSER, origin, (2, 2), amount);
         }
 
-        // One HQ + starting workers per player.
-        let hq = s.data.building_tag("hq");
-        let worker = s.data.unit_tag("fabricator");
+        // One HQ + starting workers per player, per their race.
         for p in 0..n_players as u8 {
+            let hq = s.data.hq_of_race(s.players[p as usize].race);
+            let worker = s.data.worker_of_race(s.players[p as usize].race);
             let start = s.map.starts[p as usize];
             let origin = TilePos::new(start.x - 1, start.y - 1);
             let id = s.spawn_building(p, hq, origin, false);
@@ -306,6 +323,9 @@ impl State {
         let idx = self.alloc();
         let hp = self.data.units[def as usize].hp;
         let energy = (self.data.units[def as usize].energy_max / 4) as u16;
+        if (owner as usize) < self.players.len() {
+            self.players[owner as usize].units_built += 1;
+        }
         let e = &mut self.entities[idx as usize];
         let gen = e.gen;
         *e = Entity {
@@ -395,6 +415,15 @@ impl State {
         }
         if e.kind != EntityKind::Resource {
             self.events.push(SimEvent::Death { pos: e.pos, owner: e.owner, kind: e.kind });
+            let owner = e.owner as usize;
+            let kind = e.kind;
+            if owner < self.players.len() {
+                match kind {
+                    EntityKind::Unit => self.players[owner].units_lost += 1,
+                    EntityKind::Building => self.players[owner].buildings_lost += 1,
+                    EntityKind::Resource => {}
+                }
+            }
         }
         let e = &mut self.entities[idx as usize];
         e.alive = false;
@@ -512,20 +541,33 @@ impl State {
         true
     }
 
-    /// First open tile ringing a building footprint — unit spawn point.
-    pub fn spawn_tile_near(&self, def: DefId, origin: TilePos) -> Option<TilePos> {
+    /// Open tile ringing a building footprint, preferring the side facing
+    /// `toward` (the rally point) — symmetric on mirrored maps and units
+    /// exit in the useful direction.
+    pub fn spawn_tile_near(&self, def: DefId, origin: TilePos, toward: FxVec2) -> Option<TilePos> {
         let (fw, fh) = self.data.buildings[def as usize].footprint;
         for r in 1..8 {
+            let mut best: Option<(i64, i32, i32)> = None;
             for y in origin.y - r..origin.y + fh + r {
                 for x in origin.x - r..origin.x + fw + r {
-                    let on_ring = x < origin.x || x >= origin.x + fw || y < origin.y || y >= origin.y + fh;
+                    let on_ring =
+                        x < origin.x || x >= origin.x + fw || y < origin.y || y >= origin.y + fh;
                     if on_ring
                         && self.map.walkable(x, y)
                         && !self.blocked[self.map.idx(x, y)]
                     {
-                        return Some(TilePos::new(x, y));
+                        let d = crate::fixed::dist_sq_raw(
+                            TilePos::new(x, y).center(),
+                            toward,
+                        );
+                        if best.map_or(true, |(bd, bx, by)| (d, x, y) < (bd, bx, by)) {
+                            best = Some((d, x, y));
+                        }
                     }
                 }
+            }
+            if let Some((_, x, y)) = best {
+                return Some(TilePos::new(x, y));
             }
         }
         None
@@ -647,6 +689,9 @@ impl State {
             mix(p.defeated as u64);
             mix(p.weapons_level as u64);
             mix(p.armor_level as u64);
+            mix(p.units_built as u64);
+            mix(p.units_lost as u64);
+            mix(p.minerals_mined as u64);
         }
         for s in &self.storms {
             mix(s.pos.x.0 as u64);

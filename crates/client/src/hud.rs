@@ -6,7 +6,7 @@ use orion_sim::data::DefId;
 use orion_sim::map::{TileKind, TilePos};
 use orion_sim::EntityKind;
 
-use crate::app::{hp_color, App, EffKind, Mode, GAS_COLOR, HUMAN, MINERAL_COLOR, TEAM_COLORS, WHITE};
+use crate::app::{hp_color, App, EffKind, Mode, GAS_COLOR, MINERAL_COLOR, TEAM_COLORS, WHITE};
 use crate::gfx::Inst;
 
 /// A clickable command-card button.
@@ -103,7 +103,7 @@ impl App {
             t.push((d.desc.to_uppercase(), TIP_DESC));
         }
         if let Some(req) = d.requires {
-            if !self.state.requirement_met(HUMAN, Some(req)) {
+            if !self.state.requirement_met(self.human, Some(req)) {
                 t.push((
                     format!("REQUIRES {}", self.state.data.buildings[req as usize].name)
                         .to_uppercase(),
@@ -129,7 +129,7 @@ impl App {
             t.push((d.desc.to_uppercase(), TIP_DESC));
         }
         if let Some(req) = d.requires {
-            if !self.state.requirement_met(HUMAN, Some(req)) {
+            if !self.state.requirement_met(self.human, Some(req)) {
                 t.push((
                     format!("REQUIRES {}", self.state.data.buildings[req as usize].name)
                         .to_uppercase(),
@@ -149,10 +149,10 @@ impl App {
         if !d.desc.is_empty() {
             t.push((d.desc.to_uppercase(), TIP_DESC));
         }
-        if self.state.players[HUMAN as usize].research_done[r as usize] {
+        if self.state.players[self.human as usize].research_done[r as usize] {
             t.push(("ALREADY RESEARCHED".into(), TIP_WARN));
         } else if let Some(pre) = d.requires {
-            if !self.state.players[HUMAN as usize].research_done[pre as usize] {
+            if !self.state.players[self.human as usize].research_done[pre as usize] {
                 t.push((
                     format!("REQUIRES {}", self.state.data.research[pre as usize].name),
                     TIP_WARN,
@@ -221,7 +221,7 @@ impl App {
         let mut k = 0;
         for id in self.selection.iter().take(18) {
             let Some(u) = self.state.get(*id) else { continue };
-            if u.owner != HUMAN || u.kind == EntityKind::Resource {
+            if u.owner != self.human || u.kind == EntityKind::Resource {
                 continue;
             }
             let col = k % 9;
@@ -393,7 +393,7 @@ impl App {
             let (visible, color) = match e.kind {
                 EntityKind::Resource => (true, MINERAL_COLOR),
                 _ => {
-                    let vis = e.owner == HUMAN || self.visible(t);
+                    let vis = e.owner == self.human || self.visible(t);
                     (vis, TEAM_COLORS[e.owner as usize % 2])
                 }
             };
@@ -676,21 +676,21 @@ impl App {
         let key_of = |a: crate::config::Action| crate::config::key_label(self.settings.key_for(a));
         match self.mode {
             Mode::BuildMenu => {
-                let d = &self.state.data;
-                for (act, tag) in [
-                    (crate::config::Action::Place1, "depot"),
-                    (crate::config::Action::Place2, "barracks"),
-                    (crate::config::Action::Place3, "hq"),
-                    (crate::config::Action::Place4, "condenser"),
-                    (crate::config::Action::Place5, "forge"),
-                    (crate::config::Action::Place6, "aerie"),
-                    (crate::config::Action::Place7, "archive"),
-                ] {
-                    let def = d.building_tag(tag);
-                    let b = &d.buildings[def as usize];
-                    let met = self.state.requirement_met(HUMAN, b.requires);
+                let place_keys = [
+                    crate::config::Action::Place1,
+                    crate::config::Action::Place2,
+                    crate::config::Action::Place3,
+                    crate::config::Action::Place4,
+                    crate::config::Action::Place5,
+                    crate::config::Action::Place6,
+                    crate::config::Action::Place7,
+                ];
+                for (slot, def) in self.build_menu_defs().into_iter().enumerate().take(7) {
+                    let act = place_keys[slot];
+                    let b = &self.state.data.buildings[def as usize];
+                    let met = self.state.requirement_met(self.human, b.requires);
                     let cost = if !met {
-                        let req = &d.buildings[b.requires.unwrap() as usize];
+                        let req = &self.state.data.buildings[b.requires.unwrap() as usize];
                         format!("NEEDS {}", req.name)
                     } else if b.cost_gas > 0 {
                         format!("{} {}G", b.cost_minerals, b.cost_gas)
@@ -756,7 +756,7 @@ impl App {
                     ];
                     for (k, &u) in trains.iter().take(3).enumerate() {
                         let d = &self.state.data.units[u as usize];
-                        let met = self.state.requirement_met(HUMAN, d.requires);
+                        let met = self.state.requirement_met(self.human, d.requires);
                         let cost = if !met {
                             let req =
                                 &self.state.data.buildings[d.requires.unwrap() as usize];
@@ -777,10 +777,10 @@ impl App {
                     // Research options (Archive).
                     for (k, &r) in bdef.researches.iter().take(4).enumerate() {
                         let rdef = &self.state.data.research[r as usize];
-                        let done = self.state.players[HUMAN as usize].research_done
+                        let done = self.state.players[self.human as usize].research_done
                             [r as usize];
                         let prereq_ok = rdef.requires.map_or(true, |p| {
-                            self.state.players[HUMAN as usize].research_done[p as usize]
+                            self.state.players[self.human as usize].research_done[p as usize]
                         });
                         let researching = b.research.map_or(false, |(id, _)| id == r);
                         // Keep the on-button label SHORT — the tooltip has
@@ -908,12 +908,12 @@ impl App {
             let icon_cy = b.y + b.h * 0.44;
             match b.icon {
                 CardIcon::Building(btype) => {
-                    let r = book.building(btype, HUMAN as usize);
+                    let r = book.building(btype, self.human as usize);
                     let s = (b.h * 0.72) / r.h as f32;
                     self.gfx.sprite(out, r, b.x + b.w * 0.5, icon_cy, r.w as f32 * s, r.h as f32 * s, WHITE);
                 }
                 CardIcon::Unit(utype) => {
-                    let r = book.unit(utype, HUMAN as usize, 2, 0);
+                    let r = book.unit(utype, self.human as usize, 2, 0);
                     let s = (b.h * 0.7) / r.h as f32;
                     self.gfx.sprite(out, r, b.x + b.w * 0.5, icon_cy, r.w as f32 * s, r.h as f32 * s, WHITE);
                 }
@@ -971,16 +971,16 @@ impl App {
         let ts = self.ts(2.0);
         let icon_y = 12.0 * ui + 5.0 * ui;
 
-        let minerals = self.state.players[HUMAN as usize].minerals;
-        let gas = self.state.players[HUMAN as usize].gas;
-        let (used, prov) = self.state.supply(HUMAN);
+        let minerals = self.state.players[self.human as usize].minerals;
+        let gas = self.state.players[self.human as usize].gas;
+        let (used, prov) = self.state.supply(self.human);
 
         // Right-aligned: minerals | gas | supply.
         let sup_s = format!("{used}/{prov}");
         let sup_col = if used >= prov { [1.0, 0.45, 0.3, 1.0] } else { white };
         let mut x = w - 16.0 * ui - self.gfx.text_width(ts, &sup_s);
         self.gfx.text(out, x, 10.0 * ui, ts, sup_col, &sup_s);
-        let pr = book.building(1, HUMAN as usize);
+        let pr = book.building(1, self.human as usize);
         self.gfx.sprite(out, pr, x - 12.0 * ui, icon_y, pr.w as f32 * 0.3 * ui, pr.h as f32 * 0.3 * ui, WHITE);
 
         let gas_s = format!("{gas}");
@@ -1008,10 +1008,33 @@ impl App {
     }
 
     fn draw_banner(&self, out: &mut Vec<Inst>) {
+        // Multiplayer terminal states outrank the normal banner.
+        if let Some(mp) = &self.mp {
+            let msg = if mp.desync {
+                Some(("DESYNC DETECTED", [1.0, 0.6, 0.2, 1.0]))
+            } else if mp.disconnected && self.state.winner.is_none() {
+                Some(("OPPONENT DISCONNECTED", [0.4, 1.0, 0.4, 1.0]))
+            } else {
+                None
+            };
+            if let Some((msg, color)) = msg {
+                let w = self.cam.screen_w;
+                let h = self.cam.screen_h;
+                self.gfx.quad(out, 0.0, h * 0.5 - 70.0 * self.ui(), w, 140.0 * self.ui(), [0.02, 0.02, 0.03, 0.85]);
+                let ts = self.ts(4.0);
+                let tw = self.gfx.text_width(ts, msg);
+                self.gfx.text(out, (w - tw) * 0.5, h * 0.5 - 30.0 * self.ui(), ts, color, msg);
+                let sub = "ESC: MENU";
+                let ts2 = self.ts(2.0);
+                let sw = self.gfx.text_width(ts2, sub);
+                self.gfx.text(out, (w - sw) * 0.5, h * 0.5 + 24.0 * self.ui(), ts2, [0.7, 0.7, 0.7, 1.0], sub);
+                return;
+            }
+        }
         let Some(winner) = self.state.winner else { return };
         let w = self.cam.screen_w;
         let h = self.cam.screen_h;
-        let (msg, color) = if winner == HUMAN {
+        let (msg, color) = if winner == self.human {
             ("VICTORY!", [0.4, 1.0, 0.4, 1.0])
         } else {
             ("DEFEAT", [1.0, 0.35, 0.3, 1.0])
@@ -1020,10 +1043,41 @@ impl App {
         let ts = self.ts(6.0);
         let tw = self.gfx.text_width(ts, msg);
         self.gfx.text(out, (w - tw) * 0.5, h * 0.5 - 40.0 * self.ui(), ts, color, msg);
+        // Match stats.
+        let secs = self.state.tick / 24;
+        let ts3 = self.ts(1.4);
+        let mut y = h * 0.5 + 16.0 * self.ui();
+        let time_l = format!("MATCH TIME {:02}:{:02}", secs / 60, secs % 60);
+        let tw3 = self.gfx.text_width(ts3, &time_l);
+        self.gfx.text(out, (w - tw3) * 0.5, y, ts3, [0.75, 0.75, 0.72, 1.0], &time_l);
+        y += 20.0 * self.ui();
+        for (p, pl) in self.state.players.iter().enumerate() {
+            let name = self
+                .state
+                .data
+                .race_names
+                .get(pl.race as usize)
+                .cloned()
+                .unwrap_or_default()
+                .to_uppercase();
+            let line = format!(
+                "P{}  {}  UNITS {}  LOST {}  MINED {}+{}G",
+                p + 1,
+                name,
+                pl.units_built,
+                pl.units_lost + pl.buildings_lost,
+                pl.minerals_mined,
+                pl.gas_mined,
+            );
+            let c = TEAM_COLORS[p % 2];
+            let lw = self.gfx.text_width(ts3, &line);
+            self.gfx.text(out, (w - lw) * 0.5, y, ts3, [c[0], c[1], c[2], 1.0], &line);
+            y += 18.0 * self.ui();
+        }
         let sub = "R: PLAY AGAIN   ESC: MENU";
         let ts2 = self.ts(2.0);
         let sw = self.gfx.text_width(ts2, sub);
-        self.gfx.text(out, (w - sw) * 0.5, h * 0.5 + 24.0 * self.ui(), ts2, [0.7, 0.7, 0.7, 1.0], sub);
+        self.gfx.text(out, (w - sw) * 0.5, y + 8.0 * self.ui(), ts2, [0.7, 0.7, 0.7, 1.0], sub);
     }
 
     // ----------------------------------------------------------- click ----
@@ -1071,7 +1125,7 @@ impl App {
                 CardAction::Research(r) => {
                     if let Some(bid) = self.primary_selected_building() {
                         self.pending
-                            .push((crate::app::HUMAN, orion_sim::Command::Research {
+                            .push((self.human, orion_sim::Command::Research {
                                 building: bid,
                                 research: r,
                             }));

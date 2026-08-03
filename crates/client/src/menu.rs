@@ -34,6 +34,13 @@ enum MenuAction {
     Speed(f32),
     MusicVol(f32),
     SfxVol(f32),
+    CycleRace,
+    CycleEnemyRace,
+    HostMp,
+    JoinMp,
+    HostRelay,
+    JoinRelay,
+    CancelMp,
     Rebind(Action),
 }
 
@@ -83,18 +90,51 @@ impl App {
                 );
             }
             MenuPage::Difficulty => {
+                let races = &self.state.data.race_names;
+                let my = races
+                    .get(self.chosen_race as usize)
+                    .cloned()
+                    .unwrap_or_default()
+                    .to_uppercase();
+                let enemy = match self.enemy_race_choice {
+                    2 => "RANDOM".to_string(),
+                    r => races.get(r as usize).cloned().unwrap_or_default().to_uppercase(),
+                };
                 stack(
                     vec![
+                        (format!("YOUR RACE: {my}"), MenuAction::CycleRace),
+                        (format!("ENEMY: {enemy}"), MenuAction::CycleEnemyRace),
                         ("EASY".into(), MenuAction::StartGame(Difficulty::Easy)),
                         ("NORMAL".into(), MenuAction::StartGame(Difficulty::Normal)),
                         ("HARD".into(), MenuAction::StartGame(Difficulty::Hard)),
                         ("BACK".into(), MenuAction::Back),
                     ],
-                    h * 0.42,
+                    h * 0.34,
                 );
             }
             MenuPage::Multiplayer => {
-                stack(vec![("BACK".into(), MenuAction::Back)], h * 0.62);
+                let races = &self.state.data.race_names;
+                let my = races
+                    .get(self.chosen_race as usize)
+                    .cloned()
+                    .unwrap_or_default()
+                    .to_uppercase();
+                if self.mp_waiting.is_some() {
+                    stack(vec![("CANCEL".into(), MenuAction::CancelMp)], h * 0.64);
+                } else {
+                    let mut rows = vec![(format!("YOUR RACE: {my}"), MenuAction::CycleRace)];
+                    if !self.settings.relay_url.is_empty() {
+                        rows.push(("HOST ONLINE (LOBBY CODE)".into(), MenuAction::HostRelay));
+                        rows.push((
+                            format!("JOIN CODE: {}_", self.ip_input.to_uppercase()),
+                            MenuAction::JoinRelay,
+                        ));
+                    }
+                    rows.push(("HOST LAN (DIRECT)".into(), MenuAction::HostMp));
+                    rows.push((format!("JOIN IP: {}_", self.ip_input), MenuAction::JoinMp));
+                    rows.push(("BACK".into(), MenuAction::Back));
+                    stack(rows, h * 0.30);
+                }
             }
             MenuPage::EscRoot => {
                 stack(
@@ -233,16 +273,34 @@ impl App {
         // Page-specific copy.
         if self.page == MenuPage::Multiplayer {
             let ts = self.ts(1.5);
-            let lines = [
-                "RANKED 1V1 QUEUE AND PASSWORD LOBBIES",
-                "ARE IN DEVELOPMENT.",
-                "",
-                "THE SIM IS LOCKSTEP-READY: DETERMINISTIC,",
-                "FIXED-POINT, INPUT-ONLY. NETCODE IS NEXT.",
-            ];
+            let mut lines: Vec<String> = Vec::new();
+            if self.mp_waiting.is_some() {
+                if let Some(code) = &self.mp_lobby_code {
+                    lines.push(format!("LOBBY CODE:  {code}"));
+                    lines.push("TELL YOUR OPPONENT - THEY PICK JOIN CODE.".into());
+                } else {
+                    lines.push(format!(
+                        "WAITING ON PORT {}...",
+                        orion_sim::net::DEFAULT_PORT
+                    ));
+                    if let Some(ip) = orion_sim::net::local_ip() {
+                        lines.push(format!("YOUR LAN IP:  {ip}"));
+                    }
+                    lines.push("THE OTHER PLAYER PICKS JOIN IP.".into());
+                }
+            } else {
+                lines.push("ONLINE: HOST GETS A 5-LETTER LOBBY CODE.".into());
+                lines.push("LAN: HOST DIRECT AND SHARE YOUR IP.".into());
+                lines.push("TYPE TO FILL THE CODE / IP FIELD.".into());
+            }
+            if let Some(err) = &self.mp_error {
+                lines.push(String::new());
+                lines.push(err.to_uppercase());
+            }
             for (k, l) in lines.iter().enumerate() {
                 let lw = self.gfx.text_width(ts, l);
-                self.gfx.text(out, cx - lw * 0.5, h * 0.34 + k as f32 * 22.0 * ui, ts, dim, l);
+                let color = if l.starts_with("CONNECTION") { [1.0, 0.5, 0.4, 1.0] } else { dim };
+                self.gfx.text(out, cx - lw * 0.5, h * 0.22 + k as f32 * 22.0 * ui, ts, color, l);
             }
         }
         if let MenuPage::Settings { .. } = self.page {
@@ -331,6 +389,7 @@ impl App {
             MenuAction::Resume => self.page = MenuPage::None,
             MenuAction::QuitToMenu => {
                 self.in_game = false;
+                self.mp = None; // closes the socket; peer sees a disconnect
                 self.page = MenuPage::MainRoot;
             }
             MenuAction::QuitApp => {
@@ -367,6 +426,58 @@ impl App {
                     a.sfx_volume = self.settings.sfx_volume;
                 }
                 self.settings.save();
+            }
+            MenuAction::HostMp => {
+                self.mp_error = None;
+                match orion_sim::net::host_async(self.chosen_race, orion_sim::net::DEFAULT_PORT)
+                {
+                    Ok(rx) => self.mp_waiting = Some(rx),
+                    Err(e) => self.mp_error = Some(format!("cannot host: {e}")),
+                }
+            }
+            MenuAction::JoinMp => {
+                self.mp_error = None;
+                let addr = if self.ip_input.contains(':') {
+                    self.ip_input.clone()
+                } else {
+                    format!("{}:{}", self.ip_input, orion_sim::net::DEFAULT_PORT)
+                };
+                self.mp_waiting =
+                    Some(orion_sim::net::join_async(addr, self.chosen_race));
+            }
+            MenuAction::HostRelay => {
+                self.mp_error = None;
+                let (code, rx) = crate::relay::host_relay_async(
+                    self.settings.relay_url.clone(),
+                    self.chosen_race,
+                );
+                self.mp_lobby_code = Some(code);
+                self.mp_waiting = Some(rx);
+            }
+            MenuAction::JoinRelay => {
+                self.mp_error = None;
+                let code = self.ip_input.trim().to_uppercase();
+                if code.len() < 4 {
+                    self.mp_error = Some("type the lobby code first".into());
+                } else {
+                    self.mp_waiting = Some(crate::relay::join_relay_async(
+                        self.settings.relay_url.clone(),
+                        code,
+                        self.chosen_race,
+                    ));
+                }
+            }
+            MenuAction::CancelMp => {
+                self.mp_waiting = None;
+                self.mp_lobby_code = None;
+            }
+            MenuAction::CycleRace => {
+                let n = self.state.data.race_names.len() as u8;
+                self.chosen_race = (self.chosen_race + 1) % n.max(1);
+            }
+            MenuAction::CycleEnemyRace => {
+                let n = self.state.data.race_names.len() as u8;
+                self.enemy_race_choice = (self.enemy_race_choice + 1) % (n + 1).max(1);
             }
             MenuAction::Rebind(a) => {
                 self.rebinding = Some(a);

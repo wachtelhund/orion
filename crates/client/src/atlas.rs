@@ -7,7 +7,7 @@
 
 use crate::font;
 
-pub const ATLAS: u32 = 1024;
+pub const ATLAS: u32 = 2048;
 
 pub type Color = [u8; 4];
 
@@ -241,13 +241,14 @@ pub struct SpriteBook {
     // world objects
     pub minerals: [Region; 3],
     pub geyser: Region,
-    /// [unit_type][team][facing][frame]. Types: worker, trooper, vanguard,
-    /// breaker, skywing, stormcaller, breaker-sieged.
+    /// [unit_type][team][facing][frame]. 0-6: Vanguard Combine (worker,
+    /// trooper, vanguard, breaker, skywing, stormcaller, breaker-sieged).
+    /// 7-12: Kyth Assembly (drone, skitter, spitter, ravager, wisp, weaver).
     pub units: Vec<Region>,
-    /// [building_type][team]: hq, depot, barracks, condenser, forge, aerie,
-    /// archive.
+    /// [building_type][team]. 0-6 Vanguard, 7-13 Kyth (hive, spire, sapwell,
+    /// warren, incubator, roost, cortex).
     pub buildings: Vec<Region>,
-    pub building_px_h: [u32; 7],
+    pub building_px_h: [u32; 14],
     // effects
     pub flash: Region,
     pub spark: Region,
@@ -322,7 +323,7 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
 
     // Units: [type][team][facing][frame].
     let mut units = Vec::new();
-    for unit_type in 0..7 {
+    for unit_type in 0..13 {
         for team in 0..2 {
             for facing in 0..N_FACINGS {
                 for frame in 0..N_FRAMES {
@@ -333,7 +334,13 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
                         3 => paint_breaker(facing, frame, TEAMS[team]),
                         4 => paint_skywing(facing, frame, TEAMS[team]),
                         5 => paint_stormcaller(facing, frame, TEAMS[team]),
-                        _ => paint_breaker_sieged(facing, frame, TEAMS[team]),
+                        6 => paint_breaker_sieged(facing, frame, TEAMS[team]),
+                        7 => paint_kdrone(facing, frame, TEAMS[team]),
+                        8 => paint_skitter(facing, frame, TEAMS[team]),
+                        9 => paint_spitter(facing, frame, TEAMS[team]),
+                        10 => paint_ravager(facing, frame, TEAMS[team]),
+                        11 => paint_wisp(facing, frame, TEAMS[team]),
+                        _ => paint_weaver(facing, frame, TEAMS[team]),
                     };
                     units.push(p.place(&c));
                 }
@@ -343,8 +350,8 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
 
     // Buildings: [type][team].
     let mut buildings = Vec::new();
-    let mut building_px_h = [0u32; 7];
-    for b_type in 0..7 {
+    let mut building_px_h = [0u32; 14];
+    for b_type in 0..14 {
         for team in 0..2 {
             let c = match b_type {
                 0 => paint_hq(TEAMS[team]),
@@ -353,7 +360,14 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
                 3 => paint_condenser(TEAMS[team]),
                 4 => paint_forge(TEAMS[team]),
                 5 => paint_aerie(TEAMS[team]),
-                _ => paint_archive(TEAMS[team]),
+                6 => paint_archive(TEAMS[team]),
+                7 => paint_hive(TEAMS[team]),
+                8 => paint_spire(TEAMS[team]),
+                9 => paint_sapwell(TEAMS[team]),
+                10 => paint_warren(TEAMS[team]),
+                11 => paint_incubator(TEAMS[team]),
+                12 => paint_roost(TEAMS[team]),
+                _ => paint_cortex(TEAMS[team]),
             };
             building_px_h[b_type] = c.h as u32;
             buildings.push(p.place(&c));
@@ -919,6 +933,306 @@ fn paint_stormcaller(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
         let a = a0 + k as f32 * 2.1;
         c.line(ox, oy, ox + a.cos() * 4.5, oy + a.sin() * 4.5, 1.0, [170, 245, 255, 200]);
     }
+    c.outline(OUTLINE);
+    c
+}
+
+// ----------------------------------------------------- Kyth Assembly ----
+
+const CHITIN: [u8; 3] = [96, 78, 104];
+const CHITIN_LIGHT: [u8; 3] = [128, 106, 138];
+const MEMBRANE: [u8; 3] = [168, 120, 92];
+const KYTH_GLOW: [u8; 3] = [180, 255, 140];
+
+/// Drone: round hover-bug worker. 24x22.
+fn paint_kdrone(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(24, 22);
+    let (dx, dy) = facing_vec(f);
+    let cx = 12.0;
+    let cy = 12.0;
+    let bob = if frame == 0 { 0.0 } else { -0.8 };
+    // Legs.
+    for side in [-1.0f32, 1.0] {
+        let lo = if frame == 0 { 1.0 } else { 0.0 };
+        c.line(cx, cy + bob + 2.0, cx + side * 6.0, cy + 7.0 + lo * side, 1.2, rgba([58, 48, 62]));
+    }
+    // Segmented body.
+    c.ellipse_shaded(cx - dx * 2.0, cy + bob, 5.0, 4.0, CHITIN);
+    c.ellipse_shaded(cx + dx * 3.0, cy + bob + dy * 1.5, 3.6, 3.0, CHITIN_LIGHT);
+    // Team marking + eye.
+    c.ellipse(cx - dx * 3.0, cy + bob - 1.0, 1.8, 1.4, rgba(team));
+    if dy > -0.5 {
+        c.ellipse(cx + dx * 4.5, cy + bob + dy * 1.8, 1.2, 1.0, rgba(KYTH_GLOW));
+    }
+    c.outline(OUTLINE);
+    c
+}
+
+/// Skitter: small fast 4-legged blade-bug. 22x20.
+fn paint_skitter(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(22, 20);
+    let (dx, dy) = facing_vec(f);
+    let cx = 11.0;
+    let cy = 11.0;
+    let step = if frame == 0 { 1.5 } else { -1.5 };
+    for (k, side) in [-1.0f32, 1.0].iter().enumerate() {
+        let sw = if k == 0 { step } else { -step };
+        c.line(cx - 2.0, cy + 1.0, cx - 5.0 + sw, cy + 6.0, 1.1, rgba([58, 48, 62]));
+        c.line(cx + 2.0, cy + 1.0, cx + 5.0 - sw, cy + 6.0, 1.1, rgba([58, 48, 62]));
+        let _ = side;
+    }
+    // Low sleek body.
+    c.ellipse_shaded(cx - dx * 1.5, cy, 4.5, 2.8, CHITIN);
+    // Blade mandibles toward facing.
+    c.line(cx + dx * 3.0, cy + dy * 1.5, cx + dx * 8.0, cy + dy * 4.0 - 1.0, 1.4, rgba(team));
+    c.line(cx + dx * 3.0, cy + dy * 1.5 + 1.5, cx + dx * 8.0, cy + dy * 4.0 + 1.5, 1.4, rgba(team));
+    if dy > -0.5 {
+        c.ellipse(cx + dx * 2.5, cy + dy * 1.2 - 0.5, 1.0, 0.8, rgba(KYTH_GLOW));
+    }
+    c.outline(OUTLINE);
+    c
+}
+
+/// Spitter: slug with an acid tube. 26x24.
+fn paint_spitter(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(26, 24);
+    let (dx, dy) = facing_vec(f);
+    let cx = 13.0;
+    let cy = 14.0;
+    let squish = if frame == 0 { 0.0 } else { 0.6 };
+    // Slug body.
+    c.ellipse_shaded(cx - dx * 2.0, cy + squish, 6.5, 4.5 - squish, MEMBRANE);
+    c.ellipse_shaded(cx - dx * 4.0, cy - 1.0, 3.5, 2.8, CHITIN);
+    // Team ridge.
+    c.line(cx - dx * 6.0, cy - 3.0, cx + dx * 1.0, cy - 4.0, 1.4, rgba(team));
+    // Acid tube toward facing, tilted up.
+    c.line(cx + dx * 2.0, cy - 1.0, cx + dx * 8.0, cy - 4.0 + dy * 3.0, 2.2, rgba(CHITIN_LIGHT));
+    c.ellipse(cx + dx * 8.5, cy - 4.5 + dy * 3.2, 1.6, 1.3, rgba(KYTH_GLOW));
+    c.outline(OUTLINE);
+    c
+}
+
+/// Ravager: towering splash beetle. 34x32.
+fn paint_ravager(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(34, 32);
+    let (dx, dy) = facing_vec(f);
+    let cx = 17.0;
+    let cy = 18.0;
+    let lift = if frame == 0 { 0.0 } else { 1.0 };
+    // Six thick legs.
+    for k in 0..3 {
+        let off = -5.0 + k as f32 * 5.0;
+        c.line(cx + off, cy + 2.0, cx + off - 3.0, cy + 10.0 - lift, 1.8, rgba([58, 48, 62]));
+        c.line(cx + off, cy + 2.0, cx + off + 3.0, cy + 10.0 + lift - 1.0, 1.8, rgba([58, 48, 62]));
+    }
+    // Massive carapace with plates.
+    c.ellipse_shaded(cx - dx * 2.0, cy - 2.0, 10.0, 7.5, CHITIN);
+    c.ellipse_shaded(cx - dx * 4.0, cy - 5.0, 6.0, 4.0, CHITIN_LIGHT);
+    c.line(cx - 8.0, cy - 2.0, cx + 8.0, cy - 2.0, 1.2, rgba(scale_rgb(CHITIN, 0.7)));
+    // Team spines.
+    for k in 0..3 {
+        let sx = cx - 5.0 + k as f32 * 5.0;
+        c.line(sx, cy - 7.0, sx + 1.0, cy - 11.0, 1.4, rgba(team));
+    }
+    // Crusher claws toward facing.
+    for side in [-1.0f32, 1.0] {
+        let px = cx + dx * 6.0 - dy * side * 5.0;
+        let py = cy + dy * 5.0 + dx * side * 3.0;
+        c.line(px, py, px + dx * 6.5, py + dy * 4.5, 2.6, rgba(CHITIN_LIGHT));
+        c.line(px + dx * 5.0, py + dy * 3.5, px + dx * 7.0, py + dy * 5.0, 1.6, rgba(team));
+    }
+    if dy > -0.4 {
+        c.ellipse(cx + dx * 4.0, cy - 1.0 + dy * 2.0, 1.6, 1.2, rgba(KYTH_GLOW));
+    }
+    c.outline(OUTLINE);
+    c
+}
+
+/// Wisp: floating jelly flyer. 26x26.
+fn paint_wisp(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(26, 26);
+    let (dx, dy) = facing_vec(f);
+    let cx = 13.0;
+    let cy = 11.0;
+    let pulse = if frame == 0 { 0.0 } else { 1.0 };
+    // Bell.
+    c.ellipse_shaded(cx, cy, 6.0 + pulse * 0.8, 5.0 - pulse * 0.5, MEMBRANE);
+    c.ellipse(cx - 1.5, cy - 1.5, 2.5, 2.0, rgba(scale_rgb(MEMBRANE, 1.25)));
+    c.ellipse(cx + dx * 2.0, cy + dy * 1.5, 2.0, 1.6, rgba(team));
+    // Tentacles trailing away from facing.
+    for k in 0..4 {
+        let off = -4.5 + k as f32 * 3.0;
+        let sway = if (k + frame) % 2 == 0 { 1.5 } else { -1.0 };
+        c.line(
+            cx + off,
+            cy + 4.0,
+            cx + off - dx * 4.0 + sway,
+            cy + 10.0 - dy * 2.0,
+            1.1,
+            rgba(scale_rgb(MEMBRANE, 0.8)),
+        );
+    }
+    c.ellipse(cx + dx * 3.5, cy + dy * 2.0 - 1.0, 1.2, 1.0, rgba(KYTH_GLOW));
+    c.outline(OUTLINE);
+    c
+}
+
+/// Weaver: psionic tentacle node. 26x30.
+fn paint_weaver(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(26, 30);
+    let (dx, dy) = facing_vec(f);
+    let cx = 13.0;
+    let cy = 17.0;
+    // Root tentacles.
+    for k in 0..4 {
+        let off = -5.0 + k as f32 * 3.3;
+        c.line(cx + off, cy + 4.0, cx + off * 1.5, cy + 10.0, 1.3, rgba([58, 48, 62]));
+    }
+    // Bulb body.
+    c.ellipse_shaded(cx, cy, 5.5, 6.0, CHITIN);
+    c.ellipse_shaded(cx, cy - 6.0, 4.0, 3.5, CHITIN_LIGHT);
+    c.line(cx - 3.0, cy + 2.0, cx + 3.0, cy + 3.0, 1.4, rgba(team));
+    // Floating rift shards orbiting toward facing.
+    let a0 = if frame == 0 { 0.0f32 } else { 0.8 };
+    for k in 0..3 {
+        let a = a0 + k as f32 * 2.1;
+        let px = cx + dx * 6.0 + a.cos() * 3.5;
+        let py = cy - 8.0 + dy * 3.0 + a.sin() * 2.0;
+        c.line(px, py - 1.5, px, py + 1.5, 1.2, rgba(KYTH_GLOW));
+    }
+    if dy > -0.4 {
+        c.ellipse(cx + dx * 1.5, cy - 6.0, 1.6, 1.1, rgba(KYTH_GLOW));
+    }
+    c.outline(OUTLINE);
+    c
+}
+
+/// Organic mound base shared by Kyth structures.
+fn kyth_mound(c: &mut Canvas, cx: f32, cy: f32, rx: f32, ry: f32, team: [u8; 3]) {
+    c.ellipse_shaded(cx, cy, rx, ry, MEMBRANE);
+    c.ellipse_shaded(cx, cy - ry * 0.25, rx * 0.8, ry * 0.7, CHITIN);
+    // Creep skirt.
+    c.ellipse(cx, cy + ry * 0.45, rx * 1.15, ry * 0.5, [92, 70, 96, 160]);
+    // Team veins.
+    for k in 0..3 {
+        let a = k as f32 * 2.1 + 0.6;
+        c.line(
+            cx,
+            cy + ry * 0.3,
+            cx + a.cos() * rx * 0.9,
+            cy + ry * 0.35 + a.sin().abs() * ry * 0.5,
+            1.3,
+            rgba(team),
+        );
+    }
+}
+
+/// Hive: the swarm HQ — big mound with chimney spires. 100x78.
+fn paint_hive(team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(100, 78);
+    kyth_mound(&mut c, 50.0, 52.0, 44.0, 22.0, team);
+    // Spires.
+    for (sx, sh) in [(30.0f32, 22.0f32), (52.0, 30.0), (70.0, 18.0)] {
+        c.line(sx, 44.0, sx - 2.0, 44.0 - sh, 4.5, rgba(CHITIN_LIGHT));
+        c.ellipse(sx - 2.5, 42.0 - sh, 2.0, 2.4, rgba(KYTH_GLOW));
+    }
+    // Mouth.
+    c.ellipse(50.0, 60.0, 10.0, 5.0, rgba([44, 34, 48]));
+    c.ellipse(50.0, 59.0, 7.0, 3.0, rgba(KYTH_GLOW));
+    c.outline(OUTLINE);
+    c
+}
+
+/// Spire: supply crystal spike. 64x60.
+fn paint_spire(team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(64, 60);
+    kyth_mound(&mut c, 32.0, 46.0, 26.0, 12.0, team);
+    // Twisting spike.
+    c.line(32.0, 42.0, 28.0, 20.0, 6.0, rgba(CHITIN));
+    c.line(28.0, 20.0, 33.0, 6.0, 4.0, rgba(CHITIN_LIGHT));
+    c.ellipse(33.0, 5.0, 2.6, 3.2, rgba(team));
+    c.ellipse(30.0, 24.0, 1.8, 1.8, rgba(KYTH_GLOW));
+    c.outline(OUTLINE);
+    c
+}
+
+/// Sap Well: membrane pool over a geyser. 68x56.
+fn paint_sapwell(team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(68, 56);
+    kyth_mound(&mut c, 34.0, 40.0, 30.0, 14.0, team);
+    // Sap pool.
+    c.ellipse(34.0, 36.0, 14.0, 6.5, rgba([54, 42, 58]));
+    c.ellipse(34.0, 36.0, 10.0, 4.5, rgba([120, 220, 120]));
+    c.ellipse(31.0, 34.5, 3.0, 1.5, rgba([200, 255, 180]));
+    // Siphon tube.
+    c.line(46.0, 32.0, 54.0, 20.0, 3.5, rgba(CHITIN_LIGHT));
+    c.ellipse(54.5, 18.5, 2.4, 2.6, rgba(KYTH_GLOW));
+    c.outline(OUTLINE);
+    c
+}
+
+/// Warren: infantry mound with a birthing maw. 96x66.
+fn paint_warren(team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(96, 66);
+    kyth_mound(&mut c, 48.0, 44.0, 42.0, 20.0, team);
+    // Maw.
+    c.ellipse(48.0, 52.0, 13.0, 6.0, rgba([44, 34, 48]));
+    for k in 0..5 {
+        let x = 38.0 + k as f32 * 5.0;
+        c.line(x, 48.0, x + 1.0, 52.0, 1.3, rgba(CHITIN_LIGHT)); // teeth
+    }
+    // Back plates.
+    c.ellipse_shaded(34.0, 30.0, 9.0, 5.0, CHITIN_LIGHT);
+    c.ellipse_shaded(60.0, 28.0, 11.0, 6.0, CHITIN_LIGHT);
+    c.outline(OUTLINE);
+    c
+}
+
+/// Incubator: egg cluster. 96x70.
+fn paint_incubator(team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(96, 70);
+    kyth_mound(&mut c, 48.0, 50.0, 42.0, 19.0, team);
+    // Eggs.
+    for (ex, ey, r) in [(32.0f32, 36.0f32, 8.0f32), (52.0, 30.0, 10.0), (68.0, 38.0, 7.0)] {
+        c.ellipse_shaded(ex, ey, r, r * 1.15, MEMBRANE);
+        c.ellipse(ex - r * 0.3, ey - r * 0.4, r * 0.35, r * 0.4, rgba(scale_rgb(MEMBRANE, 1.3)));
+        c.ellipse(ex, ey + r * 0.3, r * 0.4, r * 0.3, rgba(KYTH_GLOW));
+    }
+    c.outline(OUTLINE);
+    c
+}
+
+/// Roost: flyer perch tower. 84x74.
+fn paint_roost(team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(84, 74);
+    kyth_mound(&mut c, 42.0, 56.0, 36.0, 16.0, team);
+    // Tall perch stalk with hanging pods.
+    c.line(42.0, 52.0, 38.0, 14.0, 7.0, rgba(CHITIN));
+    c.line(38.0, 16.0, 24.0, 24.0, 3.0, rgba(CHITIN_LIGHT));
+    c.line(38.0, 14.0, 56.0, 20.0, 3.0, rgba(CHITIN_LIGHT));
+    for (px, py) in [(24.0f32, 28.0f32), (56.0, 24.0)] {
+        c.ellipse_shaded(px, py + 3.0, 4.0, 5.0, MEMBRANE);
+        c.ellipse(px, py + 5.0, 1.8, 2.0, rgba(KYTH_GLOW));
+    }
+    c.ellipse(37.0, 12.0, 3.0, 2.4, rgba(team));
+    c.outline(OUTLINE);
+    c
+}
+
+/// Cortex: exposed brain dome. 66x56.
+fn paint_cortex(team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(66, 56);
+    kyth_mound(&mut c, 33.0, 42.0, 28.0, 13.0, team);
+    // Brain.
+    c.ellipse_shaded(33.0, 26.0, 16.0, 12.0, [186, 142, 160]);
+    for k in 0..4 {
+        let y = 18.0 + k as f32 * 5.0;
+        c.line(20.0 + k as f32 * 2.0, y, 46.0 - k as f32 * 2.0, y + 2.0, 1.2, rgba([150, 108, 128]));
+    }
+    // Psionic sparks.
+    c.ellipse(33.0, 14.0, 2.0, 2.0, rgba(KYTH_GLOW));
+    c.line(28.0, 18.0, 26.0, 12.0, 1.1, rgba(KYTH_GLOW));
+    c.line(40.0, 17.0, 43.0, 11.0, 1.1, rgba(KYTH_GLOW));
     c.outline(OUTLINE);
     c
 }

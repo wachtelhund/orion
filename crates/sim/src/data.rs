@@ -61,6 +61,9 @@ pub struct UnitRaw {
     /// Tooltip flavor line.
     #[serde(default)]
     pub desc: String,
+    /// Which race this belongs to (index into race_names).
+    #[serde(default)]
+    pub race: u8,
 }
 
 #[derive(Debug, Deserialize)]
@@ -93,6 +96,9 @@ pub struct BuildingRaw {
     /// Tooltip flavor line.
     #[serde(default)]
     pub desc: String,
+    /// Which race this belongs to (index into race_names).
+    #[serde(default)]
+    pub race: u8,
 }
 
 #[derive(Debug, Deserialize)]
@@ -111,6 +117,9 @@ pub struct ResearchRaw {
 #[derive(Debug, Deserialize)]
 pub struct RaceRaw {
     pub name: String,
+    /// Playable race names; defs reference these by index via `race`.
+    #[serde(default)]
+    pub race_names: Vec<String>,
     pub units: Vec<UnitRaw>,
     pub buildings: Vec<BuildingRaw>,
     #[serde(default)]
@@ -151,6 +160,7 @@ pub struct UnitDef {
     /// Index into buildings.
     pub requires: Option<DefId>,
     pub desc: String,
+    pub race: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -173,6 +183,7 @@ pub struct BuildingDef {
     /// Indices into `GameData::research`.
     pub researches: Vec<u8>,
     pub desc: String,
+    pub race: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -191,6 +202,7 @@ pub struct ResearchDef {
 #[derive(Debug)]
 pub struct GameData {
     pub race_name: String,
+    pub race_names: Vec<String>,
     pub units: Vec<UnitDef>,
     pub buildings: Vec<BuildingDef>,
     pub research: Vec<ResearchDef>,
@@ -243,6 +255,7 @@ impl GameData {
                 energy_max: u.energy,
                 requires: u.requires.as_deref().map(building_index),
                 desc: u.desc.clone(),
+                race: u.race,
             })
             .collect();
 
@@ -280,6 +293,7 @@ impl GameData {
                 requires: b.requires.as_deref().map(building_index),
                 researches: b.researches.iter().map(|r| research_index(r)).collect(),
                 desc: b.desc.clone(),
+                race: b.race,
             })
             .collect();
 
@@ -298,7 +312,28 @@ impl GameData {
             })
             .collect();
 
-        GameData { race_name: raw.name, units, buildings, research }
+        let race_names = if raw.race_names.is_empty() {
+            vec![raw.name.clone()]
+        } else {
+            raw.race_names.clone()
+        };
+        GameData { race_name: raw.name, race_names, units, buildings, research }
+    }
+
+    /// First headquarters building of a race.
+    pub fn hq_of_race(&self, race: u8) -> DefId {
+        self.buildings
+            .iter()
+            .position(|b| b.headquarters && b.race == race)
+            .expect("race has no headquarters") as DefId
+    }
+
+    /// First harvester unit of a race.
+    pub fn worker_of_race(&self, race: u8) -> DefId {
+        self.units
+            .iter()
+            .position(|u| u.harvester && u.race == race)
+            .expect("race has no worker") as DefId
     }
 
     pub fn unit_tag(&self, tag: &str) -> DefId {

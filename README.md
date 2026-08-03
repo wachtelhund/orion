@@ -8,12 +8,12 @@ See [SPEC.md](SPEC.md) for the full product specification and
 
 ## Status
 
-Playable single-player game:
+Playable game — single player vs AI, or 1v1 multiplayer (direct connect):
 
 - Full macro loop: minerals + plasma (gas) → build → tech → army → destroy
   the enemy base
-- One race (Vanguard Combine), authored entirely in
-  `crates/sim/assets/units.ron`:
+- **Two asymmetric races**, authored entirely in `crates/sim/assets/units.ron`:
+- Vanguard Combine (industrial):
   - Units: Fabricator (worker), Trooper, Vanguard (melee), **Breaker (siege
     tank with deploy mode + splash)**, **Skywing (flyer, hits air+ground)**,
     **Stormcaller (spellcaster: Plasma Storm AoE)**
@@ -21,6 +21,18 @@ Playable single-player game:
     (tanks)**, **Aerie (flyers)**, **Archive (research: Weapons/Armor +1/+2)**
   - Tech tree requirements (Forge needs Muster Hall, Aerie needs Forge,
     Stormcaller needs Archive)
+- **Kyth Assembly** (swarm): Drone, Skitter (cheap fast melee), Spitter
+  (ranged anti-air), Ravager (splash melee heavy), Wisp (flyer), Weaver
+  (caster); Hive / Spire / Sap Well / Warren / Incubator / Roost / Cortex
+- **Multiplayer**: online via **lobby codes** (a Cloudflare Worker relay —
+  host gets a 5-letter code, opponent types it; no IPs needed), or LAN
+  direct-connect (host screen shows your LAN IP). TCP/WebSocket lockstep,
+  input-delay 4 ticks, checksum desync detection; menus don't pause MP
+- Race select + enemy race choice on the difficulty screen
+- End-of-match stats (time, units built/lost, resources mined)
+- Bot personalities (seeded timing/cap offsets) so games vary; escalation so
+  they always finish; balance measured by
+  `cargo run --release -p orion-sim --example balance`
 - One map ("Meridian"): two high-ground mains, ramps, chokepoints, geysers,
   fog of war with the high-ground vision rule
 - Main menu (vs AI at three difficulties), pause menu with settings:
@@ -60,6 +72,18 @@ cargo run --release -p orion-client -- --shot out.ppm --shot-ticks 6480 \
 # Scripted human-play test: builds a base through the real command path,
 # captures a frame series, asserts the buildings went up
 cargo run --release -p orion-client -- --script prefix
+
+# THE QA workhorse: N full bot matches headless with invariant checks,
+# shadow-determinism runs, balance report and per-game CSV. Non-zero exit
+# on any violation.
+cargo run --release -p orion-sim --example soak -- 32 report.csv
+
+# Balance-only summary across matchups
+cargo run --release -p orion-sim --example balance
+
+# Multiplayer smokes: two processes over LAN loopback or the live relay
+orion-client --mp-auto host & orion-client --mp-auto join
+orion-client --mp-auto host-relay:CODE & orion-client --mp-auto join-relay:CODE
 ```
 
 All art is generated at startup — procedural SC1-style pixel sprites (units
