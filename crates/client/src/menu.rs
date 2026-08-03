@@ -36,10 +36,11 @@ enum MenuAction {
     SfxVol(f32),
     CycleRace,
     CycleEnemyRace,
-    HostMp,
-    JoinMp,
-    HostRelay,
+    CreateLobby { private: bool },
     JoinRelay,
+    JoinListed(usize),
+    FocusName,
+    FocusCode,
     CancelMp,
     Rebind(Action),
 }
@@ -122,18 +123,44 @@ impl App {
                 if self.mp_waiting.is_some() {
                     stack(vec![("CANCEL".into(), MenuAction::CancelMp)], h * 0.64);
                 } else {
-                    let mut rows = vec![(format!("YOUR RACE: {my}"), MenuAction::CycleRace)];
-                    if !self.settings.relay_url.is_empty() {
-                        rows.push(("HOST ONLINE (LOBBY CODE)".into(), MenuAction::HostRelay));
+                    let name_marker = if self.name_focus { "_" } else { "" };
+                    let code_marker = if self.name_focus { "" } else { "_" };
+                    let mut rows = vec![
+                        (
+                            format!("NAME: {}{}", self.settings.player_name, name_marker),
+                            MenuAction::FocusName,
+                        ),
+                        (format!("YOUR RACE: {my}"), MenuAction::CycleRace),
+                        ("CREATE LOBBY".into(), MenuAction::CreateLobby { private: false }),
+                        (
+                            "CREATE PRIVATE LOBBY".into(),
+                            MenuAction::CreateLobby { private: true },
+                        ),
+                    ];
+                    // Public lobbies, click to join.
+                    for (k, l) in self.lobby_list.iter().take(4).enumerate() {
+                        let race = self
+                            .state
+                            .data
+                            .race_names
+                            .get(l.race as usize)
+                            .map(|r| r.split_whitespace().next().unwrap_or("").to_string())
+                            .unwrap_or_default()
+                            .to_uppercase();
                         rows.push((
-                            format!("JOIN CODE: {}_", self.ip_input.to_uppercase()),
-                            MenuAction::JoinRelay,
+                            format!("JOIN  {}  ({race})", l.name),
+                            MenuAction::JoinListed(k),
                         ));
                     }
-                    rows.push(("HOST LAN (DIRECT)".into(), MenuAction::HostMp));
-                    rows.push((format!("JOIN IP: {}_", self.ip_input), MenuAction::JoinMp));
+                    rows.push((
+                        format!("PRIVATE CODE: {}{}", self.code_input, code_marker),
+                        MenuAction::FocusCode,
+                    ));
+                    if self.code_input.trim().len() >= 4 {
+                        rows.push(("JOIN PRIVATE".into(), MenuAction::JoinRelay));
+                    }
                     rows.push(("BACK".into(), MenuAction::Back));
-                    stack(rows, h * 0.30);
+                    stack(rows, h * 0.24);
                 }
             }
             MenuPage::EscRoot => {
@@ -275,23 +302,18 @@ impl App {
             let ts = self.ts(1.5);
             let mut lines: Vec<String> = Vec::new();
             if self.mp_waiting.is_some() {
-                if let Some(code) = &self.mp_lobby_code {
-                    lines.push(format!("LOBBY CODE:  {code}"));
-                    lines.push("TELL YOUR OPPONENT - THEY PICK JOIN CODE.".into());
-                } else {
-                    lines.push(format!(
-                        "WAITING ON PORT {}...",
-                        orion_sim::net::DEFAULT_PORT
-                    ));
-                    if let Some(ip) = orion_sim::net::local_ip() {
-                        lines.push(format!("YOUR LAN IP:  {ip}"));
+                if self.mp_private {
+                    if let Some(code) = &self.mp_lobby_code {
+                        lines.push(format!("PRIVATE LOBBY CODE:  {code}"));
+                        lines.push("SHARE IT - ONLY PEOPLE WITH THE CODE CAN JOIN.".into());
                     }
-                    lines.push("THE OTHER PLAYER PICKS JOIN IP.".into());
+                } else {
+                    lines.push("LOBBY OPEN - WAITING FOR AN OPPONENT...".into());
+                    lines.push("YOUR GAME IS LISTED FOR EVERYONE TO JOIN.".into());
                 }
             } else {
-                lines.push("ONLINE: HOST GETS A 5-LETTER LOBBY CODE.".into());
-                lines.push("LAN: HOST DIRECT AND SHARE YOUR IP.".into());
-                lines.push("TYPE TO FILL THE CODE / IP FIELD.".into());
+                lines.push("CREATE A LOBBY, OR CLICK ONE BELOW TO JOIN.".into());
+                lines.push("PRIVATE LOBBIES ARE JOINED BY THEIR CODE.".into());
             }
             if let Some(err) = &self.mp_error {
                 lines.push(String::new());
@@ -300,7 +322,8 @@ impl App {
             for (k, l) in lines.iter().enumerate() {
                 let lw = self.gfx.text_width(ts, l);
                 let color = if l.starts_with("CONNECTION") { [1.0, 0.5, 0.4, 1.0] } else { dim };
-                self.gfx.text(out, cx - lw * 0.5, h * 0.22 + k as f32 * 22.0 * ui, ts, color, l);
+                // Above the button stack (stack starts at h*0.24).
+                self.gfx.text(out, cx - lw * 0.5, h * 0.172 + k as f32 * 22.0 * ui, ts, color, l);
             }
         }
         if let MenuPage::Settings { .. } = self.page {
@@ -351,6 +374,22 @@ impl App {
             let lw = self.gfx.text_width(ts, &b.label);
             let ly = b.y + b.h * 0.5 - ts * 3.5;
             self.gfx.text(out, b.x + b.w * 0.5 - lw * 0.5, ly, ts, white, &b.label);
+        }
+    }
+
+    /// Join the lobby whose code sits in the code field. Reached by the
+    /// JOIN PRIVATE button or by pressing Enter while typing the code.
+    pub(crate) fn join_private_lobby(&mut self) {
+        self.mp_error = None;
+        let code = self.code_input.trim().to_uppercase();
+        if code.len() < 4 {
+            self.mp_error = Some("type the lobby code first".into());
+        } else {
+            self.mp_waiting = Some(crate::relay::join_relay_async(
+                self.settings.relay_url.clone(),
+                code,
+                self.chosen_race,
+            ));
         }
     }
 
@@ -427,45 +466,36 @@ impl App {
                 }
                 self.settings.save();
             }
-            MenuAction::HostMp => {
+            MenuAction::CreateLobby { private } => {
                 self.mp_error = None;
-                match orion_sim::net::host_async(self.chosen_race, orion_sim::net::DEFAULT_PORT)
-                {
-                    Ok(rx) => self.mp_waiting = Some(rx),
-                    Err(e) => self.mp_error = Some(format!("cannot host: {e}")),
-                }
-            }
-            MenuAction::JoinMp => {
-                self.mp_error = None;
-                let addr = if self.ip_input.contains(':') {
-                    self.ip_input.clone()
-                } else {
-                    format!("{}:{}", self.ip_input, orion_sim::net::DEFAULT_PORT)
-                };
-                self.mp_waiting =
-                    Some(orion_sim::net::join_async(addr, self.chosen_race));
-            }
-            MenuAction::HostRelay => {
-                self.mp_error = None;
-                let (code, rx) = crate::relay::host_relay_async(
+                self.settings.save(); // persist the name
+                self.mp_private = private;
+                let (code, rx) = crate::relay::host_relay_async_full(
                     self.settings.relay_url.clone(),
+                    crate::relay::fresh_code(),
                     self.chosen_race,
+                    &self.settings.player_name,
+                    private,
                 );
                 self.mp_lobby_code = Some(code);
                 self.mp_waiting = Some(rx);
             }
-            MenuAction::JoinRelay => {
-                self.mp_error = None;
-                let code = self.ip_input.trim().to_uppercase();
-                if code.len() < 4 {
-                    self.mp_error = Some("type the lobby code first".into());
-                } else {
+            MenuAction::JoinRelay => self.join_private_lobby(),
+            MenuAction::JoinListed(k) => {
+                if let Some(l) = self.lobby_list.get(k) {
+                    self.mp_error = None;
                     self.mp_waiting = Some(crate::relay::join_relay_async(
                         self.settings.relay_url.clone(),
-                        code,
+                        l.code.clone(),
                         self.chosen_race,
                     ));
                 }
+            }
+            MenuAction::FocusName => {
+                self.name_focus = true;
+            }
+            MenuAction::FocusCode => {
+                self.name_focus = false;
             }
             MenuAction::CancelMp => {
                 self.mp_waiting = None;

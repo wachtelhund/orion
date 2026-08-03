@@ -13,16 +13,19 @@ All art and audio are procedurally generated at startup: zero asset files.
 
 ## Install
 
-Grab the latest build from **[Releases](../../releases)**:
+Grab the latest build from **[Releases](../../releases)** — everything is
+precompiled, no install step:
 
 | OS | File | Steps |
 |---|---|---|
-| macOS (Apple Silicon + Intel) | `orion-macos-universal.tar.gz` | `tar xzf`, then first launch: right-click `orion` → Open (unsigned binary), or `xattr -d com.apple.quarantine ./orion` |
-| Windows 10/11 | `orion-windows-x86_64.zip` | Unzip, run `orion.exe`. If SmartScreen objects: More info → Run anyway |
-| Linux (x86_64) | `orion-linux-x86_64.tar.gz` | `tar xzf && ./orion`. Needs Vulkan drivers + ALSA (`libasound2`) at runtime |
+| macOS (Apple Silicon + Intel) | `Orion-macOS.zip` | Unzip → double-click **Orion.app**. First launch only: right-click → Open (it isn't notarized) |
+| Windows 10/11 | `orion-windows-x86_64.zip` | Unzip → double-click **orion.exe**. If SmartScreen objects: More info → Run anyway |
+| Linux (x86_64) | `orion-linux-x86_64.tar.gz` | `tar xzf && ./orion` (needs Vulkan drivers + ALSA `libasound2`) |
 
-Multiplayer needs no setup: HOST ONLINE gives you a 5-letter lobby code,
-your opponent picks JOIN CODE. Settings live in `~/.orion-settings.ron`.
+Multiplayer needs zero setup and never shows an IP: **CREATE LOBBY** lists
+your game for anyone to click and join; **CREATE PRIVATE LOBBY** gives you a
+5-letter code that doubles as the password. Settings live in
+`~/.orion-settings.ron`.
 
 **Build from source** (any platform, Rust 1.80+):
 
@@ -55,10 +58,11 @@ Playable game — single player vs AI, or 1v1 multiplayer (direct connect):
 - **Kyth Assembly** (swarm): Drone, Skitter (cheap fast melee), Spitter
   (ranged anti-air), Ravager (splash melee heavy), Wisp (flyer), Weaver
   (caster); Hive / Spire / Sap Well / Warren / Incubator / Roost / Cortex
-- **Multiplayer**: online via **lobby codes** (a Cloudflare Worker relay —
-  host gets a 5-letter code, opponent types it; no IPs needed), or LAN
-  direct-connect (host screen shows your LAN IP). TCP/WebSocket lockstep,
-  input-delay 4 ticks, checksum desync detection; menus don't pause MP
+- **Multiplayer**: a live **lobby browser** (public games listed by player
+  name, one click to join) and **private lobbies** whose 5-letter code is
+  the password — all through a Cloudflare Worker relay, no IPs, no port
+  forwarding. WebSocket lockstep, input-delay 4 ticks, checksum desync
+  detection; menus don't pause MP
 - Race select + enemy race choice on the difficulty screen
 - End-of-match stats (time, units built/lost, resources mined)
 - Bot personalities (seeded timing/cap offsets) so games vary; escalation so
@@ -78,8 +82,8 @@ Playable game — single player vs AI, or 1v1 multiplayer (direct connect):
   all synthesized at startup (no asset files); volume sliders in settings
 - Flashing warnings with error sounds: NOT ENOUGH MINERALS / PLASMA /
   SUPPLY / ENERGY, CANNOT BUILD THERE, REQUIRES <building>
-- Deterministic lockstep-ready sim (fixed-point math, checksums, input-only
-  mutation) — multiplayer netcode not wired up yet (menu stub explains)
+- Deterministic lockstep sim (fixed-point math, checksums, input-only
+  mutation) — the property online multiplayer stands on
 
 ## Run
 
@@ -169,6 +173,8 @@ from identical inputs (the property lockstep multiplayer stands on), and the
 
 ## Deploy
 
-Desktop binaries only, no infrastructure yet. `cargo build --release` produces
-`target/release/orion-client` for the host platform. The matchmaker service
-(1v1 queue, password lobbies) is specified in SPEC.md but not built yet.
+Desktop binaries are cut by CI on `v*` tags (see Install above). The only
+server component is the Cloudflare Worker relay in `relay/` (lobby directory +
+WebSocket forwarding, free tier): `cd relay && npx wrangler deploy`. The
+client's relay URL lives in `~/.orion-settings.ron` (`relay_url`). Ranked
+matchmaking (1v1 queue) is specified in SPEC.md but not built yet.

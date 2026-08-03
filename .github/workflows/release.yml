@@ -19,7 +19,7 @@ jobs:
         include:
           - name: macos-universal
             os: macos-14
-            artifact: orion-macos-universal.tar.gz
+            artifact: Orion-macOS.zip
           - name: linux-x86_64
             os: ubuntu-22.04
             artifact: orion-linux-x86_64.tar.gz
@@ -36,19 +36,30 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
-      - name: Build (macOS universal)
+      - name: Build (macOS universal .app)
         if: matrix.name == 'macos-universal'
         run: |
           rustup target add x86_64-apple-darwin aarch64-apple-darwin
           cargo build --release -p orion-client --target aarch64-apple-darwin
           cargo build --release -p orion-client --target x86_64-apple-darwin
-          mkdir -p dist
+          APP="dist/Orion.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
           lipo -create \
             target/aarch64-apple-darwin/release/orion-client \
             target/x86_64-apple-darwin/release/orion-client \
-            -output dist/orion
-          cp README.md dist/
-          tar czf ${{ matrix.artifact }} -C dist orion README.md
+            -output "$APP/Contents/MacOS/orion"
+          cp crates/client/assets/mac/Info.plist "$APP/Contents/Info.plist"
+          # App icon: generated on the runner from a committed screenshot.
+          sips --cropToHeightWidth 760 760 docs/media/battle.png --out icon.png
+          mkdir -p Orion.iconset
+          for sz in 16 32 64 128 256 512; do
+            sips -z $sz $sz icon.png --out Orion.iconset/icon_${sz}x${sz}.png
+            sips -z $((sz*2)) $((sz*2)) icon.png --out Orion.iconset/icon_${sz}x${sz}@2x.png
+          done
+          iconutil -c icns Orion.iconset -o "$APP/Contents/Resources/orion.icns"
+          # Ad-hoc signature: without this, arm64 Macs refuse to launch at all.
+          codesign --force --deep -s - "$APP"
+          ditto -c -k --keepParent "$APP" ${{ matrix.artifact }}
 
       - name: Build (Linux)
         if: matrix.name == 'linux-x86_64'

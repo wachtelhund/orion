@@ -122,9 +122,18 @@ pub struct App {
     pub mp: Option<Lockstep>,
     pub mp_waiting: Option<std::sync::mpsc::Receiver<std::io::Result<Started>>>,
     pub mp_error: Option<String>,
-    pub ip_input: String,
+    /// LAN/dev only (mp-auto tests); never shown in the UI.
+    /// Join-code entry field.
+    pub code_input: String,
+    /// True while the name field has focus (typing edits the player name).
+    pub name_focus: bool,
     /// Set while hosting through the relay: show this code to the opponent.
     pub mp_lobby_code: Option<String>,
+    pub mp_private: bool,
+    /// Public lobby browser state.
+    pub lobby_list: Vec<crate::relay::LobbyInfo>,
+    pub lobby_fetch: Option<std::sync::mpsc::Receiver<Option<Vec<crate::relay::LobbyInfo>>>>,
+    pub lobby_fetch_at: Option<Instant>,
     /// Race picked for the human, and the enemy choice (0/1, 2 = random).
     pub chosen_race: u8,
     pub enemy_race_choice: u8,
@@ -251,8 +260,13 @@ impl App {
             mp: None,
             mp_waiting: None,
             mp_error: None,
-            ip_input: "127.0.0.1".into(),
+            code_input: String::new(),
+            name_focus: false,
             mp_lobby_code: None,
+            mp_private: false,
+            lobby_list: Vec::new(),
+            lobby_fetch: None,
+            lobby_fetch_at: None,
             chosen_race: 0,
             enemy_race_choice: 2,
             page: if headless { MenuPage::None } else { MenuPage::MainRoot },
@@ -580,23 +594,39 @@ impl App {
                 self.ctrl = m.state().control_key() || m.state().super_key();
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                // IP entry on the multiplayer page.
+                // Name / lobby-code entry on the multiplayer page.
                 if self.page == MenuPage::Multiplayer
                     && self.mp_waiting.is_none()
                     && event.state == ElementState::Pressed
                 {
                     if event.physical_key == PhysicalKey::Code(KeyCode::Backspace) {
-                        self.ip_input.pop();
+                        if self.name_focus {
+                            self.settings.player_name.pop();
+                        } else {
+                            self.code_input.pop();
+                        }
+                        return;
+                    }
+                    // Enter in the code field = join that private lobby.
+                    if event.physical_key == PhysicalKey::Code(KeyCode::Enter)
+                        && !self.name_focus
+                        && !self.code_input.trim().is_empty()
+                    {
+                        self.join_private_lobby();
                         return;
                     }
                     if let Some(text) = &event.text {
                         let mut used = false;
                         for ch in text.chars() {
-                            if ch.is_ascii_alphanumeric() || ch == '.' || ch == ':' || ch == '-'
-                            {
-                                if self.ip_input.len() < 24 {
-                                    self.ip_input.push(ch.to_ascii_lowercase());
+                            if self.name_focus {
+                                if (ch.is_ascii_alphanumeric() || ch == ' ')
+                                    && self.settings.player_name.len() < 14
+                                {
+                                    self.settings.player_name.push(ch.to_ascii_uppercase());
+                                    used = true;
                                 }
+                            } else if ch.is_ascii_alphanumeric() && self.code_input.len() < 8 {
+                                self.code_input.push(ch.to_ascii_uppercase());
                                 used = true;
                             }
                         }
@@ -1831,7 +1861,17 @@ impl App {
         // Automated MP smoke driver.
         if let Some(role) = self.mp_auto.clone() {
             if self.mp.is_none() && self.mp_waiting.is_none() {
-                if let Some(code) = role.strip_prefix("host-relay:") {
+                if let Some(code) = role.strip_prefix("host-pub:") {
+                    let (shown, rx) = crate::relay::host_relay_async_full(
+                        self.settings.relay_url.clone(),
+                        code.to_string(),
+                        0,
+                        "QA TEST LOBBY",
+                        false,
+                    );
+                    self.mp_lobby_code = Some(shown);
+                    self.mp_waiting = Some(rx);
+                } else if let Some(code) = role.strip_prefix("host-relay:") {
                     let (shown, rx) = crate::relay::host_relay_async_with_code(
                         self.settings.relay_url.clone(),
                         code.to_string(),
@@ -1875,6 +1915,28 @@ impl App {
                 );
                 self.finished = true;
                 return;
+            }
+        }
+
+        // Lobby browser: poll the directory while on the multiplayer page.
+        if self.page == MenuPage::Multiplayer
+            && !self.settings.relay_url.is_empty()
+            && self.mp.is_none()
+        {
+            if let Some(rx) = &self.lobby_fetch {
+                if let Ok(result) = rx.try_recv() {
+                    if let Some(list) = result {
+                        self.lobby_list = list;
+                    }
+                    self.lobby_fetch = None;
+                }
+            } else if self
+                .lobby_fetch_at
+                .map_or(true, |t| t.elapsed().as_secs_f32() > 3.0)
+            {
+                self.lobby_fetch =
+                    Some(crate::relay::fetch_lobbies_async(self.settings.relay_url.clone()));
+                self.lobby_fetch_at = Some(Instant::now());
             }
         }
 

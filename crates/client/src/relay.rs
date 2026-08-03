@@ -91,18 +91,73 @@ fn ws_url(base: &str, code: &str, role: &str) -> String {
     format!("{base}/ws/{code}?role={role}")
 }
 
-/// Host through the relay. Returns the lobby code immediately; the Started
-/// arrives on the receiver when an opponent joins.
-pub fn host_relay_async(base: String, my_race: u8) -> (String, Receiver<io::Result<Started>>) {
-    host_relay_async_with_code(base, fresh_code(), my_race)
+fn http_base(base: &str) -> String {
+    base.trim_end_matches('/')
+        .replacen("wss://", "https://", 1)
+        .replacen("ws://", "http://", 1)
 }
 
+/// A public lobby as advertised by the relay directory.
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct LobbyInfo {
+    pub code: String,
+    pub name: String,
+    pub race: u8,
+    #[allow(dead_code)]
+    pub age_s: u32,
+}
+
+/// Fetch the public lobby list (blocking — call in a thread).
+pub fn fetch_lobbies(base: &str) -> Option<Vec<LobbyInfo>> {
+    let url = format!("{}/lobbies", http_base(base));
+    let body = ureq::get(&url)
+        .timeout(std::time::Duration::from_secs(5))
+        .call()
+        .ok()?
+        .into_string()
+        .ok()?;
+    serde_json::from_str(&body).ok()
+}
+
+pub fn fetch_lobbies_async(base: String) -> Receiver<Option<Vec<LobbyInfo>>> {
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(fetch_lobbies(&base));
+    });
+    rx
+}
+
+/// Host a private (unlisted) lobby with a known code — used by --mp-auto
+/// smoke tests. Returns the code immediately; the Started arrives on the
+/// receiver when an opponent joins.
 pub fn host_relay_async_with_code(
     base: String,
     code: String,
     my_race: u8,
 ) -> (String, Receiver<io::Result<Started>>) {
-    let url = ws_url(&base, &code, "host");
+    host_relay_async_full(base, code, my_race, "COMMANDER", true)
+}
+
+/// Full host entry: public lobbies appear in the directory under `name`.
+pub fn host_relay_async_full(
+    base: String,
+    code: String,
+    my_race: u8,
+    name: &str,
+    private: bool,
+) -> (String, Receiver<io::Result<Started>>) {
+    let clean: String = name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == ' ')
+        .take(16)
+        .collect();
+    let url = format!(
+        "{}&name={}&race={}&private={}",
+        ws_url(&base, &code, "host"),
+        clean.replace(' ', "%20"),
+        my_race,
+        if private { 1 } else { 0 }
+    );
     let (tx, rx) = channel();
     std::thread::spawn(move || {
         let result = ws_net(&url).and_then(|net| {

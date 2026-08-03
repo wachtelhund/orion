@@ -143,9 +143,15 @@ summary. Client-side verification stays `--script` / `--shot` /
 
 `sim/net.rs`: lockstep over newline-framed RON, transport-agnostic `Net`
 (TCP threads, or WebSocket via `client/relay.rs`). The **lobby relay** is a
-Cloudflare Worker + Durable Object (`relay/` dir, `wrangler deploy`; one DO
-per 5-letter code relays frames between exactly two peers). The client's
-`Settings.relay_url` points at the deployed worker. Host binds DEFAULT_PORT,
+Cloudflare Worker + Durable Objects (`relay/` dir, `wrangler deploy`): one
+`Lobby` DO per 5-letter code relays frames between two peers, and a
+singleton `Directory` DO lists open public lobbies (`GET /lobbies`, JSON).
+The UI never shows IPs: public lobbies appear in a browser (player name +
+race, click to join, polled every 3s); private lobbies are joined by code —
+the code IS the password. TCP direct-connect still exists for the
+`--mp-auto host`/`join` loopback tests but has no UI. E2E lobby lifecycle
+check: `--mp-auto host-pub:CODE` + curl `/lobbies` + `--mp-auto
+join-relay:CODE`. Host binds DEFAULT_PORT,
 handshake exchanges seed + races, then both sides run `Lockstep::try_step`:
 local commands schedule INPUT_DELAY ticks ahead; a tick steps only when both
 players' command lists for it are present; checksums cross-check every 24
