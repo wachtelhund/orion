@@ -443,9 +443,8 @@ impl SpriteBook {
     }
 }
 
-/// Cliff wall height in canvas px = 2 * iso::ELEV_PX (canvas is 2x screen
-/// resolution at zoom 1).
-pub const CLIFF_H: i32 = 24;
+/// Cliff wall height in canvas px = SS * iso::ELEV_PX.
+pub const CLIFF_H: i32 = 48;
 
 pub fn build() -> (Vec<u8>, SpriteBook) {
     let mut p = Packer::new();
@@ -475,13 +474,16 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
     let diamond = p.place(&diamond_canvas(64, 32, [255, 255, 255, 255], false));
     let diamond_outline = p.place(&diamond_canvas(64, 32, [255, 255, 255, 255], true));
 
-    // Terrain.
-    let ground_low = std::array::from_fn(|i| p.place(&ground_tile(i as u32, GROUND_LOW)));
-    let ground_high = std::array::from_fn(|i| p.place(&ground_tile(i as u32 + 8, GROUND_HIGH)));
-    let ramp = std::array::from_fn(|i| p.place(&ramp_tile(i as u32)));
-    let rock = std::array::from_fn(|i| p.place(&rock_tile(i as u32)));
-    let cliff_left = p.place(&cliff_face(true));
-    let cliff_right = p.place(&cliff_face(false));
+    // Terrain (painted at SS; tiles are drawn at explicit world sizes so
+    // the region scale is informational here).
+    let ground_low =
+        std::array::from_fn(|i| p.place_s(&ground_tile(i as u32, GROUND_LOW, false), SS));
+    let ground_high =
+        std::array::from_fn(|i| p.place_s(&ground_tile(i as u32 + 8, GROUND_HIGH, true), SS));
+    let ramp = std::array::from_fn(|i| p.place_s(&ramp_tile(i as u32), SS));
+    let rock = std::array::from_fn(|i| p.place_s(&rock_tile(i as u32), SS));
+    let cliff_left = p.place_s(&cliff_face(true), SS);
+    let cliff_right = p.place_s(&cliff_face(false), SS);
 
     // Minerals + geyser.
     let minerals = std::array::from_fn(|i| p.place(&mineral_cluster(i as u32)));
@@ -912,40 +914,115 @@ fn diamond_canvas(w: i32, h: i32, c: Color, outline_only: bool) -> Canvas {
 }
 
 // --------------------------------------------------------------- terrain ----
+//
+// Dystopian wasteland rules: ground stays DARK (values ~40-95) and
+// low-contrast so units and buildings pop against it. Detail comes from
+// macro value-noise patches, hairline cracks, sparse debris and rust —
+// never from bright or busy texture.
 
-const GROUND_LOW: [[u8; 3]; 3] = [[96, 84, 66], [83, 72, 57], [108, 96, 76]];
-const GROUND_HIGH: [[u8; 3]; 3] = [[125, 114, 92], [110, 100, 80], [140, 130, 106]];
+const GROUND_LOW: [[u8; 3]; 3] = [[57, 51, 45], [48, 43, 38], [65, 58, 51]];
+const GROUND_HIGH: [[u8; 3]; 3] = [[84, 81, 75], [73, 70, 65], [94, 91, 84]];
 
-/// Dithered dirt diamond. Variants differ by noise salt; a few get pebbles.
-fn ground_tile(salt: u32, ramp_colors: [[u8; 3]; 3]) -> Canvas {
-    let mut c = Canvas::new(64, 32);
-    for y in 0..32 {
-        for x in 0..64 {
-            let dx = (x as f32 + 0.5 - 32.0) / 32.0;
-            let dy = (y as f32 + 0.5 - 16.0) / 16.0;
-            if dx.abs() + dy.abs() > 1.0 {
+/// Ashen wasteland diamond at 4x. Variants differ by salt; some carry
+/// cracks, scorch rings, debris or rust flecks. `high` adds slab seams.
+fn ground_tile(salt: u32, ramp_colors: [[u8; 3]; 3], high: bool) -> Canvas {
+    let (w, hh) = (128, 64);
+    let mut c = Canvas::new(w, hh);
+    let inside = |px: f32, py: f32| -> bool {
+        let dx = (px + 0.5 - w as f32 / 2.0) / (w as f32 / 2.0);
+        let dy = (py + 0.5 - hh as f32 / 2.0) / (hh as f32 / 2.0);
+        dx.abs() + dy.abs() <= 1.0
+    };
+    // Scorch patch position for the variants that get one.
+    let sc = hash2(salt as i32, 3, 902);
+    let (scx, scy) = (34.0 + (sc % 60) as f32, 18.0 + ((sc >> 8) % 28) as f32);
+    let scorched = salt % 4 == 3;
+    for y in 0..hh {
+        for x in 0..w {
+            if !inside(x as f32, y as f32) {
                 continue;
             }
+            // Macro patches so the ground isn't uniform static.
+            let macro_f = 0.90 + vnoise(x as f32, y as f32, 26.0, salt ^ 71) * 0.20;
             let h = hash2(x, y, salt);
             let t = match h % 16 {
                 0..=8 => ramp_colors[0],
                 9..=13 => ramp_colors[1],
                 _ => ramp_colors[2],
             };
-            c.set(x, y, rgba(t));
+            let mut f = macro_f;
+            if scorched {
+                let d = ((x as f32 - scx).powi(2) / 4.0 + (y as f32 - scy).powi(2)).sqrt();
+                if d < 14.0 {
+                    f *= 0.80 + 0.20 * (d / 14.0);
+                }
+            }
+            c.set(x, y, rgba(scale_rgb(t, f)));
+            // Sparse rust flecks bleed through the ash.
+            if h % 149 == 0 {
+                c.blend(x, y, [104, 58, 34, 70]);
+            }
         }
     }
-    // Pebble clusters on some variants.
-    if salt % 3 == 0 {
-        for k in 0..3 {
-            let h = hash2(k as i32, salt as i32, 5);
-            let px = 12.0 + (h % 40) as f32;
-            let py = 8.0 + ((h >> 8) % 16) as f32;
-            let dx = (px - 32.0) / 32.0;
-            let dy = (py - 16.0) / 16.0;
-            if dx.abs() + dy.abs() < 0.7 {
-                c.ellipse(px, py, 2.0, 1.2, rgba(scale_rgb(ramp_colors[1], 0.7)));
-                c.ellipse(px - 0.5, py - 0.5, 1.0, 0.6, rgba(scale_rgb(ramp_colors[2], 1.1)));
+    // Hairline cracks: dark random walks with a faint lit lip below. Some
+    // variants stay clean so the pattern doesn't tile into a scribble.
+    let n_cracks = match salt % 4 {
+        0 => 2,
+        1 | 2 => 1,
+        _ => 0,
+    };
+    for k in 0..n_cracks {
+        let h = hash2(k, salt as i32, 411);
+        let mut px = 24.0 + (h % 80) as f32;
+        let mut py = 12.0 + ((h >> 8) % 40) as f32;
+        let mut dir = ((h >> 16) % 628) as f32 / 100.0;
+        for s in 0..9 {
+            let step = 6.0 + (hash2(s, k, salt ^ 9) % 5) as f32;
+            let nx = px + dir.cos() * step;
+            let ny = py + dir.sin() * step * 0.5; // iso squash
+            if inside(px, py) && inside(nx, ny) {
+                c.line(px, py, nx, ny, 1.0, [30, 27, 24, 200]);
+                c.line(px, py + 1.0, nx, ny + 1.0, 1.0, [255, 255, 255, 14]);
+            }
+            px = nx;
+            py = ny;
+            dir += ((hash2(s, k + 7, salt) % 100) as f32 / 100.0 - 0.5) * 1.1;
+        }
+    }
+    // Debris: a few dark pebbles / plate shards.
+    for k in 0..3 {
+        let h = hash2(k as i32 + 40, salt as i32, 5);
+        let px = 20.0 + (h % 88) as f32;
+        let py = 12.0 + ((h >> 8) % 40) as f32;
+        if inside(px - 4.0, py - 2.0) && inside(px + 4.0, py + 2.0) {
+            if h % 3 == 0 && high {
+                // Broken plate fragment on the slabs.
+                c.poly(
+                    &[(px - 4.0, py), (px + 1.0, py - 2.5), (px + 5.0, py + 0.5), (px, py + 2.5)],
+                    rgba(scale_rgb(ramp_colors[1], 0.78)),
+                );
+                c.line(px - 3.0, py, px + 3.0, py - 1.0, 1.0, rgba(scale_rgb(ramp_colors[2], 1.05)));
+            } else {
+                c.dome(px, py, 2.4, 1.4, scale_rgb(ramp_colors[1], 0.82));
+            }
+        }
+    }
+    // High ground: faint slab seams parallel to the diamond edges.
+    if high {
+        for k in 0..2 {
+            let h = hash2(k + 9, salt as i32, 33);
+            let off = -16.0 + (h % 32) as f32;
+            let up = h % 2 == 0;
+            // Seam through (64+off, 32): slope +-0.5 in canvas space.
+            let (x0, y0) = (16.0f32, 32.0 + off + if up { -8.0 } else { 8.0 });
+            let sl = if up { 0.5 } else { -0.5 };
+            for s in 0..96 {
+                let px = x0 + s as f32;
+                let py = y0 + s as f32 * sl;
+                if inside(px, py) && inside(px, py + 1.0) {
+                    c.blend(px as i32, py as i32, [30, 28, 26, 90]);
+                    c.blend(px as i32, py as i32 + 1, [255, 255, 255, 12]);
+                }
             }
         }
     }
@@ -960,95 +1037,130 @@ fn scale_rgb(c: [u8; 3], f: f32) -> [u8; 3] {
     ]
 }
 
-/// Ramp: mid-tone with chevron striations.
+/// Ramp: reinforced causeway — dark plating with worn cross-treads.
 fn ramp_tile(salt: u32) -> Canvas {
-    let mut c = Canvas::new(64, 32);
-    let base = [112, 100, 78];
-    for y in 0..32 {
-        for x in 0..64 {
-            let dx = (x as f32 + 0.5 - 32.0) / 32.0;
-            let dy = (y as f32 + 0.5 - 16.0) / 16.0;
+    let (w, hh) = (128, 64);
+    let mut c = Canvas::new(w, hh);
+    let base = [78, 73, 64];
+    for y in 0..hh {
+        for x in 0..w {
+            let dx = (x as f32 + 0.5 - 64.0) / 64.0;
+            let dy = (y as f32 + 0.5 - 32.0) / 32.0;
             if dx.abs() + dy.abs() > 1.0 {
                 continue;
             }
             let h = hash2(x, y, salt + 40);
-            let stripe = ((x + y * 2) / 6) % 2 == 0;
-            let mut t = if stripe { scale_rgb(base, 0.88) } else { base };
-            if h % 13 == 0 {
-                t = scale_rgb(base, 1.12);
+            let macro_f = 0.92 + vnoise(x as f32, y as f32, 24.0, salt ^ 55) * 0.16;
+            // Cross-treads perpendicular to the slope.
+            let stripe = ((x + y * 2) / 12) % 2 == 0;
+            let mut f = if stripe { 0.88 } else { 1.0 };
+            // Tread lip highlight.
+            if (x + y * 2) % 24 == 0 {
+                f = 1.10;
             }
-            c.set(x, y, rgba(t));
+            if h % 31 == 0 {
+                f *= 0.82; // dents
+            }
+            c.set(x, y, rgba(scale_rgb(base, f * macro_f)));
+            if h % 173 == 0 {
+                c.blend(x, y, [104, 58, 34, 60]); // rust
+            }
         }
     }
     c
 }
 
-/// Impassable rock tile: dark cracked stone.
+/// Impassable rock tile: near-black basalt rubble.
 fn rock_tile(salt: u32) -> Canvas {
-    let mut c = Canvas::new(64, 32);
-    for y in 0..32 {
-        for x in 0..64 {
-            let dx = (x as f32 + 0.5 - 32.0) / 32.0;
-            let dy = (y as f32 + 0.5 - 16.0) / 16.0;
-            if dx.abs() + dy.abs() > 1.0 {
+    let (w, hh) = (128, 64);
+    let mut c = Canvas::new(w, hh);
+    let inside = |px: f32, py: f32| -> bool {
+        let dx = (px + 0.5 - 64.0) / 64.0;
+        let dy = (py + 0.5 - 32.0) / 32.0;
+        dx.abs() + dy.abs() <= 1.0
+    };
+    for y in 0..hh {
+        for x in 0..w {
+            if !inside(x as f32, y as f32) {
                 continue;
             }
             let h = hash2(x, y, salt + 80);
+            let macro_f = 0.88 + vnoise(x as f32, y as f32, 18.0, salt ^ 91) * 0.24;
             let t = match h % 16 {
-                0..=7 => [58, 54, 56],
-                8..=12 => [48, 45, 47],
-                _ => [70, 66, 68],
+                0..=7 => [50, 47, 50],
+                8..=12 => [42, 40, 43],
+                _ => [60, 56, 60],
             };
-            c.set(x, y, rgba(t));
+            c.set(x, y, rgba(scale_rgb(t, macro_f)));
         }
     }
-    // A boulder or two.
-    for k in 0..2 {
+    // Angular basalt chunks.
+    for k in 0..4 {
         let h = hash2(k, salt as i32, 31);
-        let px = 18.0 + (h % 28) as f32;
-        let py = 10.0 + ((h >> 8) % 12) as f32;
-        let dx = (px - 32.0) / 32.0;
-        let dy = (py - 16.0) / 16.0;
-        if dx.abs() + dy.abs() < 0.65 {
-            c.ellipse_shaded(px, py, 5.0, 3.0, [86, 80, 82]);
+        let px = 30.0 + (h % 68) as f32;
+        let py = 16.0 + ((h >> 8) % 30) as f32;
+        let r = 5.0 + ((h >> 16) % 6) as f32;
+        if inside(px - r, py) && inside(px + r, py) {
+            c.poly(
+                &[
+                    (px - r, py + r * 0.3),
+                    (px - r * 0.4, py - r * 0.55),
+                    (px + r * 0.6, py - r * 0.4),
+                    (px + r, py + r * 0.35),
+                    (px, py + r * 0.6),
+                ],
+                rgba([66, 62, 66]),
+            );
+            c.line(px - r * 0.4, py - r * 0.55, px + r * 0.6, py - r * 0.4, 1.2, rgba([88, 84, 88]));
+            c.line(px - r * 0.4, py - r * 0.5, px - r * 0.2, py + r * 0.5, 1.0, rgba([44, 41, 44]));
         }
     }
     c
 }
 
 /// Cliff wall face hanging under a tile's lower-left or lower-right edge.
-/// Canvas is 64x(32+CLIFF_H); the wall occupies one half, following the
-/// diamond's bottom edge, extruded down by CLIFF_H. Rock strata + bright rim.
+/// Canvas is 128x(64+CLIFF_H); the wall occupies one half, following the
+/// diamond's bottom edge, extruded down by CLIFF_H. Sediment strata warped
+/// by noise, occasional rusted support beams, bright top rim fading to
+/// near-black at the base.
 fn cliff_face(left: bool) -> Canvas {
-    let mut c = Canvas::new(64, 32 + CLIFF_H);
-    for x in 0..64i32 {
-        let on_half = if left { x < 32 } else { x >= 32 };
+    let mut c = Canvas::new(128, 64 + CLIFF_H);
+    for x in 0..128i32 {
+        let on_half = if left { x < 64 } else { x >= 64 };
         if !on_half {
             continue;
         }
-        // Bottom edge of the diamond at this column.
-        let dx = (x as f32 + 0.5 - 32.0) / 32.0;
-        let edge_y = 16.0 + 16.0 * (1.0 - dx.abs());
+        let dx = (x as f32 + 0.5 - 64.0) / 64.0;
+        let edge_y = 32.0 + 32.0 * (1.0 - dx.abs());
+        // Rusted support beams punctuate long walls.
+        let beam = hash2(x / 14, 0, if left { 61 } else { 62 }) % 5 == 0 && x % 14 < 3;
         for wy in 0..CLIFF_H {
             let y = edge_y as i32 + wy;
             let h = hash2(x, wy, if left { 7 } else { 8 });
-            let strata = (wy / 4) % 2 == 0;
-            let base: [u8; 3] = if left { [70, 62, 54] } else { [88, 78, 66] };
-            let mut t = if strata { base } else { scale_rgb(base, 0.85) };
-            if h % 11 == 0 {
-                t = scale_rgb(base, 1.15);
+            let base: [u8; 3] = if left { [58, 52, 46] } else { [74, 66, 57] };
+            // Strata bands displaced by noise so they undulate.
+            let warp = (vnoise(x as f32, 0.0, 20.0, 313) * 8.0) as i32;
+            let strata = ((wy + warp) / 8) % 2 == 0;
+            let mut f = if strata { 1.0 } else { 0.86 };
+            if h % 19 == 0 {
+                f *= 1.14;
             }
-            if h % 17 == 0 {
-                t = scale_rgb(base, 0.7);
+            if h % 23 == 0 {
+                f *= 0.74;
             }
-            // Bright rim where the wall meets the top surface.
-            if wy == 0 {
-                t = scale_rgb(base, 1.45);
+            if beam {
+                f *= 0.62; // dark girder inset
             }
-            if wy == CLIFF_H - 1 {
-                t = scale_rgb(base, 0.55);
+            // Depth: fade toward the base; bright sunlit rim at the top.
+            let depth = wy as f32 / CLIFF_H as f32;
+            f *= 1.0 - depth * 0.45;
+            if wy <= 1 {
+                f = 1.55;
             }
-            c.set(x, y, rgba(t));
+            c.set(x, y, rgba(scale_rgb(base, f)));
+            if beam && h % 7 == 0 {
+                c.blend(x, y, [110, 60, 34, 90]); // rust bleeding off the girder
+            }
         }
     }
     c

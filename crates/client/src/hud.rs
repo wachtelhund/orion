@@ -532,13 +532,13 @@ impl App {
             for x in 0..map.width {
                 let t = TilePos::new(x, y);
                 let c = match map.kind_at(x, y) {
-                    TileKind::Blocked => [0.15, 0.14, 0.15],
-                    TileKind::Ramp => [0.42, 0.37, 0.28],
+                    TileKind::Blocked => [0.11, 0.10, 0.11],
+                    TileKind::Ramp => [0.29, 0.27, 0.23],
                     TileKind::Ground => {
                         if map.elev_at(x, y) > 0 {
-                            [0.45, 0.41, 0.33]
+                            [0.32, 0.31, 0.28]
                         } else {
-                            [0.33, 0.30, 0.25]
+                            [0.21, 0.19, 0.17]
                         }
                     }
                 };
