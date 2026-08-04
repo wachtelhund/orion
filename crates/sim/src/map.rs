@@ -530,41 +530,63 @@ pub fn thornwood() -> Map {
     };
     rocks(&mut map, &[(2, 50), (3, 50), (4, 50), (5, 50)]);
 
-    // Sparse forests: hash-scattered singles with guaranteed gaps (no
-    // tree may touch another orthogonally), placed in three mirrored
-    // bands between the bases and the center. Armies squeeze through;
-    // sight does not.
-    let bands: [(i32, i32, i32, i32); 3] = [
-        (34, 8, 18, 22),  // north approach woods
-        (12, 48, 16, 18), // between natural and third
-        (40, 40, 16, 16), // center woods
+    // Forests: organic blobs, not stamped rectangles. Each grove is a
+    // set of overlapping ellipses with radial density falloff — dense
+    // ragged cores thinning to scattered edge trees. Adjacency rule:
+    // clumps are fine but no 2x2 solid block may form, so an army can
+    // always seep through while sight cannot.
+    let groves: [(i32, i32, i32, i32); 4] = [
+        // (center x, center y, radius x, radius y) — mirrored below.
+        (42, 16, 11, 7),  // north approach woods
+        (18, 55, 8, 10),  // between natural and third
+        (46, 46, 9, 8),   // center-west woods (mirror = center-east)
+        (60, 12, 6, 5),   // pocket grove at the main's shoulder
     ];
-    let mut tree_set: Vec<i32> = Vec::new();
-    for &(bx, by, bw, bh) in &bands {
-        for y in by..by + bh {
-            for x in bx..bx + bw {
-                if atlas_free_hash(x, y) % 10 >= 3 {
+    let mut occupied: Vec<i32> = Vec::new();
+    for &(cx, cy, rx, ry) in &groves {
+        for y in cy - ry..=cy + ry {
+            for x in cx - rx..=cx + rx {
+                if !map.in_bounds(x, y) {
                     continue;
                 }
-                if !map.in_bounds(x, y) || map.kind[(y * w + x) as usize] != TileKind::Ground {
+                if map.kind[(y * w + x) as usize] != TileKind::Ground
+                    || map.elev[(y * w + x) as usize] != 0
+                {
                     continue;
                 }
-                if map.elev[(y * w + x) as usize] != 0 {
+                // Radial density: ~85% in the core fading to ~15% at the
+                // rim, plus hash jitter for ragged edges.
+                let dx = (x - cx) * 100 / rx.max(1);
+                let dy = (y - cy) * 100 / ry.max(1);
+                let d = dx * dx + dy * dy; // 0..10000 inside the ellipse
+                if d > 10000 {
                     continue;
                 }
-                // Enforce breathing room: skip if any orthogonal
-                // neighbor (or its mirror partner) already has a tree.
+                let density = 85 - d * 70 / 10000; // 85% core, 15% rim
+                if (atlas_free_hash(x, y) % 100) as i32 >= density {
+                    continue;
+                }
                 let (mx, my) = (w - 1 - x, h - 1 - y);
-                let touches = |set: &Vec<i32>, tx: i32, ty: i32| {
-                    [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
-                        .iter()
-                        .any(|(dx, dy)| set.contains(&((ty + dy) * w + tx + dx)))
+                // Rule: would placing here create ANY 2x2 fully-occupied
+                // fully-occupied square among the four squares touching
+                // this tile?
+                let makes_block = |set: &Vec<i32>, tx: i32, ty: i32| {
+                    let at = |ax: i32, ay: i32| {
+                        (ax == tx && ay == ty) || set.contains(&(ay * w + ax))
+                    };
+                    (0..4).any(|q| {
+                        let (ox, oy) = [(0, 0), (-1, 0), (0, -1), (-1, -1)][q];
+                        at(tx + ox, ty + oy)
+                            && at(tx + ox + 1, ty + oy)
+                            && at(tx + ox, ty + oy + 1)
+                            && at(tx + ox + 1, ty + oy + 1)
+                    })
                 };
-                if touches(&tree_set, x, y) || touches(&tree_set, mx, my) {
+                if makes_block(&occupied, x, y) || makes_block(&occupied, mx, my) {
                     continue;
                 }
-                tree_set.push(y * w + x);
-                tree_set.push(my * w + mx);
+                occupied.push(y * w + x);
+                occupied.push(my * w + mx);
                 map.trees.push(TilePos::new(x, y));
                 map.trees.push(TilePos::new(mx, my));
             }
