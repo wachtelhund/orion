@@ -48,6 +48,7 @@ enum MenuAction {
     CancelSearch,
     OpenReplays,
     PlayReplay(usize),
+    OpenUpdate,
     Rebind(Action),
 }
 
@@ -86,6 +87,15 @@ impl App {
         };
         match self.page {
             MenuPage::MainRoot => {
+                if let Some((tag, _)) = &self.update {
+                    stack(
+                        vec![(
+                            format!("UPDATE {} AVAILABLE - DOWNLOAD", tag.to_uppercase()),
+                            MenuAction::OpenUpdate,
+                        )],
+                        h * 0.345,
+                    );
+                }
                 stack(
                     vec![
                         ("PLAY VS AI".into(), MenuAction::OpenDifficulty),
@@ -226,7 +236,7 @@ impl App {
             }
             MenuPage::Settings { .. } => {
                 let s = &self.settings;
-                let y0 = h * 0.22;
+                let y0 = h * 0.17;
                 let rows = vec![
                     (
                         format!("FULLSCREEN: {}", if s.fullscreen { "ON" } else { "OFF" }),
@@ -326,10 +336,47 @@ impl App {
         self.gfx.quad(out, 0.0, 0.0, w, h, [0.01, 0.01, 0.02, 0.72]);
 
         let white = [0.92, 0.92, 0.88, 1.0];
-        let dim = [0.6, 0.62, 0.66, 1.0];
-        let accent = [0.35, 0.62, 1.0, 1.0];
+        let dim = [0.66, 0.7, 0.76, 1.0];
+        let gold = [0.95, 0.78, 0.25, 1.0];
+        let book = &self.gfx.book;
 
-        // Title.
+        // Dialog panel: navy tech plate framed in gold, sized around the
+        // button stack (plus headroom for page copy).
+        let buttons = self.menu_buttons();
+        if !buttons.is_empty() && self.page != MenuPage::MainRoot {
+            let mut x0 = f32::MAX;
+            let mut y0 = f32::MAX;
+            let mut x1 = f32::MIN;
+            let mut y1 = f32::MIN;
+            for b in &buttons {
+                x0 = x0.min(b.x);
+                y0 = y0.min(b.y);
+                x1 = x1.max(b.x + b.w);
+                y1 = y1.max(b.y + b.h);
+            }
+            let pad = 26.0 * ui;
+            let head = 64.0 * ui; // room for copy above the stack
+            if matches!(self.page, MenuPage::Settings { .. }) {
+                // The keybind label columns are text, not buttons — the
+                // panel must cover them too.
+                x0 = x0.min(cx - 345.0 * ui);
+                x1 = x1.max(cx + 345.0 * ui);
+            }
+            let (px, py) = (x0 - pad, y0 - pad - head);
+            let (pw, ph) = (x1 - x0 + pad * 2.0, y1 - y0 + pad * 2.0 + head);
+            self.gfx
+                .sprite(out, book.chrome_panel, px + pw * 0.5, py + ph * 0.5, pw, ph, [1.0, 1.0, 1.0, 0.97]);
+            self.gold_frame_menu(out, px, py, pw, ph);
+            for (rx, ry) in
+                [(px + 10.0 * ui, py + 10.0 * ui), (px + pw - 10.0 * ui, py + 10.0 * ui),
+                 (px + 10.0 * ui, py + ph - 10.0 * ui), (px + pw - 10.0 * ui, py + ph - 10.0 * ui)]
+            {
+                let s = 6.0 * ui;
+                self.gfx.sprite(out, book.rivet, rx, ry, s, s, [1.0, 1.0, 1.0, 1.0]);
+            }
+        }
+
+        // Title on its winged plate.
         let (title, subtitle) = match self.page {
             MenuPage::EscRoot => ("PAUSED", ""),
             MenuPage::Settings { .. } => ("SETTINGS", ""),
@@ -341,7 +388,20 @@ impl App {
         let big = if self.page == MenuPage::MainRoot { self.ts(8.0) } else { self.ts(4.0) };
         let tw = self.gfx.text_width(big, title);
         let ty = if self.page == MenuPage::MainRoot { h * 0.22 } else { h * 0.12 };
-        self.gfx.text(out, cx - tw * 0.5, ty, big, if self.page == MenuPage::MainRoot { accent } else { white }, title);
+        if self.page != MenuPage::MainRoot {
+            let tp_w = (tw + 120.0 * ui).max(340.0 * ui);
+            let tp_h = big * 8.0 + 18.0 * ui;
+            self.gfx.sprite(
+                out,
+                book.title_plate,
+                cx,
+                ty + big * 3.6,
+                tp_w,
+                tp_h,
+                [1.0, 1.0, 1.0, 0.97],
+            );
+        }
+        self.gfx.text(out, cx - tw * 0.5, ty, big, gold, title);
         if !subtitle.is_empty() {
             let ts = self.ts(1.5);
             let sw = self.gfx.text_width(ts, subtitle);
@@ -381,7 +441,7 @@ impl App {
             // Labels for slider rows + bind rows (buttons drawn below).
             let bh = 44.0 * ui;
             let gap = 12.0 * ui;
-            let y0 = h * 0.22;
+            let y0 = h * 0.17;
             let row_y = y0 + 2.0 * (bh + gap);
             let ts = self.ts(1.5);
             let hud_l = format!("HUD SIZE  {:.1}X", self.settings.hud_scale);
@@ -393,7 +453,7 @@ impl App {
                 self.gfx.text(out, cx - lw * 0.5, row_y + k as f32 * (bh + gap) + 14.0 * ui, ts, white, l);
             }
             let ky0 = row_y + 4.0 * (bh + gap) + 34.0 * ui;
-            self.gfx.text(out, cx - 330.0 * ui, ky0 - 24.0 * ui, self.ts(1.5), accent, "KEYBINDS (CLICK, THEN PRESS A KEY)");
+            self.gfx.text(out, cx - 330.0 * ui, ky0 - 24.0 * ui, self.ts(1.5), gold, "KEYBINDS (CLICK, THEN PRESS A KEY)");
             let kbh = 26.0 * ui;
             let col_w = 330.0 * ui;
             for (k, a) in ALL_ACTIONS.iter().enumerate() {
@@ -411,21 +471,53 @@ impl App {
             self.gfx.text(out, cx - fw * 0.5, h - 40.0 * ui, ts, [0.4, 0.4, 0.42, 1.0], foot);
         }
 
-        // Buttons.
+        // Buttons: gold-capped navy plates with hover glow.
         for b in self.menu_buttons() {
             let hover = self.mouse.0 >= b.x
                 && self.mouse.0 <= b.x + b.w
                 && self.mouse.1 >= b.y
                 && self.mouse.1 <= b.y + b.h;
-            let bg = if hover { [0.16, 0.19, 0.26, 0.95] } else { [0.08, 0.09, 0.13, 0.92] };
-            self.gfx.quad(out, b.x, b.y, b.w, b.h, bg);
-            self.gfx.quad(out, b.x, b.y, b.w, 2.0 * ui, [0.32, 0.36, 0.46, 1.0]);
-            self.gfx.quad(out, b.x, b.y + b.h - 2.0 * ui, b.w, 2.0 * ui, [0.03, 0.03, 0.05, 1.0]);
-            let ts = if b.small { self.ts(1.4) } else { self.ts(2.0) };
+            let plate = if hover { book.menu_plate_hi } else { book.menu_plate };
+            self.gfx.sprite(
+                out,
+                plate,
+                b.x + b.w * 0.5,
+                b.y + b.h * 0.5,
+                b.w,
+                b.h,
+                [1.0, 1.0, 1.0, 1.0],
+            );
+            let mut ts = if b.small { self.ts(1.4) } else { self.ts(2.0) };
+            // Long labels shrink to fit their plate instead of overflowing.
+            while ts > self.ts(1.0) && self.gfx.text_width(ts, &b.label) > b.w - 20.0 * ui {
+                ts *= 0.9;
+            }
             let lw = self.gfx.text_width(ts, &b.label);
             let ly = b.y + b.h * 0.5 - ts * 3.5;
-            self.gfx.text(out, b.x + b.w * 0.5 - lw * 0.5, ly, ts, white, &b.label);
+            let tc = if hover { gold } else { white };
+            self.gfx.text(out, b.x + b.w * 0.5 - lw * 0.5, ly, ts, tc, &b.label);
         }
+    }
+
+    /// Gold frame reachable from menu drawing (hud.rs has the twin used by
+    /// the console; this one lives here to keep menu.rs self-contained).
+    fn gold_frame_menu(&self, out: &mut Vec<Inst>, x: f32, y: f32, w: f32, h: f32) {
+        let ui = self.ui();
+        let book = &self.gfx.book;
+        let t = 4.0 * ui;
+        let c = 10.0 * ui;
+        let wh = [1.0, 1.0, 1.0, 1.0];
+        let half = std::f32::consts::FRAC_PI_2;
+        self.gfx.sprite(out, book.gold_h, x + w * 0.5, y + t * 0.5, w - 2.0 * c, t, wh);
+        self.gfx.sprite(out, book.gold_h, x + w * 0.5, y + h - t * 0.5, w - 2.0 * c, t, wh);
+        self.gfx.sprite(out, book.gold_v, x + t * 0.5, y + h * 0.5, t, h - 2.0 * c, wh);
+        self.gfx.sprite(out, book.gold_v, x + w - t * 0.5, y + h * 0.5, t, h - 2.0 * c, wh);
+        self.gfx.sprite(out, book.gold_corner, x + c * 0.5, y + c * 0.5, c, c, wh);
+        self.gfx.sprite_rot(out, book.gold_corner, x + w - c * 0.5, y + c * 0.5, c, c, half, wh);
+        self.gfx
+            .sprite_rot(out, book.gold_corner, x + w - c * 0.5, y + h - c * 0.5, c, c, half * 2.0, wh);
+        self.gfx
+            .sprite_rot(out, book.gold_corner, x + c * 0.5, y + h - c * 0.5, c, c, half * 3.0, wh);
     }
 
     /// Join the lobby whose code sits in the code field. Reached by the
@@ -602,6 +694,11 @@ impl App {
             MenuAction::OpenReplays => {
                 self.replay_files = crate::replays::list(&self.state.data.race_names);
                 self.page = MenuPage::Replays;
+            }
+            MenuAction::OpenUpdate => {
+                if let Some((_, url)) = &self.update {
+                    crate::relay::open_url(url);
+                }
             }
             MenuAction::PlayReplay(k) => {
                 if let Some((_, path)) = self.replay_files.get(k) {

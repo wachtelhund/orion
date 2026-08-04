@@ -142,6 +142,9 @@ pub struct App {
     pub mm_reported: bool,
     pub mm_rating: Option<(i32, u32)>,
     pub mm_rating_rx: Option<std::sync::mpsc::Receiver<Option<(i32, u32)>>>,
+    /// Newer release on GitHub: (tag, html url).
+    pub update: Option<(String, String)>,
+    pub update_rx: Option<std::sync::mpsc::Receiver<Option<(String, String)>>>,
     /// Race picked for the human, and the enemy choice (0/1, 2 = random).
     pub chosen_race: u8,
     pub enemy_race_choice: u8,
@@ -299,6 +302,8 @@ impl App {
             mm_reported: false,
             mm_rating: None,
             mm_rating_rx: None,
+            update: None,
+            update_rx: Some(crate::relay::check_update_async()),
             replay: None,
             replay_cursor: 0,
             replay_paused: false,
@@ -1249,15 +1254,29 @@ impl App {
                 }
             }
         } else {
+            // Box select: units win when both are inside (SC2 rule), but a
+            // box over buildings alone selects ALL of them.
+            let mut buildings: Vec<EntityId> = Vec::new();
             for i in 0..self.state.entities.len() {
                 let e = &self.state.entities[i];
-                if !e.alive || e.owner != self.human || e.kind != EntityKind::Unit {
+                if !e.alive
+                    || e.owner != self.human
+                    || !matches!(e.kind, EntityKind::Unit | EntityKind::Building)
+                {
                     continue;
                 }
+                let kind = e.kind;
                 let (sx, sy) = self.entity_screen_pos(i);
                 if sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1 {
-                    picked.push(self.state.id_of(i as u32));
+                    if kind == EntityKind::Unit {
+                        picked.push(self.state.id_of(i as u32));
+                    } else {
+                        buildings.push(self.state.id_of(i as u32));
+                    }
                 }
+            }
+            if picked.is_empty() {
+                picked = buildings;
             }
         }
         if picked.is_empty() && !is_click {
@@ -2289,6 +2308,13 @@ impl App {
                 }
             }
         }
+        // Update check result (one-shot at startup).
+        if let Some(rx) = &self.update_rx {
+            if let Ok(got) = rx.try_recv() {
+                self.update = got;
+                self.update_rx = None;
+            }
+        }
         // Rating for the FIND MATCH row.
         if let Some(rx) = &self.mm_rating_rx {
             if let Ok(got) = rx.try_recv() {
@@ -2449,6 +2475,9 @@ impl App {
             // workers selected + 2 placements must peel off 2 DIFFERENT
             // workers and leave the third mining.
             2000 => self.script_multibuild(),
+            // Box-selecting several buildings (no units in the box) must
+            // select all of them — regression: buildings were unboxable.
+            2450 => self.script_boxselect_buildings(),
             2500 | 2540 | 2580 | 2620 => {
                 if let Some(b) = self.own_building_tagged("barracks") {
                     let tr = self.state.data.unit_tag("trooper");
@@ -2569,6 +2598,51 @@ impl App {
             .count();
         assert_eq!(untouched, 1, "script: exactly one worker should keep mining");
         println!("script: multibuild distributed across 2 workers, 1 left mining");
+    }
+
+    /// Drag a screen box over every own building; assert they all land in
+    /// the selection (units elsewhere must not be required).
+    fn script_boxselect_buildings(&mut self) {
+        let depot = self.state.data.building_tag("depot");
+        let mut min = (f32::MAX, f32::MAX);
+        let mut max = (f32::MIN, f32::MIN);
+        let mut n = 0;
+        for i in 0..self.state.entities.len() {
+            let e = &self.state.entities[i];
+            if e.alive && e.owner == self.human && e.kind == EntityKind::Building && e.def == depot
+            {
+                let (sx, sy) = self.entity_screen_pos(i);
+                min = (min.0.min(sx), min.1.min(sy));
+                max = (max.0.max(sx), max.1.max(sy));
+                n += 1;
+            }
+        }
+        if n < 2 {
+            return;
+        }
+        self.selection.clear();
+        self.finish_selection((min.0 - 8.0, min.1 - 8.0), (max.0 + 8.0, max.1 + 8.0));
+        let picked_buildings = self
+            .selection
+            .iter()
+            .filter(|id| {
+                self.state
+                    .get(**id)
+                    .is_some_and(|e| e.kind == EntityKind::Building)
+            })
+            .count();
+        // Workers may stand inside the box — then units win by design. Only
+        // assert the building path when the box was building-only.
+        let any_units = self
+            .selection
+            .iter()
+            .any(|id| self.state.get(*id).is_some_and(|e| e.kind == EntityKind::Unit));
+        assert!(
+            any_units || picked_buildings >= 2,
+            "script: box over {n} buildings selected only {picked_buildings}"
+        );
+        println!("script: box-selected {picked_buildings} buildings (units_in_box={any_units})");
+        self.selection.clear();
     }
 
     fn free_builder(&self) -> Option<EntityId> {

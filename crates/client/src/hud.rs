@@ -57,9 +57,90 @@ const TIP_STAT: [f32; 4] = [0.75, 0.75, 0.72, 1.0];
 const TIP_DESC: [f32; 4] = [0.6, 0.62, 0.66, 1.0];
 const TIP_WARN: [f32; 4] = [1.0, 0.6, 0.3, 1.0];
 
+/// Chrome palette as draw-time tints (atlas bakes the texture, these tint).
+const GOLD_TXT: [f32; 4] = [0.95, 0.78, 0.25, 1.0];
+
 impl App {
     pub(crate) fn console_h(&self) -> f32 {
         118.0 * self.ui()
+    }
+
+    // ---------------------------------------------------- chrome helpers ----
+
+    /// Top-left-anchored sprite (gfx.sprite is center-anchored).
+    fn plate(&self, out: &mut Vec<Inst>, r: crate::atlas::Region, x: f32, y: f32, w: f32, h: f32) {
+        self.gfx.sprite(out, r, x + w * 0.5, y + h * 0.5, w, h, WHITE);
+    }
+
+    /// Raised navy tech panel (dark = inset variant). Tiled horizontally at
+    /// native texture scale — one stretched sprite across a whole console
+    /// smears the circuit detailing into streaks.
+    fn chrome_panel(&self, out: &mut Vec<Inst>, x: f32, y: f32, w: f32, h: f32, dark: bool) {
+        let r = if dark { self.gfx.book.chrome_dark } else { self.gfx.book.chrome_panel };
+        let seg = (r.w as f32) * self.ui();
+        if w <= seg {
+            self.plate(out, r, x, y, w, h);
+            return;
+        }
+        let mut x0 = x;
+        while x0 < x + w {
+            // Final segment slides left to end exactly at the panel edge
+            // (the noise texture hides the overlap seam).
+            let sx = x0.min(x + w - seg);
+            self.plate(out, r, sx, y, seg, h);
+            x0 += seg;
+        }
+    }
+
+    /// Gold piping frame around a rect: corner arcs + stretched strips.
+    fn gold_frame(&self, out: &mut Vec<Inst>, x: f32, y: f32, w: f32, h: f32) {
+        let ui = self.ui();
+        let book = &self.gfx.book;
+        let t = 4.0 * ui; // strip thickness
+        let c = 10.0 * ui; // corner span
+        self.plate(out, book.gold_h, x + c, y, w - 2.0 * c, t);
+        self.plate(out, book.gold_h, x + c, y + h - t, w - 2.0 * c, t);
+        self.plate(out, book.gold_v, x, y + c, t, h - 2.0 * c);
+        self.plate(out, book.gold_v, x + w - t, y + c, t, h - 2.0 * c);
+        // Corners: painted TL, rotated for the rest.
+        let half = std::f32::consts::FRAC_PI_2;
+        self.gfx.sprite(out, book.gold_corner, x + c * 0.5, y + c * 0.5, c, c, WHITE);
+        self.gfx
+            .sprite_rot(out, book.gold_corner, x + w - c * 0.5, y + c * 0.5, c, c, half, WHITE);
+        self.gfx.sprite_rot(
+            out,
+            book.gold_corner,
+            x + w - c * 0.5,
+            y + h - c * 0.5,
+            c,
+            c,
+            half * 2.0,
+            WHITE,
+        );
+        self.gfx.sprite_rot(
+            out,
+            book.gold_corner,
+            x + c * 0.5,
+            y + h - c * 0.5,
+            c,
+            c,
+            half * 3.0,
+            WHITE,
+        );
+    }
+
+    fn rivet(&self, out: &mut Vec<Inst>, x: f32, y: f32) {
+        let s = 6.0 * self.ui();
+        self.gfx.sprite(out, self.gfx.book.rivet, x, y, s, s, WHITE);
+    }
+
+    /// The in-console MENU button (opens the pause menu).
+    pub(crate) fn menu_button_rect(&self) -> (f32, f32, f32, f32) {
+        let ui = self.ui();
+        let w = self.cam.screen_w;
+        let cy = self.cam.screen_h - self.console_h();
+        let card_w = 4.0 * (56.0 * ui) + 18.0 * ui;
+        (w - card_w - 76.0 * ui, cy + 6.0 * ui, 64.0 * ui, 20.0 * ui)
     }
 
     // -------------------------------------------------------- tooltips ----
@@ -217,15 +298,18 @@ impl App {
         let tx = x0 + 84.0 * ui + 16.0 * ui;
         let sx = tx + 240.0 * ui;
         let sy = self.cam.screen_h - self.console_h() + 14.0 * ui;
+        // Never run under the MENU button on narrow windows.
+        let avail = self.menu_button_rect().0 - 10.0 * ui - sx;
+        let cols = ((avail / (34.0 * ui)).floor() as usize).clamp(1, 9);
         let mut out = Vec::new();
         let mut k = 0;
-        for id in self.selection.iter().take(18) {
+        for id in self.selection.iter().take(cols * 2) {
             let Some(u) = self.state.get(*id) else { continue };
             if u.owner != self.human || u.kind == EntityKind::Resource {
                 continue;
             }
-            let col = k % 9;
-            let row = k / 9;
+            let col = k % cols;
+            let row = k / cols;
             out.push((
                 sx + col as f32 * 34.0 * ui - 2.0,
                 sy + row as f32 * 46.0 * ui - 2.0,
@@ -253,9 +337,12 @@ impl App {
         let h = pad * 2.0 + ts_title * 8.0 + (lines.len() as f32 - 1.0) * line_h;
         let x = (self.mouse.0 - w * 0.5)
             .clamp(8.0, (self.cam.screen_w - w - 8.0).max(8.0));
-        let y = self.cam.screen_h - self.console_h() - h - 10.0 * ui;
-        self.gfx.quad(out, x - 2.0, y - 2.0, w + 4.0, h + 4.0, [0.35, 0.38, 0.45, 0.95]);
-        self.gfx.quad(out, x, y, w, h, [0.05, 0.05, 0.08, 0.96]);
+        let mut y = self.cam.screen_h - self.console_h() - h - 10.0 * ui;
+        if !matches!(self.mode, Mode::Normal) {
+            y -= 32.0 * ui; // clear the mode-hint plate
+        }
+        self.chrome_panel(out, x, y, w, h, true);
+        self.gold_frame(out, x - 2.0, y - 2.0, w + 4.0, h + 4.0);
         let mut ly = y + pad;
         for (k, (line, color)) in lines.iter().enumerate() {
             let s = if k == 0 { ts_title } else { ts_body };
@@ -281,19 +368,75 @@ impl App {
         let h = self.cam.screen_h;
         let ch = self.console_h();
         let cy = h - ch;
-        let steel = [0.13, 0.14, 0.17, 1.0];
-        let steel_dark = [0.09, 0.095, 0.12, 1.0];
-        let edge_lit = [0.30, 0.33, 0.40, 1.0];
+        let book = &self.gfx.book;
+        let rise = 12.0 * ui; // side blocks rise above the center deck
+        let sh = 26.0 * ui; // shoulder span
 
-        self.gfx.quad(out, 0.0, cy, w, ch, steel);
-        self.gfx.quad(out, 0.0, cy, w, 2.0 * ui, edge_lit);
-        self.gfx.quad(out, 0.0, cy + 2.0 * ui, w, 1.0 * ui, [0.05, 0.05, 0.07, 1.0]);
-        let mut rx = 16.0 * ui;
+        // Center deck (full width base).
+        self.chrome_panel(out, 0.0, cy, w, ch, false);
+        // Side blocks: minimap (left) and command card (right) sit higher.
+        let (_, _, msize) = self.minimap_rect();
+        let lw = msize + 22.0 * ui;
+        let rb_x = w - 4.0 * (56.0 * ui) - 22.0 * ui;
+        self.chrome_panel(out, 0.0, cy - rise, lw, ch + rise, false);
+        self.chrome_panel(out, rb_x, cy - rise, w - rb_x, ch + rise, false);
+        // Angled shoulders bridging block tops down to the deck edge.
+        self.gfx.sprite_rot(
+            out,
+            book.shoulder,
+            lw + sh * 0.5,
+            cy - rise + sh * 0.5,
+            sh,
+            sh,
+            std::f32::consts::FRAC_PI_2,
+            WHITE,
+        );
+        self.gfx.sprite(
+            out,
+            book.shoulder,
+            rb_x - sh * 0.5,
+            cy - rise + sh * 0.5,
+            sh,
+            sh,
+            WHITE,
+        );
+        // Gold piping along every top edge.
+        let t = 4.0 * ui;
+        self.plate(out, book.gold_h, 0.0, cy - rise, lw, t);
+        self.plate(out, book.gold_h, lw + sh, cy + 2.0 * ui, rb_x - sh - (lw + sh), t);
+        self.plate(out, book.gold_h, rb_x, cy - rise, w - rb_x, t);
+        // Bottom seam + rivets.
+        self.plate(out, book.gold_h, 0.0, h - 3.0 * ui, w, 3.0 * ui);
+        let mut rx = 14.0 * ui;
         while rx < w {
-            self.gfx.quad(out, rx, cy + 6.0 * ui, 2.0 * ui, 2.0 * ui, edge_lit);
-            self.gfx.quad(out, rx, h - 8.0 * ui, 2.0 * ui, 2.0 * ui, steel_dark);
-            rx += 48.0 * ui;
+            self.rivet(out, rx, h - 9.0 * ui);
+            rx += 52.0 * ui;
         }
+        self.rivet(out, lw - 8.0 * ui, cy - rise + 9.0 * ui);
+        self.rivet(out, rb_x + 8.0 * ui, cy - rise + 9.0 * ui);
+        // Vertical seams where the raised blocks meet the deck.
+        let seam_y = cy + sh - rise + 2.0 * ui;
+        self.plate(out, book.gold_v, lw + sh - 3.0 * ui, seam_y, 3.0 * ui, h - seam_y - 3.0 * ui);
+        self.plate(out, book.gold_v, rb_x - sh, seam_y, 3.0 * ui, h - seam_y - 3.0 * ui);
+
+        // MENU button on the deck, left of the command card block.
+        let (mbx, mby, mbw, mbh) = self.menu_button_rect();
+        let hover = self.mouse.0 >= mbx
+            && self.mouse.0 <= mbx + mbw
+            && self.mouse.1 >= mby
+            && self.mouse.1 <= mby + mbh;
+        let r = if hover { book.menu_plate_hi } else { book.menu_plate };
+        self.plate(out, r, mbx, mby, mbw, mbh);
+        let ts = self.ts(1.2);
+        let tw = self.gfx.text_width(ts, "MENU");
+        self.gfx.text(
+            out,
+            mbx + (mbw - tw) * 0.5,
+            mby + mbh * 0.5 - ts * 3.5,
+            ts,
+            GOLD_TXT,
+            "MENU",
+        );
 
         self.draw_minimap(out);
         self.draw_info_panel(out);
@@ -354,11 +497,13 @@ impl App {
     }
 
     fn draw_minimap(&self, out: &mut Vec<Inst>) {
+        let ui = self.ui();
         let (mx, my, size) = self.minimap_rect();
         let map = &self.state.map;
         let scale = size / map.width as f32;
-        self.gfx.quad(out, mx - 2.0, my - 2.0, size + 4.0, size + 4.0, [0.32, 0.34, 0.4, 1.0]);
+        self.chrome_panel(out, mx - 6.0 * ui, my - 6.0 * ui, size + 12.0 * ui, size + 12.0 * ui, true);
         self.gfx.quad(out, mx, my, size, size, [0.0, 0.0, 0.0, 1.0]);
+        self.gold_frame(out, mx - 5.0 * ui, my - 5.0 * ui, size + 10.0 * ui, size + 10.0 * ui);
         for y in 0..map.height {
             for x in 0..map.width {
                 let t = TilePos::new(x, y);
@@ -495,10 +640,10 @@ impl App {
         };
         let Some(e) = self.state.get(first) else { return };
 
-        // Portrait.
+        // Portrait: dark inset with a gold frame, SC:R style.
         let pw = 84.0 * ui;
-        self.gfx.quad(out, x0, cy + 12.0 * ui, pw, pw + 8.0 * ui, [0.05, 0.05, 0.08, 1.0]);
-        self.gfx.quad(out, x0, cy + 12.0 * ui, pw, 2.0 * ui, [0.3, 0.33, 0.4, 1.0]);
+        self.chrome_panel(out, x0, cy + 12.0 * ui, pw, pw + 8.0 * ui, true);
+        self.gold_frame(out, x0 - 2.0 * ui, cy + 10.0 * ui, pw + 4.0 * ui, pw + 12.0 * ui);
         let team = (e.owner as usize).min(1);
         match e.kind {
             EntityKind::Unit => {
@@ -600,7 +745,7 @@ impl App {
             self.gfx.text(
                 out,
                 tx,
-                cy + 80.0 * ui,
+                cy + 94.0 * ui,
                 self.ts(1.0),
                 dim,
                 "TAB: NEXT SUBGROUP",
@@ -621,10 +766,6 @@ impl App {
                     let frac = e.progress as f32 / total.max(1) as f32;
                     self.gfx.quad(out, bx, by + bh - 3.0 * ui, bw * frac, 3.0 * ui, [0.3, 0.8, 1.0, 1.0]);
                 }
-            }
-            let qr = self.queue_slot_rects();
-            if let Some((bx, by, ..)) = qr.first().copied() {
-                self.gfx.text(out, bx, by - 12.0 * ui, self.ts(1.0), dim, "QUEUE (CLICK TO CANCEL)");
             }
         }
 
@@ -899,10 +1040,8 @@ impl App {
                 && self.mouse.0 <= b.x + b.w
                 && self.mouse.1 >= b.y
                 && self.mouse.1 <= b.y + b.h;
-            let bg = if hover { [0.13, 0.15, 0.20, 1.0] } else { [0.08, 0.09, 0.12, 1.0] };
-            self.gfx.quad(out, b.x, b.y, b.w, b.h, bg);
-            self.gfx.quad(out, b.x, b.y, b.w, 1.5 * ui, [0.34, 0.37, 0.45, 1.0]);
-            self.gfx.quad(out, b.x, b.y + b.h - 1.5 * ui, b.w, 1.5 * ui, [0.04, 0.04, 0.06, 1.0]);
+            let plate = if hover { book.btn_plate_hi } else { book.btn_plate };
+            self.plate(out, plate, b.x, b.y, b.w, b.h);
             // Icon fills the button; hotkey letter overlays the top-left
             // corner; cost/label sits along the bottom (SC2 style).
             let icon_cy = b.y + b.h * 0.44;
@@ -952,14 +1091,14 @@ impl App {
         let hint = match self.mode {
             Mode::AttackMove => Some("ATTACK MOVE: CLICK TARGET"),
             Mode::Placing(_) => Some("CLICK TO PLACE   SHIFT: CHAIN   ESC: CANCEL"),
-            Mode::CastTarget => Some("PLASMA STORM: CLICK TARGET (75 ENERGY)"),
+            Mode::CastTarget => Some("PLASMA STORM: CLICK TARGET (100 ENERGY)"),
             _ => None,
         };
         if let Some(hint) = hint {
             let ts = self.ts(1.5);
             let tw = self.gfx.text_width(ts, hint);
-            self.gfx.quad(out, w * 0.5 - tw * 0.5 - 10.0, cy - 34.0, tw + 20.0, 24.0, [0.04, 0.04, 0.06, 0.85]);
-            self.gfx.text(out, w * 0.5 - tw * 0.5, cy - 29.0, ts, [1.0, 0.9, 0.4, 1.0], hint);
+            self.chrome_panel(out, w * 0.5 - tw * 0.5 - 12.0, cy - 36.0, tw + 24.0, 26.0, true);
+            self.gfx.text(out, w * 0.5 - tw * 0.5, cy - 29.0, ts, GOLD_TXT, hint);
         }
     }
 
@@ -974,6 +1113,10 @@ impl App {
         let minerals = self.state.players[self.human as usize].minerals;
         let gas = self.state.players[self.human as usize].gas;
         let (used, prov) = self.state.supply(self.human);
+
+        // Backing plate keeps the readout legible over bright terrain.
+        self.chrome_panel(out, w - 340.0 * ui, 4.0 * ui, 334.0 * ui, 28.0 * ui, true);
+        self.plate(out, book.gold_h, w - 340.0 * ui, 30.0 * ui, 334.0 * ui, 2.0 * ui);
 
         // Right-aligned: minerals | gas | supply.
         let sup_s = format!("{used}/{prov}");
@@ -1128,6 +1271,16 @@ impl App {
 
     /// A left click landed on the console. Route it.
     pub(crate) fn console_click(&mut self) {
+        // MENU button: open the pause menu.
+        let (mbx, mby, mbw, mbh) = self.menu_button_rect();
+        if self.mouse.0 >= mbx
+            && self.mouse.0 <= mbx + mbw
+            && self.mouse.1 >= mby
+            && self.mouse.1 <= mby + mbh
+        {
+            self.page = crate::menu::MenuPage::EscRoot;
+            return;
+        }
         // Minimap: move camera.
         if let Some((wx, wy)) = self.minimap_pick(self.mouse.0, self.mouse.1) {
             let (ix, iy) = crate::iso::world_to_iso(wx, wy);

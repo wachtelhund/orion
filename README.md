@@ -94,6 +94,11 @@ Playable game — single player vs AI, or 1v1 multiplayer (direct connect):
   sparks + construction weld arcs, saturation labels over bases and
   extractors (workers / cap)
 - Hover tooltips on every HUD element (units, buildings, research, actions)
+- SC:R-style console: navy tech panels with gold piping, framed minimap and
+  portrait, beveled command-card buttons, in-console MENU button — menus
+  share the same identity (framed dialogs, plated rows, hover glow)
+- Update notice on the main menu when a newer release is out (one click
+  opens the download page — no manual checking)
 - Procedural audio: ambient music loop + combat/UI/economy sound effects,
   all synthesized at startup (no asset files); volume sliders in settings
 - Flashing warnings with error sounds: NOT ENOUGH MINERALS / PLASMA /
@@ -152,7 +157,7 @@ All game hotkeys are rebindable in Settings (Escape menu). Defaults:
 
 | Input | Action |
 |---|---|
-| Left click / drag | Select / box-select |
+| Left click / drag | Select / box-select (units win a mixed box; a box over buildings selects them all) |
 | Ctrl+click / double-click | Select all units *or buildings* of that type on screen |
 | Shift + click | Add/remove a unit from the selection |
 | Shift + right click | Queue waypoint orders (also queues worker builds) |

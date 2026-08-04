@@ -396,3 +396,54 @@ pub fn fetch_rating_async_delayed(
     });
     rx
 }
+
+// ------------------------------------------------------------- updates ----
+
+/// Latest release tag on GitHub (e.g. "v0.4.0"), if newer than ours.
+/// Best-effort: any failure just means no notice.
+pub fn check_update_async() -> Receiver<Option<(String, String)>> {
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let got = ureq::get("https://api.github.com/repos/wachtelhund/orion/releases/latest")
+            .set("User-Agent", "orion-client")
+            .timeout(Duration::from_secs(6))
+            .call()
+            .ok()
+            .and_then(|r| r.into_string().ok())
+            .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok())
+            .and_then(|v| {
+                let tag = v["tag_name"].as_str()?.to_string();
+                let url = v["html_url"].as_str()?.to_string();
+                Some((tag, url))
+            })
+            .filter(|(tag, _)| {
+                newer_than_current(tag.trim_start_matches('v'), env!("CARGO_PKG_VERSION"))
+            });
+        let _ = tx.send(got);
+    });
+    rx
+}
+
+/// Semver-ish compare: is `remote` strictly newer than `local`?
+fn newer_than_current(remote: &str, local: &str) -> bool {
+    let parse = |s: &str| -> Vec<u32> {
+        s.split('.').map(|p| p.parse().unwrap_or(0)).collect()
+    };
+    parse(remote) > parse(local)
+}
+
+/// Open a URL in the system browser (fire-and-forget).
+pub fn open_url(url: &str) {
+    #[cfg(target_os = "macos")]
+    let cmd = "open";
+    #[cfg(target_os = "windows")]
+    let cmd = "cmd";
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let cmd = "xdg-open";
+    let mut c = std::process::Command::new(cmd);
+    #[cfg(target_os = "windows")]
+    c.args(["/C", "start", "", url]);
+    #[cfg(not(target_os = "windows"))]
+    c.arg(url);
+    let _ = c.spawn();
+}

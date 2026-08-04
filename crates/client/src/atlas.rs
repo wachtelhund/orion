@@ -255,6 +255,19 @@ pub struct SpriteBook {
     pub blast_ring: Region,
     pub corpse: Region,
     pub rubble: Region,
+    // console chrome
+    pub chrome_panel: Region,
+    pub chrome_dark: Region,
+    pub gold_h: Region,
+    pub gold_v: Region,
+    pub gold_corner: Region,
+    pub rivet: Region,
+    pub btn_plate: Region,
+    pub btn_plate_hi: Region,
+    pub menu_plate: Region,
+    pub menu_plate_hi: Region,
+    pub title_plate: Region,
+    pub shoulder: Region,
     // font
     glyphs: Vec<(char, Region)>,
 }
@@ -415,6 +428,70 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
         p.place(&c)
     };
 
+    // Console chrome (SC:R-style): navy tech panels, gold piping, beveled
+    // button plates. Painted once, stretched/tiled by the HUD.
+    let chrome_panel = p.place(&chrome_panel_canvas(384, 160, 1.0));
+    let chrome_dark = p.place(&chrome_panel_canvas(192, 96, 0.55));
+    let gold_h = p.place(&gold_strip_canvas(64, 6, false));
+    let gold_v = p.place(&gold_strip_canvas(6, 64, true));
+    let gold_corner = {
+        let mut c = Canvas::new(14, 14);
+        // Rounded gold corner (top-left orientation; HUD flips via scale).
+        for y in 0..14 {
+            for x in 0..14 {
+                let dx = (x as f32 + 0.5 - 14.0) / 14.0;
+                let dy = (y as f32 + 0.5 - 14.0) / 14.0;
+                let d = (dx * dx + dy * dy).sqrt();
+                if (0.62..=1.0).contains(&d) {
+                    let f = if d > 0.93 {
+                        0.55
+                    } else if d < 0.74 {
+                        1.35
+                    } else {
+                        1.0
+                    };
+                    c.set(x, y, scale(GOLD, f));
+                }
+            }
+        }
+        p.place(&c)
+    };
+    let rivet = {
+        let mut c = Canvas::new(7, 7);
+        c.ellipse_shaded(3.5, 3.5, 3.0, 3.0, [116, 122, 140]);
+        c.set(2, 2, [210, 218, 235, 255]);
+        p.place(&c)
+    };
+    let btn_plate = p.place(&button_plate_canvas(52, 48, false));
+    let btn_plate_hi = p.place(&button_plate_canvas(52, 48, true));
+    let menu_plate = p.place(&menu_plate_canvas(300, 44, false));
+    let menu_plate_hi = p.place(&menu_plate_canvas(300, 44, true));
+    let title_plate = p.place(&title_plate_canvas(320, 40));
+    let shoulder = {
+        // Angled console shoulder: navy triangle with a gold hypotenuse.
+        // Painted as the LEFT-rising variant; mirrored by negative width.
+        let (w, h) = (48, 48);
+        let mut c = Canvas::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                // Solid below the diagonal from bottom-left to top-right.
+                if y >= h - 1 - x {
+                    let f = tech_noise(x, y, 31);
+                    c.set(x, y, scale(NAVY, f));
+                }
+            }
+        }
+        for x in 0..w {
+            let y = h - 1 - x;
+            c.set(x, y, rgba(GOLD));
+            c.set(x, (y + 1).min(h - 1), scale(GOLD, 0.6));
+            if y + 2 < h {
+                c.set(x, y + 2, scale(NAVY, 1.5));
+            }
+        }
+        p.place(&c)
+    };
+
     // Font.
     let mut glyphs = Vec::new();
     for ch in " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:/-.%+!(),".chars() {
@@ -453,9 +530,179 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
         blast_ring,
         corpse,
         rubble,
+        chrome_panel,
+        chrome_dark,
+        gold_h,
+        gold_v,
+        gold_corner,
+        rivet,
+        btn_plate,
+        btn_plate_hi,
+        menu_plate,
+        menu_plate_hi,
+        title_plate,
+        shoulder,
         glyphs,
     };
     (p.px, book)
+}
+
+// -------------------------------------------------------- console chrome ----
+
+/// Chrome palette: deep navy tech panels with gold piping.
+pub const NAVY: [u8; 3] = [22, 34, 58];
+pub const GOLD: [u8; 3] = [201, 162, 39];
+
+/// Brightness factor for the brushed tech-panel texture at (x, y).
+fn tech_noise(x: i32, y: i32, salt: u32) -> f32 {
+    let n = (hash2(x, y, salt) % 100) as f32 / 100.0;
+    // Horizontal brushing + sparse darker seams.
+    let brush = if y % 4 == 0 { 1.08 } else { 1.0 };
+    let seam = if hash2(0, y / 9, salt ^ 5) % 7 == 0 && y % 9 == 8 { 0.82 } else { 1.0 };
+    (0.92 + n * 0.16) * brush * seam
+}
+
+/// Navy tech panel with circuit detailing; `level` scales overall brightness
+/// (1.0 = raised panel, ~0.55 = dark inset).
+fn chrome_panel_canvas(w: i32, h: i32, level: f32) -> Canvas {
+    let mut c = Canvas::new(w, h);
+    for y in 0..h {
+        for x in 0..w {
+            let mut f = tech_noise(x, y, 77) * level;
+            // Vignette toward edges sells depth.
+            let ex = (x.min(w - 1 - x) as f32 / 22.0).min(1.0);
+            let ey = (y.min(h - 1 - y) as f32 / 22.0).min(1.0);
+            f *= 0.82 + 0.18 * ex.min(ey);
+            c.set(x, y, scale(NAVY, f));
+        }
+    }
+    // Sparse circuit traces: thin lit lines with elbow bends + node dots.
+    let traces = (w * h / 3800).max(3);
+    for k in 0..traces {
+        let hsh = hash2(k, w + h, 913);
+        let x0 = 8 + (hsh % (w as u32 - 16)) as i32;
+        let y0 = 8 + ((hsh >> 9) % (h as u32 - 16)) as i32;
+        let len = 12 + ((hsh >> 18) % 26) as i32;
+        let vertical = hsh & 1 == 0;
+        let lit: Color = [64, 96, 148, 255];
+        for s in 0..len {
+            let (x, y) = if vertical { (x0, y0 + s) } else { (x0 + s, y0) };
+            if x < w - 6 && y < h - 6 {
+                c.blend(x, y, [lit[0], lit[1], lit[2], 130]);
+            }
+        }
+        let (ex, ey) = if vertical { (x0, (y0 + len).min(h - 7)) } else { ((x0 + len).min(w - 7), y0) };
+        c.rect(ex - 1, ey - 1, 3, 3, [110, 170, 230, 200]);
+    }
+    c
+}
+
+/// Gold piping strip: bright core, dark rim, subtle segment ticks.
+fn gold_strip_canvas(w: i32, h: i32, vertical: bool) -> Canvas {
+    let mut c = Canvas::new(w, h);
+    let thick = if vertical { w } else { h };
+    for y in 0..h {
+        for x in 0..w {
+            let t = if vertical { x } else { y };
+            let f = match t {
+                0 => 0.5,
+                1 => 1.45,
+                _ if t == thick - 1 => 0.42,
+                _ if t == thick - 2 => 0.8,
+                _ => 1.05,
+            };
+            let along = if vertical { y } else { x };
+            let seg = if along % 16 == 15 { 0.75 } else { 1.0 };
+            c.set(x, y, scale(GOLD, f * seg));
+        }
+    }
+    c
+}
+
+/// Command-card button plate: navy face, chunky steel bevel, gold rim on
+/// hover.
+fn button_plate_canvas(w: i32, h: i32, hover: bool) -> Canvas {
+    let mut c = Canvas::new(w, h);
+    for y in 0..h {
+        for x in 0..w {
+            let b = x.min(y).min(w - 1 - x).min(h - 1 - y);
+            let px = match b {
+                0 => scale([8, 10, 16], 1.0),
+                1 | 2 => {
+                    // Bevel: lit top-left, shadowed bottom-right.
+                    let tl = x <= 2 || y <= 2;
+                    let f = if tl { 1.7 } else { 0.55 };
+                    if hover {
+                        scale(GOLD, if tl { 1.1 } else { 0.5 })
+                    } else {
+                        scale([88, 98, 122], f)
+                    }
+                }
+                _ => {
+                    let f = tech_noise(x, y, 55) * if hover { 1.25 } else { 1.0 };
+                    scale(NAVY, f)
+                }
+            };
+            c.set(x, y, px);
+        }
+    }
+    c
+}
+
+/// Menu row plate: wide navy plate with a thin steel bevel and gold ends.
+fn menu_plate_canvas(w: i32, h: i32, hover: bool) -> Canvas {
+    let mut c = Canvas::new(w, h);
+    for y in 0..h {
+        for x in 0..w {
+            let b = x.min(y).min(w - 1 - x).min(h - 1 - y);
+            let px = match b {
+                0 => scale([6, 8, 14], 1.0),
+                1 => {
+                    let tl = y <= 1;
+                    if hover {
+                        scale(GOLD, if tl { 1.2 } else { 0.6 })
+                    } else {
+                        scale([80, 90, 114], if tl { 1.5 } else { 0.6 })
+                    }
+                }
+                _ => {
+                    let mut f = tech_noise(x, y, 21) * if hover { 1.3 } else { 0.92 };
+                    // Slight center glow.
+                    let cx = (x as f32 / w as f32 - 0.5).abs();
+                    f *= 1.1 - cx * 0.3;
+                    scale(NAVY, f)
+                }
+            };
+            c.set(x, y, px);
+        }
+    }
+    // Gold end caps.
+    for y in 2..h - 2 {
+        for x in [2, 3, w - 4, w - 3] {
+            c.set(x, y, scale(GOLD, if x % 2 == 0 { 1.0 } else { 0.65 }));
+        }
+    }
+    c
+}
+
+/// Menu title plate: darker, gold underline, winged ends.
+fn title_plate_canvas(w: i32, h: i32) -> Canvas {
+    let mut c = Canvas::new(w, h);
+    for y in 0..h {
+        for x in 0..w {
+            let f = tech_noise(x, y, 8) * 0.6;
+            let cx = (x as f32 / w as f32 - 0.5).abs();
+            c.set(x, y, scale(NAVY, f * (1.25 - cx * 0.5)));
+        }
+    }
+    for x in 0..w {
+        let cx = (x as f32 / w as f32 - 0.5).abs();
+        if cx < 0.46 {
+            c.set(x, h - 3, scale(GOLD, 1.1 - cx));
+            c.set(x, h - 2, scale(GOLD, 0.55));
+        }
+    }
+    c
 }
 
 // ---------------------------------------------------------------- shapes ----
