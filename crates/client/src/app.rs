@@ -1925,6 +1925,49 @@ impl App {
         self.step_post();
     }
 
+    /// Ambient world particles: geyser vapor, chimney smoke, hive spores.
+    /// Called once per sim tick; render-side only.
+    fn tick_emitters(&mut self) {
+        let tick = self.state.tick;
+        for i in 0..self.state.entities.len() {
+            let e = &self.state.entities[i];
+            if !e.alive {
+                continue;
+            }
+            let salt = crate::atlas::hash2(i as i32, 0, 5150) % 97;
+            let (x, y) = (e.pos.x.to_f32(), e.pos.y.to_f32());
+            match e.kind {
+                EntityKind::Resource if e.def == RES_GEYSER => {
+                    if (tick + salt) % 10 == 0 {
+                        let j = (crate::atlas::hash2(i as i32, tick as i32, 77) % 60) as f32 * 0.02 - 0.6;
+                        self.effects.push(Effect { kind: EffKind::Vapor, ax: x + j, ay: y, bx: 0.0, by: 0.0, age: 0.0, ttl: 1.6, style: 0 });
+                    }
+                }
+                EntityKind::Building if e.construction.is_none() => {
+                    let bt = self.building_type[e.def as usize];
+                    match bt {
+                        // Forge / bastion smelter / fume tap flare: smoke.
+                        4 | 14 | 16 => {
+                            if (tick + salt) % 14 == 0 {
+                                let (ox, oy) = if bt == 4 { (0.9, 40.0) } else if bt == 14 { (0.7, 52.0) } else { (0.55, 38.0) };
+                                self.effects.push(Effect { kind: EffKind::Smoke, ax: x + ox, ay: y, bx: (salt % 9) as f32, by: oy, age: 0.0, ttl: 2.2, style: 0 });
+                            }
+                        }
+                        // Hive: drifting green spores.
+                        7 => {
+                            if (tick + salt) % 16 == 0 {
+                                let j = (crate::atlas::hash2(i as i32, tick as i32, 31) % 100) as f32 * 0.03 - 1.5;
+                                self.effects.push(Effect { kind: EffKind::Vapor, ax: x + j, ay: y + 0.5, bx: 0.0, by: 0.0, age: 0.0, ttl: 2.0, style: 1 });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Render-side bookkeeping after any sim step (SP or lockstep).
     /// Report a ranked result once and schedule a rating refresh for the
     /// end screen (delayed so the opponent's confirming report can land).
@@ -1948,6 +1991,7 @@ impl App {
     }
 
     pub(crate) fn step_post(&mut self) {
+        self.tick_emitters();
         if self.state.winner.is_some() {
             self.save_replay();
             if let Some(w) = self.state.winner {
@@ -3157,6 +3201,7 @@ impl App {
         self.draw_saturation(&mut out);
         self.draw_placement_ghost(&mut out);
         self.draw_selection_box(&mut out);
+        self.draw_fog_drift(&mut out);
         // Everything above lives in the world; glow adds on top of it,
         // and the console/menus draw over both.
         let world_n = out.len();
@@ -3231,6 +3276,56 @@ impl App {
                 }
                 if below(self, x + 1, y) {
                     self.gfx.sprite(out, book.cliff_right, sx, cliff_cy, tw, cliff_h_screen, tint);
+                }
+            }
+        }
+    }
+
+    /// Drifting haze over fogged ground: two parallax layers of soft
+    /// blobs, denser over unexplored tiles. The fog of war gets actual fog.
+    fn draw_fog_drift(&self, out: &mut Vec<Inst>) {
+        if self.reveal_all {
+            return;
+        }
+        let map = &self.state.map;
+        let fog = &self.state.fog[self.human as usize];
+        let book = &self.gfx.book;
+        let zoom = self.cam.zoom;
+        // Visible world-tile bounds via the screen corners.
+        let (w, h) = (self.cam.screen_w, self.cam.screen_h);
+        let mut x0 = f32::MAX;
+        let mut y0 = f32::MAX;
+        let mut x1 = f32::MIN;
+        let mut y1 = f32::MIN;
+        for (px, py) in [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)] {
+            let (wx, wy) = self.cam.screen_to_world(px, py);
+            x0 = x0.min(wx);
+            y0 = y0.min(wy);
+            x1 = x1.max(wx);
+            y1 = y1.max(wy);
+        }
+        let t = self.state.tick as f32 / 24.0;
+        const STEP: i32 = 3;
+        let bx0 = ((x0 as i32 - 4) / STEP) * STEP;
+        let by0 = ((y0 as i32 - 4) / STEP) * STEP;
+        for by in (by0..=(y1 as i32 + 4)).step_by(STEP as usize) {
+            for bx in (bx0..=(x1 as i32 + 4)).step_by(STEP as usize) {
+                let ct = TilePos::new(bx + STEP / 2, by + STEP / 2);
+                if !map.in_bounds(ct.x, ct.y) || fog.visible(map, ct) {
+                    continue;
+                }
+                let deep = !fog.explored(map, ct);
+                let hsh = crate::atlas::hash2(bx, by, 4242);
+                let phase = (hsh % 628) as f32 / 100.0;
+                for layer in 0..2 {
+                    let spd = if layer == 0 { 0.05 } else { 0.085 };
+                    let amp = if layer == 0 { 1.1 } else { 1.7 };
+                    let wx = bx as f32 + 1.5 + (t * spd + phase).sin() * amp + t * spd * 2.0 % 1.0;
+                    let wy = by as f32 + 1.5 + (t * spd * 0.7 + phase * 1.3).cos() * amp * 0.7;
+                    let (sx, sy) = self.cam.world_to_screen(wx, wy);
+                    let sz = (STEP as f32 * 2.4 + layer as f32 * 26.0) * iso::TILE_HALF_W * 0.14 * zoom * 4.0;
+                    let a = if deep { 0.16 } else { 0.08 } * (1.0 - layer as f32 * 0.3);
+                    self.gfx.sprite(out, book.glow_soft, sx, sy, sz, sz * 0.55, [0.35, 0.4, 0.5, a]);
                 }
             }
         }
@@ -3347,6 +3442,12 @@ impl App {
                     let team = (e.owner as usize).min(1);
                     let r = book.building(btype, team);
                     let (ax, ay) = BUILDING_ANCHOR[btype];
+                    // Drop shadow: light from the upper-left.
+                    {
+                        let fw = self.state.data.buildings[e.def as usize].footprint.0 as f32;
+                        let sw = fw * iso::TILE_HALF_W * 2.1 * zoom;
+                        self.gfx.sprite(out, book.circle, sx + 4.0 * zoom, sy + 3.0 * zoom, sw, sw * 0.45, [0.0, 0.0, 0.0, 0.28]);
+                    }
                     if selected {
                         let d = &self.state.data.buildings[e.def as usize];
                         let w = d.footprint.0 as f32 * iso::TILE_HALF_W * 2.0 * zoom;
@@ -3451,7 +3552,7 @@ impl App {
                     };
                     let sw = d.radius.to_f32() * 44.0 * zoom;
                     let shadow_a = if d.fly { 0.22 } else { 0.35 };
-                    self.gfx.sprite(out, book.circle, sx, sy + 2.0 * zoom, sw, sw * 0.45, [0.0, 0.0, 0.0, shadow_a]);
+                    self.gfx.sprite(out, book.circle, sx + 3.0 * zoom, sy + 2.5 * zoom, sw, sw * 0.45, [0.0, 0.0, 0.0, shadow_a]);
                     if selected {
                         let rw = sw + 8.0 * zoom;
                         self.gfx.sprite(out, book.ring, sx, sy + 2.0 * zoom, rw, rw * 0.5, [0.35, 1.0, 0.35, 0.9]);
@@ -3708,10 +3809,15 @@ impl App {
                 }
                 EffKind::Vapor => {
                     let (sx, sy) = self.world_to_screen_elev(e.ax, e.ay);
-                    let rise = 20.0 * f * zoom;
+                    let (c, dir): ([f32; 3], f32) = if e.style == 1 {
+                        ([0.5, 0.95, 0.4], 0.35) // hive spores: lazy drift up
+                    } else {
+                        ([0.35, 0.9, 0.8], 1.0)
+                    };
+                    let rise = 20.0 * f * dir * zoom;
                     let sz = (5.0 + f * 10.0) * zoom;
                     let a = (1.0 - f) * 0.25 * (f * 6.0).min(1.0);
-                    self.gfx.sprite(glow, book.glow_soft, sx + (f * 7.0).sin() * 2.5 * zoom, sy - 8.0 * zoom - rise, sz, sz * 0.8, [0.35, 0.9, 0.8, a]);
+                    self.gfx.sprite(glow, book.glow_soft, sx + (f * 7.0).sin() * 2.5 * zoom, sy - 8.0 * zoom - rise, sz, sz * 0.8, [c[0], c[1], c[2], a]);
                 }
                 EffKind::Spark => {
                     let (sx, sy) = self.world_to_screen_elev(e.ax, e.ay);
