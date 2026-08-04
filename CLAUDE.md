@@ -241,4 +241,9 @@ of all versions.
 4. macOS builds are unsigned — Gatekeeper right-click-open. Needs an
    Apple Developer ID in CI.
 5. Ferron balance is young — watch the `balance` round-robin after any
-   numbers change.
+   numbers change (VC leans ahead of Ferron; 8-seed Hard-bot runs are
+   noisy, don't over-tune on one sweep).
+6. Hard-bot mirrors on thornwood mostly hit the 20-minute balance
+   budget (all races — turtling on the multi-base map), so the balance
+   example's thornwood rows are mostly stalls. Normal-difficulty soak
+   games finish fine.
