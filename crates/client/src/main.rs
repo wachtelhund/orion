@@ -42,6 +42,7 @@ struct Shell {
     replay_open: Option<String>,
     replay_shot: Option<(String, String, u32)>,
     map_arg: Option<String>,
+    races_arg: Option<(u8, u8)>,
 }
 
 impl ApplicationHandler for Shell {
@@ -77,14 +78,18 @@ impl ApplicationHandler for Shell {
             app.shot_bot0 = Some(app::Bot2::new(0));
             app.follow = self.record_follow;
         }
+        let (r0, r1) = self.races_arg.unwrap_or((0, 1));
         if let Some(m) = &self.map_arg {
             if let Some(k) = orion_sim::map::MAP_NAMES.iter().position(|n| n == m) {
                 app.map_choice = k;
                 app.game_map = m.clone();
-                app.state = app::new_game_with(0, 1, m);
+                app.state = app::new_game_with(r0, r1, m);
             } else {
                 eprintln!("unknown map '{m}', maps: {:?}", orion_sim::map::MAP_NAMES);
             }
+        } else if self.races_arg.is_some() {
+            let map = app.game_map.clone();
+            app.state = app::new_game_with(r0, r1, &map);
         }
         if let Some(path) = &self.replay_open {
             app.start_replay(std::path::Path::new(path));
@@ -218,6 +223,15 @@ fn main() {
         .position(|a| a == "--map")
         .and_then(|i| args.get(i + 1))
         .cloned();
+    // --races A,B — bot race indices for --shot/--record captures.
+    let races_arg = args
+        .iter()
+        .position(|a| a == "--races")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|s| {
+            let (a, b) = s.split_once(',')?;
+            Some((a.parse().ok()?, b.parse().ok()?))
+        });
     // --replay path — open straight into the replay viewer.
     let replay_open = args
         .iter()
@@ -259,6 +273,7 @@ fn main() {
         replay_open,
         replay_shot,
         map_arg,
+        races_arg,
         ..Default::default()
     };
     event_loop.run_app(&mut shell).expect("run app");

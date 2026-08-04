@@ -11,13 +11,18 @@ fn main() {
         .nth(1)
         .and_then(|s| s.parse().ok())
         .unwrap_or(8);
-    let matchups: [(u8, u8, &str); 4] = [
+    let matchups: [(u8, u8, &str); 9] = [
         (0, 0, "VC mirror"),
         (1, 1, "Kyth mirror"),
+        (2, 2, "Ferron mirror"),
         (0, 1, "VC vs Kyth"),
         (1, 0, "Kyth vs VC"),
+        (0, 2, "VC vs Ferron"),
+        (2, 0, "Ferron vs VC"),
+        (1, 2, "Kyth vs Ferron"),
+        (2, 1, "Ferron vs Kyth"),
     ];
-    let mut race_wins = [0u32; 2];
+    let mut race_wins = [0u32; 3];
     for map_name in MAP_NAMES {
         println!("--- {map_name} (Hard, {n} seeds/matchup) ---");
         for (ra, rb, label) in matchups {
@@ -73,7 +78,7 @@ fn main() {
         }
     }
     println!(
-        "cross-race total: VC {} - {} Kyth",
-        race_wins[0], race_wins[1]
+        "cross-race total: VC {}  Kyth {}  Ferron {}",
+        race_wins[0], race_wins[1], race_wins[2]
     );
 }

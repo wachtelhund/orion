@@ -70,7 +70,7 @@ pub struct Effect {
 
 /// Building sprite anchor: canvas point that sits on the building's world
 /// center. [type] -> (x, y) in canvas px. hq, depot, barracks, condenser.
-pub const BUILDING_ANCHOR: [(f32, f32); 14] = [
+pub const BUILDING_ANCHOR: [(f32, f32); 21] = [
     (50.0, 54.0), // hq
     (34.0, 46.0), // depot
     (50.0, 50.0), // barracks
@@ -85,6 +85,13 @@ pub const BUILDING_ANCHOR: [(f32, f32); 14] = [
     (48.0, 50.0), // incubator
     (42.0, 56.0), // roost
     (33.0, 42.0), // cortex
+    (50.0, 54.0), // bastion
+    (34.0, 46.0), // mast
+    (34.0, 42.0), // fumetap
+    (50.0, 50.0), // assembly
+    (50.0, 50.0), // refit
+    (50.0, 48.0), // skydock
+    (33.0, 42.0), // relay
 ];
 
 pub struct App {
@@ -250,6 +257,12 @@ impl App {
                 "stormcaller" => 5,
                 "bulwark" => 13,
                 "burrower" => 15,
+                "scrapper" => 16,
+                "arclight" => 17,
+                "mauler" => 18,
+                "lodestone" => 19,
+                "kestrel" => 20,
+                "resonant" => 21,
                 "kdrone" => 7,
                 "skitter" => 8,
                 "spitter" => 9,
@@ -276,7 +289,14 @@ impl App {
                 "warren" => 10,
                 "incubator" => 11,
                 "roost" => 12,
-                _ => 13,
+                "cortex" => 13,
+                "bastion" => 14,
+                "mast" => 15,
+                "fumetap" => 16,
+                "assembly" => 17,
+                "refit" => 18,
+                "skydock" => 19,
+                _ => 20,
             })
             .collect();
         let headless = smoke || shot.is_some();
@@ -408,6 +428,8 @@ impl App {
                 let d = &self.state.data.units[e.def as usize];
                 if d.race == 1 {
                     if self.ack_flip { Sfx::SelKyth1 } else { Sfx::SelKyth2 }
+                } else if d.race == 2 {
+                    if self.ack_flip { Sfx::SelFer1 } else { Sfx::SelFer2 }
                 } else if d.harvester {
                     Sfx::SelVcWorker
                 } else if self.ack_flip {

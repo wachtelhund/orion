@@ -305,7 +305,7 @@ pub fn run_game(cfg: GameConfig) -> GameReport {
 /// Standard soak matrix: `n` games across all race matchups with varied
 /// seeds/styles. Deterministic given `base_seed`.
 pub fn soak_configs(n: usize, base_seed: u64, shadow_every: usize) -> Vec<GameConfig> {
-    let matchups = [[0u8, 0u8], [1, 1], [0, 1], [1, 0]];
+    let matchups = [[0u8, 0u8], [1, 1], [2, 2], [0, 1], [1, 0], [0, 2], [2, 0], [1, 2], [2, 1]];
     (0..n)
         .map(|k| {
             let seed = base_seed

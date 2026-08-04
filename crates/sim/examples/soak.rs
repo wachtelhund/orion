@@ -34,9 +34,9 @@ fn main() {
     let wall = start.elapsed();
 
     // ---- aggregate ----
-    let race_name = |r: u8| if r == 0 { "VC" } else { "Kyth" };
+    let race_name = |r: u8| ["VC", "Kyth", "Ferron"][r as usize];
     println!("\n=== ORION SOAK: {} games in {:.1}s ===", reports.len(), wall.as_secs_f32());
-    for matchup in [[0u8, 0u8], [1, 1], [0, 1], [1, 0]] {
+    for matchup in [[0u8, 0u8], [1, 1], [2, 2], [0, 1], [1, 0], [0, 2], [2, 0], [1, 2], [2, 1]] {
         let games: Vec<&GameReport> =
             reports.iter().filter(|r| r.cfg.races == matchup).collect();
         if games.is_empty() {
