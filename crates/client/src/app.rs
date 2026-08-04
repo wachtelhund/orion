@@ -12,7 +12,7 @@ use orion_sim::ai::{Bot, Difficulty};
 use orion_sim::net::{Lockstep, Started};
 use orion_sim::data::DefId;
 use orion_sim::map::{meridian, TileKind, TilePos};
-use orion_sim::state::{SimEvent, NEUTRAL, RES_GEYSER, RES_MINERALS};
+use orion_sim::state::{BuildPhase, GatherPhase, SimEvent, NEUTRAL, RES_GEYSER, RES_MINERALS};
 use orion_sim::{Command, EntityId, EntityKind, FxVec2, GameData, Order, State};
 
 use crate::atlas::hash2;
@@ -1218,12 +1218,46 @@ impl App {
         });
     }
 
+    /// Build orders a worker already has: current + shift-queued + commands
+    /// issued this frame but not yet stepped. Used to spread placements
+    /// across the selection instead of piling them on one worker.
+    fn pending_builds_of(&self, worker: EntityId) -> usize {
+        let e = &self.state.entities[worker.idx as usize];
+        let in_orders = std::iter::once(&e.order)
+            .chain(e.order_queue.iter())
+            .filter(|o| matches!(o, Order::Build { .. }))
+            .count();
+        let in_pending = self
+            .pending
+            .iter()
+            .filter(|(_, c)| matches!(c, Command::Build { worker: w, .. } if *w == worker))
+            .count();
+        in_orders + in_pending
+    }
+
     fn try_place(&mut self, def: DefId) {
-        let Some(builder) = self.selected_builder() else {
+        // Spread builds across selected workers: each placement goes to the
+        // builder with the fewest build orders (nearest on ties), so 3
+        // queued buildings with 5 workers selected = 3 workers peel off and
+        // the other 2 keep doing what they were doing.
+        let site = self.hovered_site(def);
+        let builders: Vec<EntityId> = self
+            .own_selected_units()
+            .filter(|id| {
+                let e = &self.state.entities[id.idx as usize];
+                self.state.data.units[e.def as usize].builder
+            })
+            .collect();
+        let Some(&builder) = builders.iter().min_by_key(|id| {
+            let e = &self.state.entities[id.idx as usize];
+            let dx = e.pos.x.to_f32() - (site.x as f32 + 0.5);
+            let dy = e.pos.y.to_f32() - (site.y as f32 + 0.5);
+            let dist = ((dx * dx + dy * dy) * 16.0) as i64;
+            (self.pending_builds_of(**id), dist, id.idx)
+        }) else {
             self.mode = Mode::Normal;
             return;
         };
-        let site = self.hovered_site(def);
         if !self.state.valid_building_site(def, site, Some(builder.idx)) {
             self.deny("CANNOT BUILD THERE");
             return;
@@ -1238,12 +1272,20 @@ impl App {
             self.deny("NOT ENOUGH PLASMA");
             return;
         }
-        // Shift both chains placement mode and queues the build order.
+        // A worker with build work already gets this appended; a free one
+        // starts now. With a single worker selected, shift keeps its usual
+        // "queue after current activity" meaning.
+        let queued = if builders.len() == 1 {
+            self.shift
+        } else {
+            self.pending_builds_of(builder) > 0
+        };
+        // Shift also chains placement mode for the next building.
         self.pending.push((self.human, Command::Build {
             worker: builder,
             building: def,
             site,
-            queued: self.shift,
+            queued,
         }));
         self.sfx(Sfx::Click);
     }
@@ -2010,8 +2052,13 @@ impl App {
     fn run_script(&mut self, prefix: &str) {
         self.in_game = true;
         self.page = MenuPage::None;
-        let captures: [(u32, &str); 4] =
-            [(300, "econ"), (1500, "build"), (3100, "army"), (4800, "attack")];
+        let captures: [(u32, &str); 5] = [
+            (300, "econ"),
+            (1500, "build"),
+            (2008, "multibuild"),
+            (3100, "army"),
+            (4800, "attack"),
+        ];
         let mut ci = 0;
         while ci < captures.len() {
             let (t, name) = captures[ci];
@@ -2089,6 +2136,10 @@ impl App {
                     }
                 }
             }
+            // Multi-worker placement through the real try_place path: 3
+            // workers selected + 2 placements must peel off 2 DIFFERENT
+            // workers and leave the third mining.
+            2000 => self.script_multibuild(),
             2500 | 2540 | 2580 | 2620 => {
                 if let Some(b) = self.own_building_tagged("barracks") {
                     let tr = self.state.data.unit_tag("trooper");
@@ -2143,6 +2194,74 @@ impl App {
         }
     }
 
+    /// Select 3 mining workers, place two depots via try_place, and assert
+    /// the builds went to two distinct workers while the third kept mining.
+    fn script_multibuild(&mut self) {
+        let miners: Vec<EntityId> = self
+            .own_units_of(|d| d.builder)
+            .into_iter()
+            .filter(|id| {
+                matches!(self.state.entities[id.idx as usize].order, Order::Gather { .. })
+            })
+            .take(3)
+            .collect();
+        if miners.len() < 3 {
+            return; // economy not there yet; skip rather than flake
+        }
+        self.selection = miners.clone();
+        let def = self.state.data.building_tag("depot");
+        let Some(hq) = self.own_building_tagged("hq") else { return };
+        let hq_tile = TilePos::of(self.state.entities[hq.idx as usize].pos);
+        let mut placed = 0;
+        'search: for r in 3i32..14 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    let site = TilePos::new(hq_tile.x + dx, hq_tile.y + dy);
+                    if self.state.valid_building_site(def, site, None) {
+                        let (fw, fh) = self.state.data.buildings[def as usize].footprint;
+                        self.mouse = self.cam.world_to_screen(
+                            site.x as f32 + fw as f32 * 0.5,
+                            site.y as f32 + fh as f32 * 0.5,
+                        );
+                        let before = self.pending.len();
+                        self.try_place(def);
+                        if self.pending.len() > before {
+                            placed += 1;
+                            if placed == 2 {
+                                break 'search;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let build_workers: Vec<EntityId> = self
+            .pending
+            .iter()
+            .filter_map(|(_, c)| match c {
+                Command::Build { worker, queued, .. } => {
+                    assert!(!queued, "script: distributed builds must start immediately");
+                    Some(*worker)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(build_workers.len(), 2, "script: expected 2 placements to issue");
+        assert_ne!(
+            build_workers[0], build_workers[1],
+            "script: both builds went to the same worker"
+        );
+        let untouched = miners
+            .iter()
+            .filter(|id| !build_workers.contains(id))
+            .count();
+        assert_eq!(untouched, 1, "script: exactly one worker should keep mining");
+        println!("script: multibuild distributed across 2 workers, 1 left mining");
+    }
+
     fn free_builder(&self) -> Option<EntityId> {
         self.own_units_of(|d| d.builder).into_iter().find(|id| {
             !matches!(
@@ -2155,6 +2274,9 @@ impl App {
     fn stage_script_selection(&mut self, stage: &str) {
         self.selection = match stage {
             "econ" => self.own_building_tagged("hq").into_iter().collect(),
+            // Keep the workers script_multibuild selected — the capture
+            // verifies their order-queue lines (build sites + gather).
+            "multibuild" => return,
             "build" => self
                 .own_building_tagged("condenser")
                 .or_else(|| self.own_building_tagged("depot"))
@@ -2210,6 +2332,7 @@ impl App {
         self.draw_entities(&mut out);
         self.draw_air_effects(&mut out);
         self.draw_waypoints(&mut out);
+        self.draw_saturation(&mut out);
         self.draw_placement_ghost(&mut out);
         self.draw_selection_box(&mut out);
         self.draw_hud(&mut out);
@@ -2444,8 +2567,58 @@ impl App {
                         [tint[0] * flash, tint[1] * flash, tint[2] * flash, tint[3]],
                     );
                     if e.amount > 0 {
+                        // Carried cargo: a bobbing chunk so full workers read
+                        // at a glance.
                         let c = if e.carry_gas { GAS_COLOR } else { MINERAL_COLOR };
-                        self.gfx.sprite(out, book.spark, sx + 5.0 * zoom, sy - 14.0 * zoom, 5.0 * zoom, 5.0 * zoom, [c[0], c[1], c[2], 1.0]);
+                        let bob = ((self.state.tick as f32 * 0.3 + i as f32).sin()) * 1.2 * zoom;
+                        self.gfx.sprite(out, book.spark, sx + 6.0 * zoom, sy - 15.0 * zoom + bob, 7.0 * zoom, 7.0 * zoom, [c[0], c[1], c[2], 1.0]);
+                    }
+                    // Active-work feedback: chip sparks while mining, weld
+                    // arcs while constructing — driven straight off the
+                    // order state, no effect bookkeeping.
+                    match &e.order {
+                        Order::Gather { resource, phase: GatherPhase::Mining { .. }, .. } => {
+                            if let Some(res) = self.state.get(*resource) {
+                                let (rx, ry) = self
+                                    .world_to_screen_elev(res.pos.x.to_f32(), res.pos.y.to_f32());
+                                // Chip point on the crystal, on the worker's side.
+                                let px = rx + (sx - rx) * 0.35;
+                                let py = ry + (sy - ry) * 0.35 - 6.0 * zoom;
+                                let h = crate::atlas::hash2(i as i32, (self.state.tick / 3) as i32, 77);
+                                if h % 8 < 4 {
+                                    let c = if res.kind == EntityKind::Building {
+                                        GAS_COLOR
+                                    } else {
+                                        MINERAL_COLOR
+                                    };
+                                    self.gfx.beam(out, sx, sy - 8.0 * zoom, px, py, 1.2 * zoom, [1.0, 1.0, 0.9, 0.7]);
+                                    for k in 0..2 {
+                                        let hk = crate::atlas::hash2(k, h as i32, 31);
+                                        let ox = ((hk % 11) as f32 - 5.0) * zoom;
+                                        let oy = ((hk >> 4) % 7) as f32 * zoom * 0.5;
+                                        self.gfx.sprite(out, book.spark, px + ox, py - oy, 4.0 * zoom, 4.0 * zoom, [c[0], c[1], c[2], 0.9]);
+                                    }
+                                }
+                            }
+                        }
+                        Order::Build { phase: BuildPhase::Constructing { building }, .. } => {
+                            if let Some(b) = self.state.get(*building) {
+                                let (bx, by) = self
+                                    .world_to_screen_elev(b.pos.x.to_f32(), b.pos.y.to_f32());
+                                let h = crate::atlas::hash2(i as i32, (self.state.tick / 2) as i32, 913);
+                                let fw = self.state.data.buildings[b.def as usize].footprint.0 as f32;
+                                let ox = ((h % 100) as f32 / 100.0 - 0.5) * fw * 20.0 * zoom;
+                                let oy = (((h >> 8) % 100) as f32 / 100.0) * 16.0 * zoom;
+                                // Weld arc from the worker to a wandering
+                                // point on the structure + white-hot spark.
+                                if h % 8 < 5 {
+                                    self.gfx.beam(out, sx, sy - 8.0 * zoom, bx + ox, by - oy, 1.3 * zoom, [1.0, 0.95, 0.6, 0.8]);
+                                    self.gfx.sprite(out, book.spark, bx + ox, by - oy, 6.0 * zoom, 6.0 * zoom, [1.0, 1.0, 0.85, 0.95]);
+                                    self.gfx.sprite(out, book.spark, bx + ox + 3.0 * zoom, by - oy + 2.0 * zoom, 3.5 * zoom, 3.5 * zoom, [1.0, 0.8, 0.3, 0.9]);
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                     let hp_frac = e.hp as f32 / d.hp as f32;
                     let bar_y = sy - (r.h as f32 + 4.0) * zoom * 0.9 - hover;
@@ -2543,7 +2716,7 @@ impl App {
                 if let Order::Build {
                     def,
                     site,
-                    phase: orion_sim::state::BuildPhase::Travel,
+                    phase: BuildPhase::Travel,
                     ..
                 } = order
                 {
@@ -2576,6 +2749,117 @@ impl App {
         }
     }
 
+    /// Harvester saturation labels ("8/16" over a base, "2/3" over an
+    /// extractor) whenever the selection involves the economy: a worker,
+    /// a depot, or an extractor.
+    fn draw_saturation(&self, out: &mut Vec<Inst>) {
+        let econ_selected = self.selection.iter().any(|id| {
+            self.state.get(*id).is_some_and(|e| {
+                e.owner == self.human
+                    && match e.kind {
+                        EntityKind::Unit => self.state.data.units[e.def as usize].harvester,
+                        EntityKind::Building => {
+                            let d = &self.state.data.buildings[e.def as usize];
+                            d.deposit || d.gas_extractor
+                        }
+                        _ => false,
+                    }
+            })
+        });
+        if !econ_selected {
+            return;
+        }
+        let ents = &self.state.entities;
+        // Nearest own completed depot for each live mineral patch.
+        let depots: Vec<usize> = (0..ents.len())
+            .filter(|&j| {
+                let e = &ents[j];
+                e.alive
+                    && e.owner == self.human
+                    && e.kind == EntityKind::Building
+                    && e.construction.is_none()
+                    && self.state.data.buildings[e.def as usize].deposit
+            })
+            .collect();
+        let patch_depot: Vec<(usize, usize)> = (0..ents.len())
+            .filter(|&j| {
+                let e = &ents[j];
+                e.alive && e.kind == EntityKind::Resource && e.def == RES_MINERALS && e.amount > 0
+            })
+            .filter_map(|j| {
+                depots
+                    .iter()
+                    .copied()
+                    .min_by_key(|&d| {
+                        let dx = (ents[d].pos.x - ents[j].pos.x).to_f32();
+                        let dy = (ents[d].pos.y - ents[j].pos.y).to_f32();
+                        ((dx * dx + dy * dy) * 16.0) as i64
+                    })
+                    .map(|d| (j, d))
+            })
+            .collect();
+        // Who is gathering what (current order only — one loop covers
+        // ToResource, Mining and ToDepot phases).
+        let mut on_patch = vec![0u32; ents.len()];
+        for e in ents.iter() {
+            if e.alive && e.owner == self.human && e.kind == EntityKind::Unit {
+                if let Order::Gather { resource, .. } = e.order {
+                    if self.state.get(resource).is_some() {
+                        on_patch[resource.idx as usize] += 1;
+                    }
+                }
+            }
+        }
+        let zoom = self.cam.zoom;
+        let ts = (1.6 * zoom).clamp(1.2, 2.4);
+        let label = |out: &mut Vec<Inst>, j: usize, n: u32, cap: u32, c3: [f32; 3]| {
+            let e = &ents[j];
+            let btype = self.building_type[e.def as usize];
+            let top = self.gfx.book.building_px_h[btype] as f32;
+            let (sx, sy) = self.world_to_screen_elev(e.pos.x.to_f32(), e.pos.y.to_f32());
+            let text = format!("{n}/{cap}");
+            let w = self.gfx.text_width(ts, &text);
+            let color = if n > cap {
+                [1.0, 0.45, 0.25, 0.95]
+            } else if n == cap {
+                [1.0, 0.85, 0.3, 0.95]
+            } else {
+                [0.95, 0.98, 1.0, 0.95]
+            };
+            let x = sx - w * 0.5;
+            let y = sy - (top + 12.0) * zoom;
+            self.gfx.quad(out, x - 10.0 * zoom - 2.0, y - 2.0, w + 12.0 * zoom + 4.0, 9.0 * ts, [0.02, 0.05, 0.08, 0.6]);
+            self.gfx.sprite(out, self.gfx.book.spark, x - 5.0 * zoom, y + 3.5 * ts, 7.0 * zoom, 7.0 * zoom, [c3[0], c3[1], c3[2], 1.0]);
+            self.gfx.text(out, x, y, ts, color, &text);
+        };
+        // Mineral line per depot: cap 2 workers per live patch.
+        for &d in &depots {
+            let mut n = 0u32;
+            let mut patches = 0u32;
+            for &(p, dd) in &patch_depot {
+                if dd == d {
+                    patches += 1;
+                    n += on_patch[p];
+                }
+            }
+            if patches > 0 {
+                label(out, d, n, patches * 2, MINERAL_COLOR);
+            }
+        }
+        // Extractors: cap 3.
+        for (j, e) in ents.iter().enumerate() {
+            if e.alive
+                && e.owner == self.human
+                && e.kind == EntityKind::Building
+                && e.construction.is_none()
+                && self.state.data.buildings[e.def as usize].gas_extractor
+                && e.amount > 0
+            {
+                label(out, j, on_patch[j], 3, GAS_COLOR);
+            }
+        }
+    }
+
     /// Waypoint lines for selected units + rally line for selected buildings.
     fn draw_waypoints(&self, out: &mut Vec<Inst>) {
         let book = &self.gfx.book;
@@ -2590,6 +2874,20 @@ impl App {
                     let (target, color) = match order {
                         Order::Move { target, .. } => (*target, [0.35, 1.0, 0.35, 0.35]),
                         Order::AttackMove { target, .. } => (*target, [1.0, 0.4, 0.3, 0.35]),
+                        // Worker plans are part of the chain: amber to a
+                        // build site, mineral-blue to a gather target.
+                        Order::Build { def, site, .. } => {
+                            let (fw, fh) = self.state.data.buildings[*def as usize].footprint;
+                            let c = fx(
+                                site.x as f32 + fw as f32 * 0.5,
+                                site.y as f32 + fh as f32 * 0.5,
+                            );
+                            (c, [1.0, 0.8, 0.3, 0.45])
+                        }
+                        Order::Gather { resource, .. } => {
+                            let Some(r) = self.state.get(*resource) else { continue };
+                            (r.pos, [0.45, 0.85, 1.0, 0.45])
+                        }
                         _ => continue,
                     };
                     let p = self.world_to_screen_elev(target.x.to_f32(), target.y.to_f32());
@@ -2598,7 +2896,8 @@ impl App {
                     prev = p;
                 }
             } else if e.kind == EntityKind::Building
-                && e.construction.is_none()
+                // Under-construction production buildings show their preset
+                // rally too — the sim honors it, so the UI must.
                 && !self.state.data.buildings[e.def as usize].trains.is_empty()
                 && e.rally != e.pos
             {

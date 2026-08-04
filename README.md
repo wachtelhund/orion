@@ -77,6 +77,11 @@ Playable game — single player vs AI, or 1v1 multiplayer (direct connect):
   tightness and aggression timing)
 - Order queueing (shift), control groups, ctrl+click type-select, rally
   points with auto-gather, production queue with cancel/refund
+- Worker-friendly macro UX: placements spread across selected workers (5
+  workers + 3 queued buildings = 3 peel off, 2 keep mining), order-queue
+  lines show each worker's plan (build sites, gather targets), mining chip
+  sparks + construction weld arcs, saturation labels over bases and
+  extractors (workers / cap)
 - Hover tooltips on every HUD element (units, buildings, research, actions)
 - Procedural audio: ambient music loop + combat/UI/economy sound effects,
   all synthesized at startup (no asset files); volume sliders in settings
