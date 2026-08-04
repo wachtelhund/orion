@@ -62,7 +62,7 @@ const GOLD_TXT: [f32; 4] = [0.95, 0.78, 0.25, 1.0];
 
 impl App {
     pub(crate) fn console_h(&self) -> f32 {
-        118.0 * self.ui()
+        150.0 * self.ui()
     }
 
     // ---------------------------------------------------- chrome helpers ----
@@ -139,7 +139,7 @@ impl App {
         let ui = self.ui();
         let w = self.cam.screen_w;
         let cy = self.cam.screen_h - self.console_h();
-        let card_w = 4.0 * (56.0 * ui) + 18.0 * ui;
+        let card_w = 4.0 * (64.0 * ui) + 18.0 * ui;
         (w - card_w - 76.0 * ui, cy + 6.0 * ui, 64.0 * ui, 20.0 * ui)
     }
 
@@ -295,12 +295,12 @@ impl App {
         let ui = self.ui();
         let (mx, _, size) = self.minimap_rect();
         let x0 = mx + size + 24.0 * ui;
-        let tx = x0 + 84.0 * ui + 16.0 * ui;
+        let tx = x0 + 104.0 * ui + 16.0 * ui;
         let sx = tx + 240.0 * ui;
         let sy = self.cam.screen_h - self.console_h() + 14.0 * ui;
         // Never run under the MENU button on narrow windows.
         let avail = self.menu_button_rect().0 - 10.0 * ui - sx;
-        let cols = ((avail / (34.0 * ui)).floor() as usize).clamp(1, 9);
+        let cols = ((avail / (40.0 * ui)).floor() as usize).clamp(1, 9);
         let mut out = Vec::new();
         let mut k = 0;
         for id in self.selection.iter().take(cols * 2) {
@@ -311,10 +311,10 @@ impl App {
             let col = k % cols;
             let row = k / cols;
             out.push((
-                sx + col as f32 * 34.0 * ui - 2.0,
-                sy + row as f32 * 46.0 * ui - 2.0,
-                32.0 * ui,
-                42.0 * ui,
+                sx + col as f32 * 40.0 * ui - 2.0,
+                sy + row as f32 * 58.0 * ui - 2.0,
+                38.0 * ui,
+                52.0 * ui,
                 *id,
             ));
             k += 1;
@@ -377,7 +377,7 @@ impl App {
         // Side blocks: minimap (left) and command card (right) sit higher.
         let (_, _, msize) = self.minimap_rect();
         let lw = msize + 22.0 * ui;
-        let rb_x = w - 4.0 * (56.0 * ui) - 22.0 * ui;
+        let rb_x = w - 4.0 * (64.0 * ui) - 22.0 * ui;
         self.chrome_panel(out, 0.0, cy - rise, lw, ch + rise, false);
         self.chrome_panel(out, rb_x, cy - rise, w - rb_x, ch + rise, false);
         // Angled shoulders bridging block tops down to the deck edge.
@@ -609,10 +609,10 @@ impl App {
         }
         let ui = self.ui();
         let (mx, _, size) = self.minimap_rect();
-        let x0 = mx + size + 24.0 * ui + 84.0 * ui + 16.0 * ui;
-        let y = self.cam.screen_h - self.console_h() + 66.0 * ui;
+        let x0 = mx + size + 24.0 * ui + 104.0 * ui + 16.0 * ui;
+        let y = self.cam.screen_h - self.console_h() + 84.0 * ui;
         (0..b.queue.len())
-            .map(|k| (x0 + k as f32 * 36.0 * ui, y, 32.0 * ui, 38.0 * ui, k))
+            .map(|k| (x0 + k as f32 * 42.0 * ui, y, 38.0 * ui, 44.0 * ui, k))
             .collect()
     }
 
@@ -641,7 +641,7 @@ impl App {
         let Some(e) = self.state.get(first) else { return };
 
         // Portrait: dark inset with a gold frame, SC:R style.
-        let pw = 84.0 * ui;
+        let pw = 104.0 * ui;
         self.chrome_panel(out, x0, cy + 12.0 * ui, pw, pw + 8.0 * ui, true);
         self.gold_frame(out, x0 - 2.0 * ui, cy + 10.0 * ui, pw + 4.0 * ui, pw + 12.0 * ui);
         let team = (e.owner as usize).min(1);
@@ -686,21 +686,21 @@ impl App {
                 (n.to_string(), 0)
             }
         };
-        self.gfx.text(out, tx, cy + 16.0 * ui, self.ts(2.0), white, &name);
+        self.gfx.text(out, tx, cy + 18.0 * ui, self.ts(2.6), white, &name);
         if e.kind == EntityKind::Resource {
             self.gfx.text(
                 out,
                 tx,
-                cy + 38.0 * ui,
-                self.ts(1.5),
+                cy + 46.0 * ui,
+                self.ts(1.6),
                 [MINERAL_COLOR[0], MINERAL_COLOR[1], MINERAL_COLOR[2], 1.0],
                 &format!("{} LEFT", e.amount),
             );
         } else {
             let frac = e.hp as f32 / maxhp.max(1) as f32;
-            self.gfx.text(out, tx, cy + 38.0 * ui, self.ts(1.5), dim, &format!("HP {}/{}", e.hp, maxhp));
-            self.gfx.quad(out, tx, cy + 54.0 * ui, 120.0 * ui, 5.0 * ui, [0.05, 0.05, 0.05, 1.0]);
-            self.gfx.quad(out, tx, cy + 55.0 * ui, 120.0 * ui * frac.clamp(0.0, 1.0), 3.0 * ui, hp_color(frac));
+            self.gfx.text(out, tx, cy + 46.0 * ui, self.ts(1.6), dim, &format!("HP {}/{}", e.hp, maxhp));
+            self.gfx.quad(out, tx, cy + 64.0 * ui, 140.0 * ui, 6.0 * ui, [0.05, 0.05, 0.05, 1.0]);
+            self.gfx.quad(out, tx, cy + 65.0 * ui, 140.0 * ui * frac.clamp(0.0, 1.0), 4.0 * ui, hp_color(frac));
         }
         // Extractor: show remaining gas.
         if e.kind == EntityKind::Building
@@ -710,14 +710,14 @@ impl App {
             self.gfx.text(
                 out,
                 tx,
-                cy + 66.0 * ui,
+                cy + 80.0 * ui,
                 self.ts(1.5),
                 [GAS_COLOR[0], GAS_COLOR[1], GAS_COLOR[2], 1.0],
                 &format!("PLASMA {}", e.amount),
             );
         }
         if e.construction.is_some() {
-            self.gfx.text(out, tx, cy + 66.0 * ui, self.ts(1.5), [0.95, 0.8, 0.3, 1.0], "CONSTRUCTING");
+            self.gfx.text(out, tx, cy + 80.0 * ui, self.ts(1.5), [0.95, 0.8, 0.3, 1.0], "CONSTRUCTING");
         }
         // Caster energy.
         if e.kind == EntityKind::Unit {
@@ -726,7 +726,7 @@ impl App {
                 self.gfx.text(
                     out,
                     tx,
-                    cy + 66.0 * ui,
+                    cy + 80.0 * ui,
                     self.ts(1.5),
                     [0.7, 0.55, 1.0, 1.0],
                     &format!("ENERGY {}/{}", e.energy, d.energy_max),
@@ -737,15 +737,15 @@ impl App {
         if let Some((r, p)) = e.research {
             let rdef = &self.state.data.research[r as usize];
             let frac = p as f32 / rdef.ticks.max(1) as f32;
-            self.gfx.text(out, tx, cy + 66.0 * ui, self.ts(1.5), [0.5, 0.9, 1.0, 1.0], &format!("RESEARCHING {}", rdef.name));
-            self.gfx.quad(out, tx, cy + 84.0 * ui, 120.0 * ui, 5.0 * ui, [0.05, 0.05, 0.05, 1.0]);
-            self.gfx.quad(out, tx, cy + 85.0 * ui, 120.0 * ui * frac, 3.0 * ui, [0.5, 0.9, 1.0, 1.0]);
+            self.gfx.text(out, tx, cy + 80.0 * ui, self.ts(1.5), [0.5, 0.9, 1.0, 1.0], &format!("RESEARCHING {}", rdef.name));
+            self.gfx.quad(out, tx, cy + 100.0 * ui, 140.0 * ui, 5.0 * ui, [0.05, 0.05, 0.05, 1.0]);
+            self.gfx.quad(out, tx, cy + 101.0 * ui, 140.0 * ui * frac, 3.0 * ui, [0.5, 0.9, 1.0, 1.0]);
         }
         if self.selection_types().len() > 1 {
             self.gfx.text(
                 out,
                 tx,
-                cy + 94.0 * ui,
+                cy + 116.0 * ui,
                 self.ts(1.0),
                 dim,
                 "TAB: NEXT SUBGROUP",
@@ -786,16 +786,16 @@ impl App {
             match u.kind {
                 EntityKind::Unit => {
                     let r = book.unit(self.unit_type[u.def as usize], (u.owner as usize).min(1), 2, 0);
-                    self.gfx.sprite(out, r, bx + 14.0 * ui, by + 18.0 * ui, r.w as f32 * 0.8 * ui, r.h as f32 * 0.8 * ui, WHITE);
+                    self.gfx.sprite(out, r, bx + 17.0 * ui, by + 22.0 * ui, r.w as f32 * ui, r.h as f32 * ui, WHITE);
                     let frac = u.hp as f32 / self.state.data.units[u.def as usize].hp as f32;
-                    self.gfx.quad(out, bx, by + 37.0 * ui, 28.0 * ui * frac, 2.0 * ui, hp_color(frac));
+                    self.gfx.quad(out, bx, by + 46.0 * ui, 34.0 * ui * frac, 3.0 * ui, hp_color(frac));
                 }
                 EntityKind::Building => {
                     let r = book.building(self.building_type[u.def as usize], (u.owner as usize).min(1));
-                    let s = (28.0 * ui) / r.w as f32;
-                    self.gfx.sprite(out, r, bx + 14.0 * ui, by + 18.0 * ui, r.w as f32 * s, r.h as f32 * s, WHITE);
+                    let s = (34.0 * ui) / r.w as f32;
+                    self.gfx.sprite(out, r, bx + 17.0 * ui, by + 22.0 * ui, r.w as f32 * s, r.h as f32 * s, WHITE);
                     let frac = u.hp as f32 / self.state.data.buildings[u.def as usize].hp as f32;
-                    self.gfx.quad(out, bx, by + 37.0 * ui, 28.0 * ui * frac, 2.0 * ui, hp_color(frac));
+                    self.gfx.quad(out, bx, by + 46.0 * ui, 34.0 * ui * frac, 3.0 * ui, hp_color(frac));
                 }
                 EntityKind::Resource => continue,
             }
@@ -808,8 +808,8 @@ impl App {
         let ui = self.ui();
         let w = self.cam.screen_w;
         let cy = self.cam.screen_h - self.console_h();
-        let bw = 52.0 * ui;
-        let bh = 46.0 * ui;
+        let bw = 60.0 * ui;
+        let bh = 56.0 * ui;
         let gap = 4.0 * ui;
         let bx0 = w - 4.0 * (bw + gap) - 10.0 * ui;
         let mut list: Vec<(String, String, CardIcon, CardAction, Vec<(String, [f32; 4])>)> =

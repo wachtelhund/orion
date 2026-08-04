@@ -576,23 +576,22 @@ fn chrome_panel_canvas(w: i32, h: i32, level: f32) -> Canvas {
             c.set(x, y, scale(NAVY, f));
         }
     }
-    // Sparse circuit traces: thin lit lines with elbow bends + node dots.
-    let traces = (w * h / 3800).max(3);
+    // Faint circuit traces — barely-there detailing. Bright marks at this
+    // scale read as broken pixels, not texture (user report), so: few,
+    // dim, and no glowing endpoint nodes.
+    let traces = (w * h / 9000).max(2);
     for k in 0..traces {
         let hsh = hash2(k, w + h, 913);
-        let x0 = 8 + (hsh % (w as u32 - 16)) as i32;
-        let y0 = 8 + ((hsh >> 9) % (h as u32 - 16)) as i32;
-        let len = 12 + ((hsh >> 18) % 26) as i32;
+        let x0 = 10 + (hsh % (w as u32 - 20)) as i32;
+        let y0 = 10 + ((hsh >> 9) % (h as u32 - 20)) as i32;
+        let len = 10 + ((hsh >> 18) % 18) as i32;
         let vertical = hsh & 1 == 0;
-        let lit: Color = [64, 96, 148, 255];
         for s in 0..len {
             let (x, y) = if vertical { (x0, y0 + s) } else { (x0 + s, y0) };
-            if x < w - 6 && y < h - 6 {
-                c.blend(x, y, [lit[0], lit[1], lit[2], 130]);
+            if x < w - 8 && y < h - 8 {
+                c.blend(x, y, [58, 82, 124, 55]);
             }
         }
-        let (ex, ey) = if vertical { (x0, (y0 + len).min(h - 7)) } else { ((x0 + len).min(w - 7), y0) };
-        c.rect(ex - 1, ey - 1, 3, 3, [110, 170, 230, 200]);
     }
     c
 }

@@ -236,7 +236,7 @@ impl App {
             }
             MenuPage::Settings { .. } => {
                 let s = &self.settings;
-                let y0 = h * 0.17;
+                let y0 = h * 0.185;
                 let rows = vec![
                     (
                         format!("FULLSCREEN: {}", if s.fullscreen { "ON" } else { "OFF" }),
@@ -441,7 +441,7 @@ impl App {
             // Labels for slider rows + bind rows (buttons drawn below).
             let bh = 44.0 * ui;
             let gap = 12.0 * ui;
-            let y0 = h * 0.17;
+            let y0 = h * 0.185;
             let row_y = y0 + 2.0 * (bh + gap);
             let ts = self.ts(1.5);
             let hud_l = format!("HUD SIZE  {:.1}X", self.settings.hud_scale);

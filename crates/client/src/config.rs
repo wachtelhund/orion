@@ -269,7 +269,7 @@ fn fresh_player_id() -> String {
 impl Default for Settings {
     fn default() -> Settings {
         Settings {
-            hud_scale: 1.0,
+            hud_scale: 1.15,
             fullscreen: false,
             edge_scroll: true,
             game_speed: 1.0,
