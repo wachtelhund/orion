@@ -34,6 +34,15 @@ struct Params {
     mineral_buffer: u32,
     /// Build a Forge and mix in Breaker tanks.
     use_forge: bool,
+    /// How long a sighting stays in memory after it leaves vision (0 =
+    /// the bot only reacts to what it can literally see right now).
+    memory_ticks: u32,
+    /// Minimum ticks between re-issuing defense orders.
+    react_interval: u32,
+    /// Weight production toward counters of what the enemy has shown.
+    counter_build: bool,
+    /// Pull endangered workers out of harm's way.
+    worker_flee: bool,
 }
 
 impl Difficulty {
@@ -48,6 +57,10 @@ impl Difficulty {
                 reattack_interval: 24 * 30,
                 mineral_buffer: 250,
                 use_forge: false,
+                memory_ticks: 0,
+                react_interval: 24 * 3,
+                counter_build: false,
+                worker_flee: false,
             },
             Difficulty::Normal => Params {
                 think_interval: 12,
@@ -58,6 +71,10 @@ impl Difficulty {
                 reattack_interval: 24 * 20,
                 mineral_buffer: 100,
                 use_forge: true,
+                memory_ticks: 24 * 15,
+                react_interval: 24 * 2,
+                counter_build: true,
+                worker_flee: true,
             },
             Difficulty::Hard => Params {
                 think_interval: 6,
@@ -68,9 +85,28 @@ impl Difficulty {
                 reattack_interval: 24 * 12,
                 mineral_buffer: 40,
                 use_forge: true,
+                memory_ticks: 24 * 30,
+                react_interval: 12,
+                counter_build: true,
+                worker_flee: true,
             },
         }
     }
+}
+
+/// One remembered enemy presence, bucketed to an 8x8-tile cell. Entries
+/// only ever come from entities the player could actually see at the time
+/// — this is the bot's fog-honest model of "what I know is out there".
+#[derive(Clone, Copy)]
+struct Sighting {
+    pos: FxVec2,
+    /// Supply-weighted strength, split by what stands on the ground vs
+    /// what flies (the split decides who can even shoot back).
+    ground: u32,
+    air: u32,
+    /// Any enemy structure here (attack targets + "their base is there").
+    building: bool,
+    tick: u32,
 }
 
 pub struct Bot {
@@ -82,6 +118,11 @@ pub struct Bot {
     last_attack_tick: u32,
     /// The one-time worker scout has been sent.
     scouted: bool,
+    /// Decaying sightings, keyed by 8-tile grid cell (kept sorted by cell
+    /// for determinism).
+    memory: Vec<(i32, Sighting)>,
+    last_defense_tick: u32,
+    last_flee_tick: u32,
 }
 
 impl Bot {
@@ -90,11 +131,20 @@ impl Bot {
     }
 
     pub fn with(player: u8, difficulty: Difficulty) -> Bot {
-        Bot { player, difficulty, style: 0, last_attack_tick: 0, scouted: false }
+        Bot::with_style(player, difficulty, 0)
     }
 
     pub fn with_style(player: u8, difficulty: Difficulty, style: u64) -> Bot {
-        Bot { player, difficulty, style, last_attack_tick: 0, scouted: false }
+        Bot {
+            player,
+            difficulty,
+            style,
+            last_attack_tick: 0,
+            scouted: false,
+            memory: Vec::new(),
+            last_defense_tick: 0,
+            last_flee_tick: 0,
+        }
     }
 
     pub fn think(&mut self, s: &State) -> Vec<(u8, Command)> {
@@ -243,6 +293,89 @@ impl Bot {
         let gas = s.players[p as usize].gas;
         let (used, provided) = s.supply(p);
 
+        // ---- perception: fog-honest view of the enemy, folded into a
+        // decaying memory so scouting information actually gets USED ----
+        let cell = |pos: FxVec2| -> i32 {
+            (pos.y.floor_int() / 8) * 64 + (pos.x.floor_int() / 8)
+        };
+        let strength_of = |d: &crate::UnitDef| -> u32 { d.supply * 4 + 2 };
+        // Current vision pass: per-cell aggregation of visible enemies.
+        let mut seen_now: Vec<(i32, Sighting)> = Vec::new();
+        for e in s.entities.iter() {
+            if !e.alive || e.owner == p || e.owner == crate::state::NEUTRAL {
+                continue;
+            }
+            if e.kind == EntityKind::Resource {
+                continue;
+            }
+            if !s.fog[p as usize].visible(&s.map, TilePos::of(e.pos)) {
+                continue;
+            }
+            let c = cell(e.pos);
+            let (g, a, b) = match e.kind {
+                EntityKind::Unit => {
+                    let d = &s.data.units[e.def as usize];
+                    if d.fly { (0, strength_of(d), false) } else { (strength_of(d), 0, false) }
+                }
+                EntityKind::Building => (0, 0, true),
+                EntityKind::Resource => unreachable!(),
+            };
+            match seen_now.iter_mut().find(|(cc, _)| *cc == c) {
+                Some((_, sg)) => {
+                    sg.ground += g;
+                    sg.air += a;
+                    sg.building |= b;
+                }
+                None => seen_now.push((
+                    c,
+                    Sighting { pos: e.pos, ground: g, air: a, building: b, tick: s.tick },
+                )),
+            }
+        }
+        // Merge: fresh sightings replace their cell; a spot we can SEE is
+        // the ground truth (empty = forget the ghost); unseen sightings
+        // decay after memory_ticks.
+        self.memory.retain(|(c, sg)| {
+            !seen_now.iter().any(|(nc, _)| nc == c)
+                && !s.fog[p as usize].visible(&s.map, TilePos::of(sg.pos))
+                && s.tick.saturating_sub(sg.tick) < prm.memory_ticks.max(1)
+        });
+        self.memory.extend(seen_now.iter().cloned());
+        self.memory.sort_unstable_by_key(|(c, _)| *c);
+
+        // What the enemy has, as far as we know.
+        let known_air: u32 = self.memory.iter().map(|(_, sg)| sg.air).sum();
+        let known_ground: u32 = self.memory.iter().map(|(_, sg)| sg.ground).sum();
+        let known_army = known_air + known_ground;
+
+        // ---- threat evaluation: enemy strength near each of our bases ----
+        let mut base_threat: Option<(FxVec2, u32, u32)> = None; // pos, ground, air
+        let radius_sq = (crate::Fx::from_int(16).0 as i64).pow(2);
+        for e in s.entities.iter() {
+            if !(e.alive
+                && e.owner == p
+                && e.kind == EntityKind::Building
+                && s.data.buildings[e.def as usize].deposit)
+            {
+                continue;
+            }
+            let (mut tg, mut ta) = (0u32, 0u32);
+            let mut tpos = None;
+            for (_, sg) in &self.memory {
+                if crate::fixed::dist_sq_raw(e.pos, sg.pos) <= radius_sq {
+                    tg += sg.ground;
+                    ta += sg.air;
+                    tpos.get_or_insert(sg.pos);
+                }
+            }
+            if tg + ta > 0 {
+                let worse = base_threat.map_or(true, |(_, bg, ba)| tg + ta > bg + ba);
+                if worse {
+                    base_threat = Some((tpos.unwrap(), tg, ta));
+                }
+            }
+        }
+
         // ---- idle workers back to mining ----
         for &w in &idle_workers {
             if let Some(res) = nearest_mineral(s, s.entities[w as usize].pos) {
@@ -358,24 +491,56 @@ impl Bot {
                 .filter(|&u| {
                     let d = &s.data.units[u as usize];
                     !d.harvester
-                        && d.energy_max == 0 // bot skips casters
+                        && d.energy_max == 0 // casters are trained separately
                         && s.requirement_met(p, d.requires)
                         && min_left >= d.cost_minerals + prm.mineral_buffer
                         && gas_left >= d.cost_gas
                 })
                 .collect();
-            // Mix compositions: mostly the best unit, every third the
-            // cheapest — swarm filler screens the expensive core.
-            let pick = if (army.len() + e.queue.len()) % 3 == 2 {
+            // Score picks against what the enemy has SHOWN us: anti-air
+            // when they fly (mandatory if we own zero AA), splash into
+            // ground mass, value otherwise. Every third unit stays cheap
+            // filler so the swarm screens the core.
+            let own_aa: u32 = army
+                .iter()
+                .filter_map(|id| s.get(*id))
+                .filter(|e| {
+                    s.data.units[e.def as usize]
+                        .weapon
+                        .as_ref()
+                        .map_or(false, |w| w.air)
+                })
+                .count() as u32;
+            let need_aa = prm.counter_build && known_air > 0 && own_aa * 8 < known_air;
+            let score = |u: DefId| -> i64 {
+                let d = &s.data.units[u as usize];
+                let mut v = (d.cost_minerals + d.cost_gas) as i64;
+                if prm.counter_build {
+                    let hits_air = d.weapon.as_ref().map_or(false, |w| w.air);
+                    if known_air > known_ground && hits_air {
+                        v += 220;
+                    }
+                    if need_aa {
+                        v += if hits_air { 800 } else { -800 };
+                    }
+                    let splashy = d
+                        .weapon_siege
+                        .as_ref()
+                        .map_or(false, |w| w.splash.0 > 0)
+                        || d.weapon.as_ref().map_or(false, |w| w.splash.0 > 0);
+                    if known_ground > known_air.saturating_mul(3) && splashy {
+                        v += 150;
+                    }
+                }
+                v
+            };
+            let pick = if (army.len() + e.queue.len()) % 3 == 2 && !need_aa {
                 affordable.iter().copied().min_by_key(|&u| {
                     let d = &s.data.units[u as usize];
                     (d.cost_minerals + d.cost_gas, u)
                 })
             } else {
-                affordable.iter().copied().max_by_key(|&u| {
-                    let d = &s.data.units[u as usize];
-                    (d.cost_minerals + d.cost_gas, u)
-                })
+                affordable.iter().copied().max_by_key(|&u| (score(u), u))
             };
             if let Some(pick) = pick {
                 let d = &s.data.units[pick as usize];
@@ -385,17 +550,138 @@ impl Bot {
             }
         }
 
-        // ---- attack waves ----
+        // ---- attack posture: strength-aware, not a blind timer. Attack
+        // when we outmatch what we KNOW the enemy fields (memory-fed by
+        // scouting), never while the home base is under threat; target the
+        // nearest remembered enemy structure ----
+        let own_army_strength: u32 = army
+            .iter()
+            .filter_map(|id| s.get(*id))
+            .map(|e| strength_of(&s.data.units[e.def as usize]))
+            .sum();
+        let late_game = s.tick > 24 * 60 * 13;
+        let outmatch = own_army_strength >= known_army + known_army / 5;
         if army_supply >= prm.attack_supply
+            && base_threat.is_none()
+            && (outmatch || known_army == 0 || late_game)
             && s.tick.saturating_sub(self.last_attack_tick) >= prm.reattack_interval
         {
             let enemy_start = s.map.starts[(1 - p as usize).min(s.map.starts.len() - 1)];
-            cmds.push(Command::AttackMove {
-                units: army.clone(),
-                target: enemy_start.center(),
-                queued: false,
-            });
+            let hq_pos = hq.map(|i| s.entities[i as usize].pos);
+            let target = self
+                .memory
+                .iter()
+                .filter(|(_, sg)| sg.building)
+                .min_by_key(|(c, sg)| {
+                    let d = hq_pos
+                        .map(|hp| crate::fixed::dist_sq_raw(hp, sg.pos))
+                        .unwrap_or(i64::MAX);
+                    (d, *c)
+                })
+                .map(|(_, sg)| sg.pos)
+                .unwrap_or_else(|| enemy_start.center());
+            cmds.push(Command::AttackMove { units: army.clone(), target, queued: false });
             self.last_attack_tick = s.tick;
+        }
+        // Retreat: mid-push discovery that we're badly outmatched sends the
+        // army home instead of feeding it away (late game excepted — the
+        // map is mined out, there is nothing to save up for).
+        else if !late_game
+            && self.last_attack_tick > 0
+            && s.tick.saturating_sub(self.last_attack_tick) < prm.reattack_interval
+            && known_army > own_army_strength * 2
+            && base_threat.is_none()
+        {
+            if let Some(hq_idx) = hq {
+                let home = s.entities[hq_idx as usize].pos;
+                let far: Vec<EntityId> = army
+                    .iter()
+                    .copied()
+                    .filter(|id| {
+                        s.get(*id).map_or(false, |e| {
+                            crate::fixed::dist_sq_raw(e.pos, home)
+                                > (crate::Fx::from_int(24).0 as i64).pow(2)
+                        })
+                    })
+                    .collect();
+                if !far.is_empty() {
+                    cmds.push(Command::Move { units: far, target: home, queued: false });
+                    // Back off the next push a little.
+                    self.last_attack_tick = s.tick;
+                }
+            }
+        }
+
+        // ---- base defense: the reported hole. A threat at home gets an
+        // interception force made of units that can actually SHOOT it —
+        // air harass answered by anti-air, not by melee staring upward ----
+        if let Some((tpos, tg, ta)) = base_threat {
+            if s.tick.saturating_sub(self.last_defense_tick) >= prm.react_interval {
+                let mut defenders: Vec<(i64, EntityId, u32)> = Vec::new();
+                for &id in &army {
+                    let Some(e) = s.get(id) else { continue };
+                    let d = &s.data.units[e.def as usize];
+                    let hits_air = d.weapon.as_ref().map_or(false, |w| w.air);
+                    let hits_ground = d.weapon.is_some() || d.weapon_siege.is_some();
+                    // Useful against this particular threat mix?
+                    let useful = (ta > 0 && hits_air) || (tg > 0 && hits_ground);
+                    if useful {
+                        defenders.push((
+                            crate::fixed::dist_sq_raw(e.pos, tpos),
+                            id,
+                            strength_of(d),
+                        ));
+                    }
+                }
+                defenders.sort_unstable_by_key(|(d, id, _)| (*d, id.idx));
+                // Send enough to outmatch the threat by 25%.
+                let want = (tg + ta) + (tg + ta) / 4;
+                let mut sent = 0u32;
+                let mut squad: Vec<EntityId> = Vec::new();
+                for (_, id, st) in defenders {
+                    if sent >= want {
+                        break;
+                    }
+                    squad.push(id);
+                    sent += st;
+                }
+                if !squad.is_empty() {
+                    cmds.push(Command::AttackMove { units: squad, target: tpos, queued: false });
+                    self.last_defense_tick = s.tick;
+                }
+                // Workers flee when the threat outguns what we sent.
+                if prm.worker_flee
+                    && sent < tg + ta
+                    && s.tick.saturating_sub(self.last_flee_tick) >= prm.react_interval * 2
+                {
+                    let danger_sq = (crate::Fx::from_int(9).0 as i64).pow(2);
+                    let fleeing: Vec<EntityId> = workers
+                        .iter()
+                        .filter(|&&w| {
+                            crate::fixed::dist_sq_raw(s.entities[w as usize].pos, tpos)
+                                <= danger_sq
+                        })
+                        .map(|&w| s.id_of(w))
+                        .collect();
+                    if !fleeing.is_empty() {
+                        // Run directly away from the threat, toward map center.
+                        if let Some(hq_idx) = hq {
+                            let hp = s.entities[hq_idx as usize].pos;
+                            let away = FxVec2::new(
+                                hp.x + (hp.x - tpos.x),
+                                hp.y + (hp.y - tpos.y),
+                            );
+                            let away = s.map.clamp_pos(away);
+                            cmds.push(Command::Move {
+                                units: fleeing,
+                                target: away,
+                                queued: false,
+                            });
+                            self.last_flee_tick = s.tick;
+                        }
+                    }
+                }
+            }
         }
 
         // ---- combat micro: siege positioning + storms; fog-honest (only
