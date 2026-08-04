@@ -2,7 +2,7 @@
 
 A StarCraft-style RTS built from scratch in Rust. No game engine — a
 purpose-built deterministic simulation with a wgpu isometric renderer.
-Two asymmetric races, skirmish AI, and online multiplayer via lobby codes.
+Three asymmetric races, skirmish AI, and online multiplayer via lobby codes.
 All art and audio are procedurally generated at startup: zero asset files.
 
 ![Orion gameplay — observer camera following a battle on Thornwood](docs/media/orion.gif)
@@ -47,18 +47,26 @@ Playable game — single player vs AI, or 1v1 multiplayer (direct connect):
 
 - Full macro loop: minerals + plasma (gas) → build → tech → army → destroy
   the enemy base
-- **Two asymmetric races**, authored entirely in `crates/sim/assets/units.ron`:
+- **Three asymmetric races**, authored entirely in `crates/sim/assets/units.ron`:
 - Vanguard Combine (industrial):
   - Units: Fabricator (worker), Trooper, Vanguard (melee), **Breaker (siege
-    tank with deploy mode + splash)**, **Skywing (flyer, hits air+ground)**,
-    **Stormcaller (spellcaster: Plasma Storm AoE)**
+    tank with deploy mode + splash)**, **Bulwark (deployable shield
+    projector: 35% damage soak for nearby allies)**, **Skywing (flyer, hits
+    air+ground)**, **Stormcaller (spellcaster: Plasma Storm AoE)**
   - Buildings: HQ, Supply Pylon, Muster Hall, Plasma Condenser, **Forge
     (tanks)**, **Aerie (flyers)**, **Archive (research: Weapons/Armor +1/+2)**
   - Tech tree requirements (Forge needs Muster Hall, Aerie needs Forge,
     Stormcaller needs Archive)
 - **Kyth Assembly** (swarm): Drone, Skitter (cheap fast melee), Spitter
-  (ranged anti-air), Ravager (splash melee heavy), Wisp (flyer), Weaver
-  (caster); Hive / Spire / Sap Well / Warren / Incubator / Roost / Cortex
+  (ranged anti-air), Ravager (splash melee heavy), **Burrower (ambusher:
+  burrows underground — hidden and untargetable, area damage still
+  hits)**, Wisp (flyer), Weaver (caster); Hive / Spire / Sap Well /
+  Warren / Incubator / Roost / Cortex
+- **Ferron Compact** (salvager machine-cult): Scrapper (worker), Arclight
+  (ranged anti-air walker), Mauler (melee wrecker), **Lodestone (mobile
+  long-range rail artillery with splash)**, Kestrel (flyer), Resonant
+  (caster); Bastion / Capacitor Mast / Fume Tap / Assembly Line / Refit
+  Bay / Skydock / Relay
 - **Multiplayer**: a live **lobby browser** (public games listed by player
   name, one click to join) and **private lobbies** whose 5-letter code is
   the password — all through a Cloudflare Worker relay, no IPs, no port

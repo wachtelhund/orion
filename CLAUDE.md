@@ -197,11 +197,21 @@ lobby handshake). E2E: two `--mp-auto queue:X` processes + curl /result +
 
 ## Races
 
+Three races: Vanguard Combine (0), Kyth Assembly (1), Ferron Compact (2).
 Defs carry `race: u8`; players pick races; Train/Build validate race. The
 bot is capability-driven (worker = harvester, supply = supply_provided,
 tier-0/1 production by requires-chain) so new races need data + sprites
-only. Balance workflow: run the `balance` example (matchups x seeds with
-bot personality styles) before and after any numbers change.
+only — Ferron shipped with zero engine changes. Balance workflow: run the
+`balance` example (full 3-race round-robin x maps x seeds with bot
+personality styles) before and after any numbers change; `soak` cycles
+the same 9 matchups. `--races A,B` aims `--shot`/`--record` captures at
+any matchup.
+
+Transform abilities share the siege toggle hotkey: Breakers siege,
+Bulwarks deploy a 35% damage-soak aura (strongest single aura, applied
+in `apply_damage`), Burrowers burrow (hidden + direct-fire-immune,
+`Entity::burrowed` is checksummed; area damage carries an `area` flag on
+hits and still connects; bot perception skips burrowed enemies).
 
 ## CI / releases
 
@@ -221,10 +231,14 @@ of all versions.
 
 ## Known gaps / next milestones (see SPEC.md for full list)
 
-1. Matchmaker service (queue, password lobbies, relay) from SPEC — current
-   MP is direct connect only; NAT traversal is the player's problem.
-2. **Replays**: serialize seed + command stream; nearly free.
-3. Kyth mirror has a spawn-position bias (SE favored, see balance example) —
-   suspect flow-field DIRS tie-break direction; investigate in pathing.
-4. Bot doesn't siege tanks, cast, or scout; casters are human-only tools.
-5. Sprite pipeline experiment (AI sheets vs Blender renders) still open.
+1. Bot ignores the new transform abilities (never deploys Bulwarks or
+   burrows Burrowers) — candidates for the next AI depth pass alongside
+   kiting and expansion denial.
+2. Replay sharing by code through the relay (replays themselves shipped
+   in v0.3.0; sharing is still manual file exchange).
+3. 2v2: lockstep generalizes to N players, but lobby/matchmaker/UI don't
+   yet.
+4. macOS builds are unsigned — Gatekeeper right-click-open. Needs an
+   Apple Developer ID in CI.
+5. Ferron balance is young — watch the `balance` round-robin after any
+   numbers change.

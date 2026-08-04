@@ -134,13 +134,10 @@ impl App {
         self.gfx.sprite(out, self.gfx.book.rivet, x, y, s, s, WHITE);
     }
 
-    /// The in-console MENU button (opens the pause menu).
-    pub(crate) fn menu_button_rect(&self) -> (f32, f32, f32, f32) {
+    /// Left edge of the command-card block (strip layout stops here).
+    pub(crate) fn card_block_x(&self) -> f32 {
         let ui = self.ui();
-        let w = self.cam.screen_w;
-        let cy = self.cam.screen_h - self.console_h();
-        let card_w = 4.0 * (64.0 * ui) + 18.0 * ui;
-        (w - card_w - 76.0 * ui, cy + 6.0 * ui, 64.0 * ui, 20.0 * ui)
+        self.cam.screen_w - 4.0 * (64.0 * ui) - 22.0 * ui
     }
 
     // -------------------------------------------------------- tooltips ----
@@ -290,13 +287,13 @@ impl App {
             return Vec::new();
         }
         let ui = self.ui();
-        let (mx, _, size) = self.minimap_rect();
-        let x0 = mx + size + 24.0 * ui;
+        let (_, _, size) = self.minimap_rect();
+        let x0 = size + 12.0 * ui + 26.0 * ui + 12.0 * ui; // past block + shoulder
         let tx = x0 + 104.0 * ui + 16.0 * ui;
         let sx = tx + 240.0 * ui;
         let sy = self.cam.screen_h - self.console_h() + 14.0 * ui;
         // Never run under the MENU button on narrow windows.
-        let avail = self.menu_button_rect().0 - 10.0 * ui - sx;
+        let avail = self.card_block_x() - 10.0 * ui - sx;
         let cols = ((avail / (40.0 * ui)).floor() as usize).clamp(1, 9);
         let mut out = Vec::new();
         let mut k = 0;
@@ -400,7 +397,7 @@ impl App {
         self.chrome_panel(out, 0.0, cy, w, ch, false);
         // Side blocks: minimap (left) and command card (right) sit higher.
         let (_, _, msize) = self.minimap_rect();
-        let lw = msize + 22.0 * ui;
+        let lw = msize + 12.0 * ui;
         let rb_x = w - 4.0 * (64.0 * ui) - 22.0 * ui;
         self.chrome_panel(out, 0.0, cy - rise, lw, ch + rise, false);
         self.chrome_panel(out, rb_x, cy - rise, w - rb_x, ch + rise, false);
@@ -443,25 +440,6 @@ impl App {
         self.plate(out, book.gold_v, lw + sh - 3.0 * ui, seam_y, 3.0 * ui, h - seam_y - 3.0 * ui);
         self.plate(out, book.gold_v, rb_x - sh, seam_y, 3.0 * ui, h - seam_y - 3.0 * ui);
 
-        // MENU button on the deck, left of the command card block.
-        let (mbx, mby, mbw, mbh) = self.menu_button_rect();
-        let hover = self.mouse.0 >= mbx
-            && self.mouse.0 <= mbx + mbw
-            && self.mouse.1 >= mby
-            && self.mouse.1 <= mby + mbh;
-        let r = if hover { book.menu_plate_hi } else { book.menu_plate };
-        self.plate(out, r, mbx, mby, mbw, mbh);
-        let ts = self.ts(1.2);
-        let tw = self.gfx.text_width(ts, "MENU");
-        self.gfx.text(
-            out,
-            mbx + (mbw - tw) * 0.5,
-            mby + mbh * 0.5 - ts * 3.5,
-            ts,
-            GOLD_TXT,
-            "MENU",
-        );
-
         self.draw_minimap(out);
         self.draw_info_panel(out);
         self.draw_command_card(out);
@@ -500,9 +478,12 @@ impl App {
     }
 
     pub(crate) fn minimap_rect(&self) -> (f32, f32, f32) {
+        // Fill the raised left block edge-to-edge: only the gold frame
+        // (6ui) separates map from chrome.
         let ui = self.ui();
-        let size = self.console_h() - 20.0 * ui;
-        (10.0 * ui, self.cam.screen_h - self.console_h() + 12.0 * ui, size)
+        let rise = 12.0 * ui;
+        let size = self.console_h() + rise - 12.0 * ui;
+        (6.0 * ui, self.cam.screen_h - self.console_h() - rise + 6.0 * ui, size)
     }
 
     pub(crate) fn minimap_pick(&self, sx: f32, sy: f32) -> Option<(f32, f32)> {
@@ -525,7 +506,6 @@ impl App {
         let (mx, my, size) = self.minimap_rect();
         let map = &self.state.map;
         let scale = size / map.width as f32;
-        self.chrome_panel(out, mx - 6.0 * ui, my - 6.0 * ui, size + 12.0 * ui, size + 12.0 * ui, true);
         self.gfx.quad(out, mx, my, size, size, [0.0, 0.0, 0.0, 1.0]);
         self.gold_frame(out, mx - 5.0 * ui, my - 5.0 * ui, size + 10.0 * ui, size + 10.0 * ui);
         for y in 0..map.height {
@@ -1210,7 +1190,7 @@ impl App {
         x -= 70.0 * ui + self.gfx.text_width(ts, &min_s);
         self.gfx.text(out, x, 10.0 * ui, ts, [0.75, 0.93, 1.0, 1.0], &min_s);
         let mr = book.minerals[0];
-        self.gfx.sprite(out, mr, x - 13.0 * ui, icon_y, mr.w as f32 * 0.5 * ui, mr.h as f32 * 0.5 * ui, WHITE);
+        self.gfx.sprite(out, mr, x - 13.0 * ui, icon_y, mr.w as f32 / mr.scale * 0.5 * ui, mr.h as f32 / mr.scale * 0.5 * ui, WHITE);
 
         // Clock + FPS, top-left, subtle.
         let secs = self.state.tick / 24;
@@ -1349,16 +1329,6 @@ impl App {
 
     /// A left click landed on the console. Route it.
     pub(crate) fn console_click(&mut self) {
-        // MENU button: open the pause menu.
-        let (mbx, mby, mbw, mbh) = self.menu_button_rect();
-        if self.mouse.0 >= mbx
-            && self.mouse.0 <= mbx + mbw
-            && self.mouse.1 >= mby
-            && self.mouse.1 <= mby + mbh
-        {
-            self.page = crate::menu::MenuPage::EscRoot;
-            return;
-        }
         // Minimap: move camera.
         if let Some((wx, wy)) = self.minimap_pick(self.mouse.0, self.mouse.1) {
             let (ix, iy) = crate::iso::world_to_iso(wx, wy);

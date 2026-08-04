@@ -165,6 +165,8 @@ pub struct App {
     pub mp_blocked: bool,
     /// Race picked for the human, and the enemy choice (0/1, 2 = random).
     pub chosen_race: u8,
+    /// Active settings tab: 0 general, 1 hotkeys.
+    pub settings_tab: u8,
     pub enemy_race_choice: u8,
     /// Menu map pick (index into map::MAP_NAMES) + the map of the RUNNING
     /// game (MP joiners play the host's choice, whatever their menu says).
@@ -360,6 +362,7 @@ impl App {
             map_choice: 0,
             game_map: "meridian".into(),
             chosen_race: 0,
+            settings_tab: 0,
             enemy_race_choice: 2,
             page: if headless { MenuPage::None } else { MenuPage::MainRoot },
             rebinding: None,

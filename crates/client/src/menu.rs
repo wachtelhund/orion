@@ -27,6 +27,7 @@ enum MenuAction {
     StartGame(Difficulty),
     OpenMultiplayer,
     OpenSettings,
+    SettingsTab(u8),
     Back,
     Resume,
     QuitToMenu,
@@ -294,96 +295,115 @@ impl App {
                 );
             }
             MenuPage::Settings { .. } => {
-                // Compact metrics: this page must fit BACK on screen at the
-                // default HUD scale (it used to run past the bottom).
+                // Two tabs: GENERAL (toggles + sliders) and HOTKEYS (binds).
+                // One page of options ran off screen (user report).
                 let s = &self.settings;
                 let y0 = h * 0.175;
                 let sbh = 36.0 * ui;
                 let sgap = 6.0 * ui;
-                for (k, (label, action)) in [
-                    (
-                        format!("FULLSCREEN: {}", if s.fullscreen { "ON" } else { "OFF" }),
-                        MenuAction::ToggleFullscreen,
-                    ),
-                    (
-                        format!("EDGE SCROLL: {}", if s.edge_scroll { "ON" } else { "OFF" }),
-                        MenuAction::ToggleEdge,
-                    ),
-                ]
-                .into_iter()
-                .enumerate()
-                {
+                let tab_w = 150.0 * ui;
+                for (k, label) in ["GENERAL", "HOTKEYS"].iter().enumerate() {
+                    let sel = self.settings_tab == k as u8;
                     out.push(MBtn {
-                        x: cx - bw * 0.5,
-                        y: y0 + k as f32 * (sbh + sgap),
-                        w: bw,
+                        x: cx - tab_w - 6.0 * ui + k as f32 * (tab_w + 12.0 * ui),
+                        y: y0,
+                        w: tab_w,
                         h: sbh,
-                        label,
-                        action,
+                        label: if sel { format!("[ {label} ]") } else { (*label).into() },
+                        action: MenuAction::SettingsTab(k as u8),
                         small: true,
                     });
                 }
-                // HUD size / speed / volumes with -/+ buttons.
-                let small_w = 40.0 * ui;
-                let row_y = y0 + 2.0 * (sbh + sgap);
-                for (k, (_, dv, act)) in [
-                    ("HUD SIZE", 0.1f32, 0),
-                    ("GAME SPEED", 0.25, 1),
-                    ("MUSIC", 0.1, 2),
-                    ("SOUND", 0.1, 3),
-                ]
-                .iter()
-                .enumerate()
-                {
-                    let y = row_y + k as f32 * (sbh + sgap);
-                    let mk = |d: f32| match *act {
-                        0 => MenuAction::HudScale(d * dv),
-                        1 => MenuAction::Speed(d * dv),
-                        2 => MenuAction::MusicVol(d * dv),
-                        _ => MenuAction::SfxVol(d * dv),
-                    };
-                    out.push(MBtn {
-                        x: cx - bw * 0.5,
-                        y,
-                        w: small_w,
-                        h: sbh,
-                        label: "-".into(),
-                        action: mk(-1.0),
-                        small: true,
-                    });
-                    out.push(MBtn {
-                        x: cx + bw * 0.5 - small_w,
-                        y,
-                        w: small_w,
-                        h: sbh,
-                        label: "+".into(),
-                        action: mk(1.0),
-                        small: true,
-                    });
+                let c0 = y0 + sbh + 18.0 * ui;
+                let mut back_y = c0;
+                if self.settings_tab == 0 {
+                    for (k, (label, action)) in [
+                        (
+                            format!("FULLSCREEN: {}", if s.fullscreen { "ON" } else { "OFF" }),
+                            MenuAction::ToggleFullscreen,
+                        ),
+                        (
+                            format!("EDGE SCROLL: {}", if s.edge_scroll { "ON" } else { "OFF" }),
+                            MenuAction::ToggleEdge,
+                        ),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        out.push(MBtn {
+                            x: cx - bw * 0.5,
+                            y: c0 + k as f32 * (sbh + sgap),
+                            w: bw,
+                            h: sbh,
+                            label,
+                            action,
+                            small: true,
+                        });
+                    }
+                    // HUD size / speed / volumes with -/+ buttons.
+                    let small_w = 40.0 * ui;
+                    let row_y = c0 + 2.0 * (sbh + sgap);
+                    for (k, (_, dv, act)) in [
+                        ("HUD SIZE", 0.1f32, 0),
+                        ("GAME SPEED", 0.25, 1),
+                        ("MUSIC", 0.1, 2),
+                        ("SOUND", 0.1, 3),
+                    ]
+                    .iter()
+                    .enumerate()
+                    {
+                        let y = row_y + k as f32 * (sbh + sgap);
+                        let mk = |d: f32| match *act {
+                            0 => MenuAction::HudScale(d * dv),
+                            1 => MenuAction::Speed(d * dv),
+                            2 => MenuAction::MusicVol(d * dv),
+                            _ => MenuAction::SfxVol(d * dv),
+                        };
+                        out.push(MBtn {
+                            x: cx - bw * 0.5,
+                            y,
+                            w: small_w,
+                            h: sbh,
+                            label: "-".into(),
+                            action: mk(-1.0),
+                            small: true,
+                        });
+                        out.push(MBtn {
+                            x: cx + bw * 0.5 - small_w,
+                            y,
+                            w: small_w,
+                            h: sbh,
+                            label: "+".into(),
+                            action: mk(1.0),
+                            small: true,
+                        });
+                    }
+                    back_y = row_y + 4.0 * (sbh + sgap) + 18.0 * ui;
+                } else {
+                    // Keybind grid: 2 columns.
+                    let ky0 = c0 + 30.0 * ui;
+                    let kbh = 22.0 * ui;
+                    let col_w = 330.0 * ui;
+                    for (k, a) in ALL_ACTIONS.iter().enumerate() {
+                        let col = k % 2;
+                        let row = k / 2;
+                        out.push(MBtn {
+                            x: cx - col_w + col as f32 * col_w + col_w - 90.0 * ui,
+                            y: ky0 + row as f32 * (kbh + 4.0 * ui),
+                            w: 84.0 * ui,
+                            h: kbh,
+                            label: if self.rebinding == Some(*a) {
+                                "???".into()
+                            } else {
+                                crate::config::key_label(self.settings.key_for(*a))
+                            },
+                            action: MenuAction::Rebind(*a),
+                            small: true,
+                        });
+                    }
+                    let n_rows = (ALL_ACTIONS.len() as f32 / 2.0).ceil();
+                    back_y = ky0 + n_rows * (kbh + 4.0 * ui) + 18.0 * ui;
                 }
-                // Keybind grid: 2 columns.
-                let ky0 = row_y + 4.0 * (sbh + sgap) + 30.0 * ui;
-                let kbh = 22.0 * ui;
-                let col_w = 330.0 * ui;
-                for (k, a) in ALL_ACTIONS.iter().enumerate() {
-                    let col = k % 2;
-                    let row = k / 2;
-                    out.push(MBtn {
-                        x: cx - col_w + col as f32 * col_w + col_w - 90.0 * ui,
-                        y: ky0 + row as f32 * (kbh + 4.0 * ui),
-                        w: 84.0 * ui,
-                        h: kbh,
-                        label: if self.rebinding == Some(*a) {
-                            "???".into()
-                        } else {
-                            crate::config::key_label(self.settings.key_for(*a))
-                        },
-                        action: MenuAction::Rebind(*a),
-                        small: true,
-                    });
-                }
-                let n_rows = (ALL_ACTIONS.len() as f32 / 2.0).ceil();
-                let back_y = ky0 + n_rows * (kbh + 4.0 * ui) + 18.0 * ui;
                 out.push(MBtn {
                     x: cx - bw * 0.5,
                     y: back_y,
@@ -430,7 +450,7 @@ impl App {
             }
             let pad = 26.0 * ui;
             let head = 64.0 * ui; // room for copy above the stack
-            if matches!(self.page, MenuPage::Settings { .. }) {
+            if matches!(self.page, MenuPage::Settings { .. }) && self.settings_tab == 1 {
                 // The keybind label columns are text, not buttons — the
                 // panel must cover them too.
                 x0 = x0.min(cx - 345.0 * ui);
@@ -525,31 +545,34 @@ impl App {
             }
         }
         if let MenuPage::Settings { .. } = self.page {
-            // Labels for slider rows + bind rows — metrics mirror the
-            // compact button layout in menu_buttons exactly.
+            // Labels mirror the tabbed button layout in menu_buttons.
             let sbh = 36.0 * ui;
             let sgap = 6.0 * ui;
             let y0 = h * 0.175;
-            let row_y = y0 + 2.0 * (sbh + sgap);
-            let ts = self.ts(1.5);
-            let hud_l = format!("HUD SIZE  {:.1}X", self.settings.hud_scale);
-            let spd_l = format!("GAME SPEED  {:.2}X", self.settings.game_speed);
-            let mus_l = format!("MUSIC  {:.0}%", self.settings.music_volume * 100.0);
-            let sfx_l = format!("SOUND  {:.0}%", self.settings.sfx_volume * 100.0);
-            for (k, l) in [hud_l, spd_l, mus_l, sfx_l].iter().enumerate() {
-                let lw = self.gfx.text_width(ts, l);
-                self.gfx.text(out, cx - lw * 0.5, row_y + k as f32 * (sbh + sgap) + 11.0 * ui, ts, white, l);
-            }
-            let ky0 = row_y + 4.0 * (sbh + sgap) + 30.0 * ui;
-            self.gfx.text(out, cx - 330.0 * ui, ky0 - 20.0 * ui, self.ts(1.4), gold, "KEYBINDS (CLICK, THEN PRESS A KEY)");
-            let kbh = 22.0 * ui;
-            let col_w = 330.0 * ui;
-            for (k, a) in ALL_ACTIONS.iter().enumerate() {
-                let col = k % 2;
-                let row = k / 2;
-                let x = cx - col_w + col as f32 * col_w;
-                let y = ky0 + row as f32 * (kbh + 4.0 * ui);
-                self.gfx.text(out, x, y + 5.0 * ui, self.ts(1.1), dim, a.label());
+            let c0 = y0 + sbh + 18.0 * ui;
+            if self.settings_tab == 0 {
+                let row_y = c0 + 2.0 * (sbh + sgap);
+                let ts = self.ts(1.5);
+                let hud_l = format!("HUD SIZE  {:.1}X", self.settings.hud_scale);
+                let spd_l = format!("GAME SPEED  {:.2}X", self.settings.game_speed);
+                let mus_l = format!("MUSIC  {:.0}%", self.settings.music_volume * 100.0);
+                let sfx_l = format!("SOUND  {:.0}%", self.settings.sfx_volume * 100.0);
+                for (k, l) in [hud_l, spd_l, mus_l, sfx_l].iter().enumerate() {
+                    let lw = self.gfx.text_width(ts, l);
+                    self.gfx.text(out, cx - lw * 0.5, row_y + k as f32 * (sbh + sgap) + 11.0 * ui, ts, white, l);
+                }
+            } else {
+                let ky0 = c0 + 30.0 * ui;
+                self.gfx.text(out, cx - 330.0 * ui, ky0 - 20.0 * ui, self.ts(1.4), gold, "KEYBINDS (CLICK, THEN PRESS A KEY)");
+                let kbh = 22.0 * ui;
+                let col_w = 330.0 * ui;
+                for (k, a) in ALL_ACTIONS.iter().enumerate() {
+                    let col = k % 2;
+                    let row = k / 2;
+                    let x = cx - col_w + col as f32 * col_w;
+                    let y = ky0 + row as f32 * (kbh + 4.0 * ui);
+                    self.gfx.text(out, x, y + 5.0 * ui, self.ts(1.1), dim, a.label());
+                }
             }
         }
         if self.page == MenuPage::MainRoot {
@@ -659,6 +682,9 @@ impl App {
                         self.settings.player_id.clone(),
                     ));
                 }
+            }
+            MenuAction::SettingsTab(t) => {
+                self.settings_tab = t;
             }
             MenuAction::OpenSettings => {
                 self.page = MenuPage::Settings { from_game: self.in_game };

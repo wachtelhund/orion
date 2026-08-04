@@ -741,19 +741,74 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
         p.place(&c)
     };
 
-    // Font.
+    // Font: 5x7 source grids baked at 3x with a bolder dilated stroke,
+    // chamfered corners, a top-lit bevel and a dark outline. Tinting
+    // multiplies, so the bevel and outline survive any text color.
     let mut glyphs = Vec::new();
+    const FS: i32 = 3;
     for ch in " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:/-.%+!(),".chars() {
         if let Some(rows) = font::glyph(ch) {
-            let mut c = Canvas::new(font::GLYPH_W as i32, font::GLYPH_H as i32);
+            let (gw, gh) = (font::GLYPH_W as i32 * FS + 2, font::GLYPH_H as i32 * FS + 2);
+            let mut fill = vec![false; (gw * gh) as usize];
             for (ry, row) in rows.iter().enumerate() {
                 for (rx, bit) in row.chars().enumerate() {
-                    if bit == '1' {
-                        c.set(rx as i32, ry as i32, [255, 255, 255, 255]);
+                    if bit != '1' {
+                        continue;
+                    }
+                    for oy in 0..FS {
+                        for ox in 0..=FS {
+                            // <=FS dilates one px rightward: bolder stroke.
+                            let x = 1 + rx as i32 * FS + ox;
+                            let y = 1 + ry as i32 * FS + oy;
+                            if x < gw - 1 && y < gh - 1 {
+                                fill[(y * gw + x) as usize] = true;
+                            }
+                        }
                     }
                 }
             }
-            glyphs.push((ch, p.place(&c)));
+            // Chamfer convex corners for a softer letterform.
+            let at = |f: &Vec<bool>, x: i32, y: i32| -> bool {
+                x >= 0 && y >= 0 && x < gw && y < gh && f[(y * gw + x) as usize]
+            };
+            let snap = fill.clone();
+            for y in 0..gh {
+                for x in 0..gw {
+                    if !at(&snap, x, y) {
+                        continue;
+                    }
+                    let (u, d) = (at(&snap, x, y - 1), at(&snap, x, y + 1));
+                    let (l, r) = (at(&snap, x - 1, y), at(&snap, x + 1, y));
+                    if (!u && !l) || (!u && !r) || (!d && !l) || (!d && !r) {
+                        fill[(y * gw + x) as usize] = false;
+                    }
+                }
+            }
+            // Bake: bevel-lit strokes + outline.
+            let mut c = Canvas::new(gw, gh);
+            for y in 0..gh {
+                for x in 0..gw {
+                    if at(&fill, x, y) {
+                        let v = if !at(&fill, x, y - 1) {
+                            255
+                        } else if !at(&fill, x, y + 1) {
+                            150
+                        } else {
+                            215
+                        };
+                        c.set(x, y, [v, v, v, 255]);
+                    } else {
+                        let edge = at(&fill, x - 1, y)
+                            || at(&fill, x + 1, y)
+                            || at(&fill, x, y - 1)
+                            || at(&fill, x, y + 1);
+                        if edge {
+                            c.set(x, y, [24, 26, 32, 235]);
+                        }
+                    }
+                }
+            }
+            glyphs.push((ch, p.place_s(&c, FS as f32)));
         }
     }
 

@@ -449,9 +449,16 @@ impl Gfx {
         let mut cx = x;
         for ch in s.chars() {
             if let Some(r) = self.book.glyph(ch) {
+                // Glyph canvases carry a 1-texel outline border at their bake
+                // scale; draw at the padded size, anchored a hair left/up, so
+                // advance metrics stay (GLYPH_W + 1) while outlines meet.
+                let pad = 1.0 / r.scale;
                 out.push(Inst {
-                    pos: [cx, y],
-                    size: [font::GLYPH_W as f32 * scale, font::GLYPH_H as f32 * scale],
+                    pos: [cx - pad * scale, y - pad * scale],
+                    size: [
+                        (font::GLYPH_W as f32 + 2.0 * pad) * scale,
+                        (font::GLYPH_H as f32 + 2.0 * pad) * scale,
+                    ],
                     uv_min: [r.u0, r.v0],
                     uv_max: [r.u1, r.v1],
                     color,
