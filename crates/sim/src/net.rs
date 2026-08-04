@@ -25,10 +25,16 @@ pub const DEFAULT_PORT: u16 = 27515;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Msg {
-    Hello { race: u8 },
+    Hello { race: u8, version: String },
     Start { seed: u64, host_race: u8, join_race: u8, map: String },
+    /// Handshake rejection (version mismatch etc.) — human-readable.
+    Reject { reason: String },
     Cmds { tick: u32, cmds: Vec<Command>, checksum: Option<(u32, u64)> },
 }
+
+/// Two builds may only play together when their sim versions match —
+/// lockstep over diverging sims desyncs by definition.
+pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// A connected peer, transport-agnostic: outgoing message lines go into a
 /// channel consumed by a transport thread; incoming parsed messages arrive
@@ -116,7 +122,16 @@ pub fn host_handshake(
     map: &str,
 ) -> std::io::Result<Started> {
     let join_race = match net.rx.recv() {
-        Ok(Msg::Hello { race }) => race,
+        Ok(Msg::Hello { race, version }) => {
+            if version != PROTOCOL_VERSION {
+                let reason = format!(
+                    "version mismatch: you {PROTOCOL_VERSION}, opponent {version} - both players must update"
+                );
+                net.send(&Msg::Reject { reason: reason.clone() });
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, reason));
+            }
+            race
+        }
         _ => {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad hello"));
         }
@@ -133,7 +148,7 @@ pub fn host_handshake(
 
 /// Join-side handshake over any transport.
 pub fn join_handshake(mut net: Net, my_race: u8) -> std::io::Result<Started> {
-    net.send(&Msg::Hello { race: my_race });
+    net.send(&Msg::Hello { race: my_race, version: PROTOCOL_VERSION.to_string() });
     match net.rx.recv() {
         Ok(Msg::Start { seed, host_race, join_race, map }) => Ok(Started {
             net,
@@ -142,6 +157,9 @@ pub fn join_handshake(mut net: Net, my_race: u8) -> std::io::Result<Started> {
             races: [host_race, join_race],
             map,
         }),
+        Ok(Msg::Reject { reason }) => {
+            Err(std::io::Error::new(std::io::ErrorKind::InvalidData, reason))
+        }
         _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad start")),
     }
 }

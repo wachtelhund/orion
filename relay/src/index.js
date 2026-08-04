@@ -299,6 +299,7 @@ export class Matchmaker {
         2000,
         parseInt(url.searchParams.get("rtt") || "100", 10) || 100,
       );
+      const ver = (url.searchParams.get("ver") || "0").slice(0, 16);
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
       server.accept();
@@ -327,6 +328,7 @@ export class Matchmaker {
         name,
         race,
         rtt,
+        ver,
         continent: (request.cf && request.cf.continent) || "??",
         mmr,
         games,
@@ -442,6 +444,8 @@ export class Matchmaker {
       let best = null;
       for (const b of entries) {
         if (b.id === a.id || taken.has(b.id)) continue;
+        // Different builds desync in lockstep: never pair them.
+        if (a.ver !== b.ver) continue;
         const gap = Math.abs(a.mmr - b.mmr);
         const lat = a.rtt + b.rtt + (a.continent !== b.continent ? 150 : 0);
         if (gap > Math.min(tol(a), tol(b))) continue;

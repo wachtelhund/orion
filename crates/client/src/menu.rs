@@ -16,6 +16,7 @@ pub enum MenuPage {
     Multiplayer,
     Ladder,
     Replays,
+    UpdatePrompt,
     Settings { from_game: bool },
     EscRoot,
 }
@@ -49,6 +50,7 @@ enum MenuAction {
     CancelSearch,
     OpenLadder,
     Noop,
+    DeclineUpdate,
     OpenReplays,
     PlayReplay(usize),
     OpenUpdate,
@@ -102,7 +104,14 @@ impl App {
                 stack(
                     vec![
                         ("PLAY VS AI".into(), MenuAction::OpenDifficulty),
-                        ("MULTIPLAYER".into(), MenuAction::OpenMultiplayer),
+                        (
+                            if self.mp_blocked {
+                                "MULTIPLAYER - UPDATE REQUIRED".into()
+                            } else {
+                                "MULTIPLAYER".to_string()
+                            },
+                            MenuAction::OpenMultiplayer,
+                        ),
                         ("REPLAYS".into(), MenuAction::OpenReplays),
                         ("SETTINGS".into(), MenuAction::OpenSettings),
                         ("QUIT".into(), MenuAction::QuitApp),
@@ -213,6 +222,23 @@ impl App {
                     rows.push(("BACK".into(), MenuAction::Back));
                     stack(rows, h * 0.24);
                 }
+            }
+            MenuPage::UpdatePrompt => {
+                let tag = self
+                    .update
+                    .as_ref()
+                    .map(|(t, _)| t.to_uppercase())
+                    .unwrap_or_default();
+                stack(
+                    vec![
+                        (format!("DOWNLOAD UPDATE {tag}"), MenuAction::OpenUpdate),
+                        (
+                            "CONTINUE - SINGLEPLAYER ONLY".into(),
+                            MenuAction::DeclineUpdate,
+                        ),
+                    ],
+                    h * 0.44,
+                );
             }
             MenuPage::Ladder => {
                 let mut rows: Vec<(String, MenuAction)> = Vec::new();
@@ -431,6 +457,10 @@ impl App {
             MenuPage::Difficulty => ("SELECT DIFFICULTY", ""),
             MenuPage::Multiplayer => ("MULTIPLAYER", ""),
             MenuPage::Ladder => ("LADDER", ""),
+            MenuPage::UpdatePrompt => (
+                "UPDATE AVAILABLE",
+                "ONLINE PLAY REQUIRES THE LATEST VERSION - MISMATCHED GAMES DESYNC.",
+            ),
             MenuPage::Replays => ("REPLAYS", ""),
             _ => ("ORION", "A DETERMINISTIC ISOMETRIC RTS"),
         };
@@ -618,6 +648,10 @@ impl App {
             MenuAction::OpenDifficulty => self.page = MenuPage::Difficulty,
             MenuAction::StartGame(d) => self.start_game(d),
             MenuAction::OpenMultiplayer => {
+                if self.mp_blocked {
+                    self.page = MenuPage::UpdatePrompt;
+                    return;
+                }
                 self.page = MenuPage::Multiplayer;
                 if !self.settings.relay_url.is_empty() {
                     self.mm_rating_rx = Some(crate::relay::fetch_rating_async(
@@ -760,6 +794,9 @@ impl App {
                 self.page = MenuPage::Ladder;
             }
             MenuAction::Noop => {}
+            MenuAction::DeclineUpdate => {
+                self.page = MenuPage::MainRoot;
+            }
             MenuAction::OpenReplays => {
                 self.replay_files = crate::replays::list(&self.state.data.race_names);
                 self.page = MenuPage::Replays;

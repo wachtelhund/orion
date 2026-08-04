@@ -144,12 +144,18 @@ pub struct App {
     pub mm_rating_rx: Option<std::sync::mpsc::Receiver<Option<(i32, u32)>>>,
     /// Alternates ack variations so spam clicks don't grate.
     pub ack_flip: bool,
+    /// Match-start freeze: countdown seconds remaining (5..=1), and the
+    /// wall-clock moment the countdown began.
+    pub countdown: Option<(std::time::Instant, u32)>,
     /// Ladder page contents + pending fetch.
     pub ladder: Option<Vec<crate::relay::LadderRow>>,
     pub ladder_rx: Option<std::sync::mpsc::Receiver<Option<Vec<crate::relay::LadderRow>>>>,
     /// Newer release on GitHub: (tag, html url).
     pub update: Option<(String, String)>,
     pub update_rx: Option<std::sync::mpsc::Receiver<Option<(String, String)>>>,
+    /// An update exists and the player declined: online play is blocked
+    /// (mismatched builds desync in lockstep; the relay won't pair them).
+    pub mp_blocked: bool,
     /// Race picked for the human, and the enemy choice (0/1, 2 = random).
     pub chosen_race: u8,
     pub enemy_race_choice: u8,
@@ -308,10 +314,12 @@ impl App {
             mm_rating: None,
             mm_rating_rx: None,
             ack_flip: false,
+            countdown: None,
             ladder: None,
             ladder_rx: None,
             update: None,
             update_rx: Some(crate::relay::check_update_async()),
+            mp_blocked: false,
             replay: None,
             replay_cursor: 0,
             replay_paused: false,
@@ -533,6 +541,15 @@ impl App {
         let (cx, cy) = iso::world_to_iso(start.x as f32 + 0.5, start.y as f32 + 0.5);
         self.cam.cx = cx;
         self.cam.cy = cy;
+        self.arm_countdown();
+    }
+
+    /// 5-second frozen countdown before the match starts (skipped for
+    /// headless automation).
+    fn arm_countdown(&mut self) {
+        if self.mp_auto.is_none() && self.script.is_none() && self.shot.is_none() {
+            self.countdown = Some((std::time::Instant::now(), 6));
+        }
     }
 
     pub fn start_mp_game(&mut self, started: Started) {
@@ -560,6 +577,24 @@ impl App {
         self.cam.cx = cx;
         self.cam.cy = cy;
         self.clamp_camera();
+        self.arm_countdown();
+    }
+
+    /// Tick the countdown; true while the sim should stay frozen.
+    pub(crate) fn countdown_active(&mut self) -> bool {
+        let Some((t0, last)) = self.countdown else { return false };
+        let elapsed = t0.elapsed().as_secs_f32();
+        let remaining = (5.0 - elapsed).ceil().max(0.0) as u32;
+        if elapsed >= 5.0 {
+            self.countdown = None;
+            self.sfx(Sfx::CountGo);
+            return false;
+        }
+        if remaining < last {
+            self.countdown = Some((t0, remaining));
+            self.sfx(Sfx::CountTick);
+        }
+        true
     }
 
     /// Shared camera input (keyboard pan + edge scroll).
@@ -693,7 +728,9 @@ impl App {
     /// Multiplayer frame: lockstep-driven stepping, menus never pause.
     fn mp_frame(&mut self, dt: f64) {
         self.camera_input(dt);
-        if self.state.winner.is_none() {
+        if self.countdown_active() {
+            self.acc = 0.0;
+        } else if self.state.winner.is_none() {
             self.acc += dt; // speed is locked to 1.0 in multiplayer
             let mut steps = 0;
             while self.acc >= TICK_DT && steps < 8 {
@@ -1022,9 +1059,10 @@ impl App {
                 self.page = if from_game { MenuPage::EscRoot } else { MenuPage::MainRoot };
             }
             MenuPage::EscRoot => self.page = MenuPage::None,
-            MenuPage::Difficulty | MenuPage::Multiplayer | MenuPage::Replays => {
-                self.page = MenuPage::MainRoot
-            }
+            MenuPage::Difficulty
+            | MenuPage::Multiplayer
+            | MenuPage::Replays
+            | MenuPage::UpdatePrompt => self.page = MenuPage::MainRoot,
             MenuPage::Ladder => self.page = MenuPage::Multiplayer,
             MenuPage::MainRoot => {}
         }
@@ -2090,6 +2128,9 @@ impl App {
             if self.shot_cross && self.state.tick == 0 {
                 self.state = new_game_with(0, 1, &self.game_map.clone());
             }
+            if self.shot_reveal {
+                self.reveal_all = true;
+            }
             self.in_game = true;
             self.page = MenuPage::None;
             // Fast-forward to the start.
@@ -2374,11 +2415,18 @@ impl App {
                 self.ladder_rx = None;
             }
         }
-        // Update check result (one-shot at startup).
+        // Update check result (one-shot at startup). Finding one blocks
+        // online play and interrupts with the update prompt.
         if let Some(rx) = &self.update_rx {
             if let Ok(got) = rx.try_recv() {
                 self.update = got;
                 self.update_rx = None;
+                if self.update.is_some() {
+                    self.mp_blocked = true;
+                    if !self.in_game && self.page == MenuPage::MainRoot {
+                        self.page = MenuPage::UpdatePrompt;
+                    }
+                }
             }
         }
         // Rating for the FIND MATCH row.
@@ -2416,7 +2464,9 @@ impl App {
         if playing {
             self.camera_input(dt);
 
-            if self.state.winner.is_none() {
+            if self.countdown_active() {
+                self.acc = 0.0;
+            } else if self.state.winner.is_none() {
                 self.acc += dt * self.settings.game_speed as f64;
                 while self.acc >= TICK_DT {
                     let mut cmds = std::mem::take(&mut self.pending);
