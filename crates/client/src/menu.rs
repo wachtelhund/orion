@@ -37,6 +37,7 @@ enum MenuAction {
     SfxVol(f32),
     CycleRace,
     CycleEnemyRace,
+    CycleMap,
     CreateLobby { private: bool },
     JoinRelay,
     JoinListed(usize),
@@ -109,6 +110,13 @@ impl App {
                     vec![
                         (format!("YOUR RACE: {my}"), MenuAction::CycleRace),
                         (format!("ENEMY: {enemy}"), MenuAction::CycleEnemyRace),
+                        (
+                            format!(
+                                "MAP: {}",
+                                orion_sim::map::MAP_NAMES[self.map_choice].to_uppercase()
+                            ),
+                            MenuAction::CycleMap,
+                        ),
                         ("EASY".into(), MenuAction::StartGame(Difficulty::Easy)),
                         ("NORMAL".into(), MenuAction::StartGame(Difficulty::Normal)),
                         ("HARD".into(), MenuAction::StartGame(Difficulty::Hard)),
@@ -135,6 +143,13 @@ impl App {
                             MenuAction::FocusName,
                         ),
                         (format!("YOUR RACE: {my}"), MenuAction::CycleRace),
+                        (
+                            format!(
+                                "MAP: {}",
+                                orion_sim::map::MAP_NAMES[self.map_choice].to_uppercase()
+                            ),
+                            MenuAction::CycleMap,
+                        ),
                         ("CREATE LOBBY".into(), MenuAction::CreateLobby { private: false }),
                         (
                             "CREATE PRIVATE LOBBY".into(),
@@ -496,6 +511,7 @@ impl App {
                     self.chosen_race,
                     &self.settings.player_name,
                     private,
+                    orion_sim::map::MAP_NAMES[self.map_choice],
                 );
                 self.mp_lobby_code = Some(code);
                 self.mp_waiting = Some(rx);
@@ -520,6 +536,9 @@ impl App {
             MenuAction::CancelMp => {
                 self.mp_waiting = None;
                 self.mp_lobby_code = None;
+            }
+            MenuAction::CycleMap => {
+                self.map_choice = (self.map_choice + 1) % orion_sim::map::MAP_NAMES.len();
             }
             MenuAction::CycleRace => {
                 let n = self.state.data.race_names.len() as u8;

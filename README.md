@@ -68,8 +68,12 @@ Playable game — single player vs AI, or 1v1 multiplayer (direct connect):
 - Bot personalities (seeded timing/cap offsets) so games vary; escalation so
   they always finish; balance measured by
   `cargo run --release -p orion-sim --example balance`
-- One map ("Meridian"): two high-ground mains, ramps, chokepoints, geysers,
-  fog of war with the high-ground vision rule
+- Two maps: "Meridian" (two high-ground mains, ramps, chokepoints) and
+  "Caverns" (Xel'Naga Caverns homage: NE/SW mains, NATURAL EXPANSIONS with
+  their own mineral lines + geysers, cavern rocks splitting the center into
+  three routes) — pick per game; bots expand to their natural
+- Replays: every game auto-saves to ~/.orion-replays; watch from the
+  REPLAYS menu with pause, speed, and per-player fog perspective
 - Main menu (vs AI at three difficulties), pause menu with settings:
   fullscreen, HUD size, game speed, edge scroll, rebindable hotkeys
   (persisted to `~/.orion-settings.ron`)
@@ -107,7 +111,12 @@ cargo run --release -p orion-client -- --smoke
 
 # Screenshot of a bot game at tick N (visual verification without a human)
 cargo run --release -p orion-client -- --shot out.ppm --shot-ticks 6480 \
-    [--shot-zoom 3.0] [--shot-focus 40,40] [--shot-reveal]
+    [--map caverns] [--shot-zoom 3.0] [--shot-focus 40,40] [--shot-reveal]
+
+# Replay tools: record headless, watch, or capture a frame + checksum
+cargo run --release -p orion-sim --example mkreplay -- game.ron 42
+cargo run --release -p orion-client -- --replay game.ron
+cargo run --release -p orion-client -- --replay-shot game.ron:out.ppm:6000
 
 # Scripted human-play test: builds a base through the real command path,
 # captures a frame series, asserts the buildings went up

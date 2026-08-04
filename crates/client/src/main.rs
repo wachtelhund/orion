@@ -40,6 +40,7 @@ struct Shell {
     shot_cross: bool,
     replay_open: Option<String>,
     replay_shot: Option<(String, String, u32)>,
+    map_arg: Option<String>,
 }
 
 impl ApplicationHandler for Shell {
@@ -73,6 +74,15 @@ impl ApplicationHandler for Shell {
         app.shot_cross = self.shot_cross;
         if app.record.is_some() {
             app.shot_bot0 = Some(app::Bot2::new(0));
+        }
+        if let Some(m) = &self.map_arg {
+            if let Some(k) = orion_sim::map::MAP_NAMES.iter().position(|n| n == m) {
+                app.map_choice = k;
+                app.game_map = m.clone();
+                app.state = app::new_game_with(0, 1, m);
+            } else {
+                eprintln!("unknown map '{m}', maps: {:?}", orion_sim::map::MAP_NAMES);
+            }
         }
         if let Some(path) = &self.replay_open {
             app.start_replay(std::path::Path::new(path));
@@ -197,6 +207,13 @@ fn main() {
         .position(|a| a == "--mp-auto")
         .and_then(|i| args.get(i + 1))
         .cloned();
+    // --map name — map for --shot/--script/--record captures and the
+    // initial menu selection.
+    let map_arg = args
+        .iter()
+        .position(|a| a == "--map")
+        .and_then(|i| args.get(i + 1))
+        .cloned();
     // --replay path — open straight into the replay viewer.
     let replay_open = args
         .iter()
@@ -236,6 +253,7 @@ fn main() {
         shot_cross,
         replay_open,
         replay_shot,
+        map_arg,
         ..Default::default()
     };
     event_loop.run_app(&mut shell).expect("run app");

@@ -26,7 +26,7 @@ pub const DEFAULT_PORT: u16 = 27515;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Msg {
     Hello { race: u8 },
-    Start { seed: u64, host_race: u8, join_race: u8 },
+    Start { seed: u64, host_race: u8, join_race: u8, map: String },
     Cmds { tick: u32, cmds: Vec<Command>, checksum: Option<(u32, u64)> },
 }
 
@@ -104,29 +104,43 @@ pub struct Started {
     pub seed: u64,
     pub local_player: u8,
     pub races: [u8; 2],
+    /// Map name (host's choice), resolved via `map::by_name`.
+    pub map: String,
 }
 
-/// Host-side handshake over any transport.
-pub fn host_handshake(mut net: Net, my_race: u8, seed: u64) -> std::io::Result<Started> {
+/// Host-side handshake over any transport. The host picks the map.
+pub fn host_handshake(
+    mut net: Net,
+    my_race: u8,
+    seed: u64,
+    map: &str,
+) -> std::io::Result<Started> {
     let join_race = match net.rx.recv() {
         Ok(Msg::Hello { race }) => race,
         _ => {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad hello"));
         }
     };
-    net.send(&Msg::Start { seed, host_race: my_race, join_race });
-    Ok(Started { net, seed, local_player: 0, races: [my_race, join_race] })
+    net.send(&Msg::Start { seed, host_race: my_race, join_race, map: map.to_string() });
+    Ok(Started {
+        net,
+        seed,
+        local_player: 0,
+        races: [my_race, join_race],
+        map: map.to_string(),
+    })
 }
 
 /// Join-side handshake over any transport.
 pub fn join_handshake(mut net: Net, my_race: u8) -> std::io::Result<Started> {
     net.send(&Msg::Hello { race: my_race });
     match net.rx.recv() {
-        Ok(Msg::Start { seed, host_race, join_race }) => Ok(Started {
+        Ok(Msg::Start { seed, host_race, join_race, map }) => Ok(Started {
             net,
             seed,
             local_player: 1,
             races: [host_race, join_race],
+            map,
         }),
         _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad start")),
     }
@@ -144,7 +158,7 @@ pub fn fresh_seed() -> u64 {
 pub fn host_blocking(listener: TcpListener, my_race: u8, seed: u64) -> std::io::Result<Started> {
     let (stream, _) = listener.accept()?;
     let net = Net::from_stream(stream)?;
-    host_handshake(net, my_race, seed)
+    host_handshake(net, my_race, seed, "meridian")
 }
 
 /// Join a host. Blocking — call in a thread.

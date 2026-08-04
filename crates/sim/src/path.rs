@@ -236,6 +236,18 @@ mod tests {
     use crate::map::meridian;
 
     #[test]
+    fn caverns_mains_connect() {
+        let m = crate::map::by_name("caverns").unwrap();
+        let blocked = vec![false; (m.width * m.height) as usize];
+        let f = compute_flow_field(&m, &blocked, m.starts[0]);
+        assert_ne!(f.cost_at(&m, m.starts[1]), u32::MAX, "caverns mains not connected");
+        // Expansion slots must be reachable too.
+        for e in &m.expansions {
+            assert_ne!(f.cost_at(&m, *e), u32::MAX, "expansion unreachable");
+        }
+    }
+
+    #[test]
     fn field_reaches_across_map() {
         let m = meridian();
         let blocked = vec![false; (m.width * m.height) as usize];

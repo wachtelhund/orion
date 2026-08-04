@@ -161,6 +161,20 @@ smoke (`orion-client --mp-auto host` / `--mp-auto join`) must stay green.
 In MP the client never pauses, forces speed 1.0, runs no bot, and the local
 player may be 1 (`App.human` — never hardcode player 0 in client code).
 
+## Maps
+
+`map.rs` registry: `MAP_NAMES` + `by_name` — names are replay/net
+identifiers, never rename a shipped one. Two maps: meridian (single-base,
+mines out ~15 min by design) and caverns (Xel'Naga Caverns homage with
+natural expansions; `Map.expansions` holds suggested HQ origins and the bot
+takes its natural at ~13 workers). Every map MUST be exactly 180-degree
+rotationally symmetric — run `cargo run -p orion-sim --example symmetry`
+(terrain, elevation, resources, expansions, starts) and keep the sim
+point-symmetric (see `examples/mirror.rs`, the mirror-covariance probe that
+found the spawn bias: fixed-point Mul truncation, flow-field tie-break
+mirroring, spawn-arc symmetry all live downstream of it). The MP handshake
+carries the host's map choice; soak alternates maps per matchup cycle.
+
 ## Races
 
 Defs carry `race: u8`; players pick races; Train/Build validate race. The
@@ -176,6 +190,14 @@ on every push/PR, and builds all three platforms. `release.yml` triggers on
 `v*` tags: macOS universal (lipo), Linux x86_64, Windows x86_64, attached to
 the GitHub release. Linux builds need `libasound2-dev` (rodio/ALSA) — that
 is the only system dependency.
+
+**Every minor and major version gets a GitHub wiki page** (the wiki is the
+`orion.wiki.git` repo next to the main one). Each page covers: what's new
+and changed (features AND balance diffs, explained — not just a commit
+list), plus in-game screenshots of the new content (`--shot`/`--menu-shot`
+captures, committed into the wiki repo and referenced relatively). Write
+the page as part of cutting the tag, and link it from a `Home` index page
+of all versions.
 
 ## Known gaps / next milestones (see SPEC.md for full list)
 

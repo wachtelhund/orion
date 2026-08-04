@@ -4,7 +4,7 @@
 //! CI tests drive this; a human never has to click through 30 matches.
 
 use crate::ai::{Bot, Difficulty};
-use crate::map::meridian;
+
 use crate::state::{EntityKind, RES_MINERALS};
 use crate::{GameData, State};
 
@@ -12,6 +12,7 @@ use crate::{GameData, State};
 #[derive(Clone, Debug)]
 pub struct GameConfig {
     pub seed: u64,
+    pub map: &'static str,
     pub races: [u8; 2],
     pub styles: [u64; 2],
     pub difficulty: Difficulty,
@@ -231,10 +232,11 @@ impl Validator {
 /// Run one full bot game under the validator. Panics inside the sim are
 /// bugs; the config is in the report for reproduction.
 pub fn run_game(cfg: GameConfig) -> GameReport {
-    let mut s = State::new_with_races(GameData::load_default(), meridian(), cfg.seed, &cfg.races);
+    let map = crate::map::by_name(cfg.map).expect("known map");
+    let mut s = State::new_with_races(GameData::load_default(), map.clone(), cfg.seed, &cfg.races);
     let mut shadow = cfg
         .shadow
-        .then(|| State::new_with_races(GameData::load_default(), meridian(), cfg.seed, &cfg.races));
+        .then(|| State::new_with_races(GameData::load_default(), map, cfg.seed, &cfg.races));
     let mut bots = [
         Bot::with_style(0, cfg.difficulty, cfg.styles[0]),
         Bot::with_style(1, cfg.difficulty, cfg.styles[1]),
@@ -311,6 +313,8 @@ pub fn soak_configs(n: usize, base_seed: u64, shadow_every: usize) -> Vec<GameCo
                 .wrapping_add(k as u64 * 1442695040888963407);
             GameConfig {
                 seed,
+                // Alternate maps every full matchup cycle.
+                map: crate::map::MAP_NAMES[(k / matchups.len()) % crate::map::MAP_NAMES.len()],
                 races: matchups[k % matchups.len()],
                 styles: [seed ^ 0xA5A5, seed.rotate_left(23) ^ 0x5A5A],
                 difficulty: Difficulty::Normal,
@@ -329,7 +333,7 @@ mod tests {
     /// shadow-determinism run. Any violation fails the build.
     #[test]
     fn small_soak_is_clean() {
-        let mut cfgs = soak_configs(4, 0xC1, 4);
+        let mut cfgs = soak_configs(8, 0xC1, 4); // 4 matchups x both maps
         for c in &mut cfgs {
             c.max_ticks = 24 * 60 * 6; // keep CI fast
         }

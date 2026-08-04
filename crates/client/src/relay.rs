@@ -135,7 +135,7 @@ pub fn host_relay_async_with_code(
     code: String,
     my_race: u8,
 ) -> (String, Receiver<io::Result<Started>>) {
-    host_relay_async_full(base, code, my_race, "COMMANDER", true)
+    host_relay_async_full(base, code, my_race, "COMMANDER", true, "meridian")
 }
 
 /// Full host entry: public lobbies appear in the directory under `name`.
@@ -145,6 +145,7 @@ pub fn host_relay_async_full(
     my_race: u8,
     name: &str,
     private: bool,
+    map: &str,
 ) -> (String, Receiver<io::Result<Started>>) {
     let clean: String = name
         .chars()
@@ -158,10 +159,11 @@ pub fn host_relay_async_full(
         my_race,
         if private { 1 } else { 0 }
     );
+    let map = map.to_string();
     let (tx, rx) = channel();
     std::thread::spawn(move || {
         let result = ws_net(&url).and_then(|net| {
-            host_handshake(net, my_race, orion_sim::net::fresh_seed())
+            host_handshake(net, my_race, orion_sim::net::fresh_seed(), &map)
         });
         let _ = tx.send(result);
     });

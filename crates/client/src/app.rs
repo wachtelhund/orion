@@ -137,6 +137,10 @@ pub struct App {
     /// Race picked for the human, and the enemy choice (0/1, 2 = random).
     pub chosen_race: u8,
     pub enemy_race_choice: u8,
+    /// Menu map pick (index into map::MAP_NAMES) + the map of the RUNNING
+    /// game (MP joiners play the host's choice, whatever their menu says).
+    pub map_choice: usize,
+    pub game_map: String,
     // Replay session (Some = watching, not playing).
     pub replay: Option<orion_sim::replay::Replay>,
     pub replay_cursor: usize,
@@ -289,6 +293,8 @@ impl App {
             record_replay: false,
             replay_files: Vec::new(),
             replay_shot: None,
+            map_choice: 0,
+            game_map: "meridian".into(),
             chosen_race: 0,
             enemy_race_choice: 2,
             page: if headless { MenuPage::None } else { MenuPage::MainRoot },
@@ -444,7 +450,8 @@ impl App {
             }
             r => r,
         };
-        self.state = new_game_with(self.chosen_race, enemy);
+        self.game_map = orion_sim::map::MAP_NAMES[self.map_choice].to_string();
+        self.state = new_game_with(self.chosen_race, enemy, &self.game_map);
         let style = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
@@ -471,7 +478,8 @@ impl App {
         self.mp_lobby_code = None;
         self.replay = None;
         self.record_replay = true;
-        self.state = new_game_mp(started.seed, started.races[0], started.races[1]);
+        self.game_map = started.map.clone();
+        self.state = new_game_mp(started.seed, started.races[0], started.races[1], &started.map);
         self.human = started.local_player;
         self.mp = Some(Lockstep::new(started.net, started.local_player));
         self.mp_waiting = None;
@@ -586,7 +594,8 @@ impl App {
         } else {
             vec![me, "BOT".into()]
         };
-        let replay = orion_sim::replay::Replay::from_state(&self.state, "meridian", names);
+        let replay =
+            orion_sim::replay::Replay::from_state(&self.state, &self.game_map.clone(), names);
         if let Err(e) = crate::replays::save(&replay) {
             eprintln!("replay save failed: {e}");
         }
@@ -1887,7 +1896,7 @@ impl App {
                 }
                 "kyth" => {
                     // Kyth Assembly showcase: one of each unit + structures.
-                    self.state = new_game_with(1, 0);
+                    self.state = new_game_with(1, 0, "meridian");
                     self.in_game = true;
                     self.page = MenuPage::None;
                     let s = &mut self.state;
@@ -1956,7 +1965,7 @@ impl App {
         }
         if let Some((prefix, start, frames, every)) = self.record.clone() {
             if self.shot_cross && self.state.tick == 0 {
-                self.state = new_game_with(0, 1);
+                self.state = new_game_with(0, 1, &self.game_map.clone());
             }
             self.in_game = true;
             self.page = MenuPage::None;
@@ -2043,7 +2052,7 @@ impl App {
         }
         if let Some((target, path)) = self.shot.clone() {
             if self.shot_cross && self.state.tick == 0 {
-                self.state = new_game_with(0, 1);
+                self.state = new_game_with(0, 1, &self.game_map.clone());
             }
             let chunk = 48u32;
             for _ in 0..chunk {
@@ -2099,6 +2108,7 @@ impl App {
                         0,
                         "QA TEST LOBBY",
                         false,
+                        "meridian",
                     );
                     self.mp_lobby_code = Some(shown);
                     self.mp_waiting = Some(rx);
@@ -3174,12 +3184,16 @@ pub fn new_game() -> State {
     State::new(GameData::load_default(), meridian(), 0xC0FFEE)
 }
 
-pub fn new_game_with(race0: u8, race1: u8) -> State {
-    State::new_with_races(GameData::load_default(), meridian(), 0xC0FFEE, &[race0, race1])
+fn map_or_meridian(name: &str) -> orion_sim::map::Map {
+    orion_sim::map::by_name(name).unwrap_or_else(meridian)
 }
 
-pub fn new_game_mp(seed: u64, race0: u8, race1: u8) -> State {
-    State::new_with_races(GameData::load_default(), meridian(), seed, &[race0, race1])
+pub fn new_game_with(race0: u8, race1: u8, map: &str) -> State {
+    State::new_with_races(GameData::load_default(), map_or_meridian(map), 0xC0FFEE, &[race0, race1])
+}
+
+pub fn new_game_mp(seed: u64, race0: u8, race1: u8, map: &str) -> State {
+    State::new_with_races(GameData::load_default(), map_or_meridian(map), seed, &[race0, race1])
 }
 
 pub fn fx(x: f32, y: f32) -> FxVec2 {

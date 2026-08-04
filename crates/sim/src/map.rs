@@ -48,6 +48,9 @@ pub struct Map {
     pub minerals: Vec<(TilePos, i32)>,
     /// Plasma geyser footprint origins (2x2 tiles) with gas amounts.
     pub geysers: Vec<(TilePos, i32)>,
+    /// Suggested expansion HQ origins (3x3), nearest-to-start first per
+    /// player. Empty on maps without expansions.
+    pub expansions: Vec<TilePos>,
 }
 
 impl Map {
@@ -105,21 +108,22 @@ impl Map {
     }
 }
 
-/// The first 1v1 map: "Meridian". 80x80, two high-ground mains connected to
-/// a low-ground center, one ramp each, mineral line per main, blocked rock
-/// clusters shaping the middle. 180°-rotation symmetric for fairness.
-/// Deterministic by construction (pure function, no RNG).
 /// All shipping maps, in menu order. Names are the replay/net identifiers —
 /// never rename one that shipped.
-pub const MAP_NAMES: &[&str] = &["meridian"];
+pub const MAP_NAMES: &[&str] = &["meridian", "caverns"];
 
 pub fn by_name(name: &str) -> Option<Map> {
     match name {
         "meridian" => Some(meridian()),
+        "caverns" => Some(caverns()),
         _ => None,
     }
 }
 
+/// The first 1v1 map: "Meridian". 80x80, two high-ground mains connected to
+/// a low-ground center, one ramp each, mineral line per main, blocked rock
+/// clusters shaping the middle. 180°-rotation symmetric for fairness.
+/// Deterministic by construction (pure function, no RNG).
 pub fn meridian() -> Map {
     let w = 80;
     let h = 80;
@@ -131,6 +135,7 @@ pub fn meridian() -> Map {
         starts: vec![TilePos::new(14, 14), TilePos::new(w - 15, h - 15)],
         minerals: Vec::new(),
         geysers: Vec::new(),
+        expansions: Vec::new(),
     };
 
     // Border wall.
@@ -236,6 +241,130 @@ pub fn meridian() -> Map {
     const GAS: i32 = 2500;
     map.geysers.push((TilePos::new(17, 4), GAS));
     map.geysers.push((TilePos::new(w - 1 - 18, h - 1 - 5), GAS));
+
+    map
+}
+
+/// Second 1v1 map: "Caverns", an homage to SC2's Xel'Naga Caverns. NE/SW
+/// high-ground mains, a NATURAL expansion below each ramp (first map with
+/// expansions), an open low-ground center split by cavern rock formations
+/// into a short middle path and two long edge routes. 180°-rotation
+/// symmetric; every feature is pushed together with its mirrored twin.
+pub fn caverns() -> Map {
+    let w = 80;
+    let h = 80;
+    let mut map = Map {
+        width: w,
+        height: h,
+        kind: vec![TileKind::Ground; (w * h) as usize],
+        elev: vec![0u8; (w * h) as usize],
+        // P0 in the SW main, P1 in the NE (mirror of P0).
+        starts: vec![TilePos::new(11, 67), TilePos::new(w - 12, h - 68)],
+        minerals: Vec::new(),
+        geysers: Vec::new(),
+        expansions: Vec::new(),
+    };
+
+    for x in 0..w {
+        for y in 0..h {
+            if x == 0 || y == 0 || x == w - 1 || y == h - 1 {
+                map.kind[(y * w + x) as usize] = TileKind::Blocked;
+            }
+        }
+    }
+
+    // Main plateaus: 22x22, SW and NE corners, elev 1 with a cliff ring.
+    let plateau = |map: &mut Map, ox: i32, oy: i32| {
+        for x in ox..ox + 22 {
+            for y in oy..oy + 22 {
+                if map.in_bounds(x, y) {
+                    let i = map.idx(x, y);
+                    map.elev[i] = 1;
+                }
+            }
+        }
+        for x in ox - 1..=ox + 22 {
+            for y in oy - 1..=oy + 22 {
+                let inside = x >= ox && x < ox + 22 && y >= oy && y < oy + 22;
+                if !inside && map.in_bounds(x, y) {
+                    let i = map.idx(x, y);
+                    map.kind[i] = TileKind::Blocked;
+                    map.elev[i] = 1;
+                }
+            }
+        }
+    };
+    plateau(&mut map, 1, h - 23); // SW: (1..22, 57..78)
+    plateau(&mut map, w - 23, 1); // NE: (57..78, 1..22)
+
+    let ramp = |map: &mut Map, tiles: &[(i32, i32)]| {
+        for &(x, y) in tiles {
+            let i = map.idx(x, y);
+            map.kind[i] = TileKind::Ramp;
+            map.elev[i] = 0;
+            // Mirrored twin.
+            let (mx, my) = (map.width - 1 - x, map.height - 1 - y);
+            let j = map.idx(mx, my);
+            map.kind[j] = TileKind::Ramp;
+            map.elev[j] = 0;
+        }
+    };
+    // SW main ramp: opening on its north edge, toward the natural.
+    ramp(&mut map, &[(8, 56), (9, 56), (10, 56), (11, 56), (8, 55), (9, 55), (10, 55), (11, 55)]);
+
+    // Natural expansions on the low ground past each ramp: an HQ slot with
+    // its own mineral arc + geyser. SW natural sits at (10..12, 44..46).
+    map.expansions.push(TilePos::new(10, 44));
+    map.expansions.push(TilePos::new(w - 3 - 10, h - 3 - 44));
+
+    const PATCH: i32 = 1000;
+    let patches = |map: &mut Map, line: &[(i32, i32)], amount: i32| {
+        for &(x, y) in line {
+            map.minerals.push((TilePos::new(x, y), amount));
+            map.minerals.push((TilePos::new(map.width - 1 - x, map.height - 1 - y), amount));
+        }
+    };
+    // Main mineral line: arced into the SW corner behind the HQ.
+    patches(
+        &mut map,
+        &[(4, 61), (4, 63), (4, 65), (4, 67), (4, 69), (5, 71), (6, 73), (8, 74)],
+        PATCH,
+    );
+    // Natural mineral line: hugging the map edge west of the natural HQ.
+    patches(&mut map, &[(4, 41), (4, 43), (4, 45), (4, 47), (5, 49), (6, 51)], PATCH);
+
+    const GAS: i32 = 2500;
+    let geysers = |map: &mut Map, origins: &[(i32, i32)]| {
+        for &(x, y) in origins {
+            map.geysers.push((TilePos::new(x, y), GAS));
+            map.geysers.push((TilePos::new(map.width - 2 - x, map.height - 2 - y), GAS));
+        }
+    };
+    geysers(&mut map, &[(16, 74), (15, 44)]); // main + natural
+
+    // Cavern rock formations: split the center into a tight middle lane
+    // and two wide edge routes (NW and SE corridors stay open).
+    let rocks = [
+        (34, 34, 12, 3), // upper jaw of the central cavern
+        (34, 43, 12, 3), // lower jaw (mirrored twin lands symmetric)
+        (24, 24, 6, 6),  // inner-corner boulders shaping the diagonals
+        (56, 40, 4, 8),  // east flank pinch
+    ];
+    for &(rx, ry, rw, rh) in &rocks {
+        for x in rx..rx + rw {
+            for y in ry..ry + rh {
+                if map.in_bounds(x, y) && map.elev_at(x, y) == 0 {
+                    let i = map.idx(x, y);
+                    map.kind[i] = TileKind::Blocked;
+                }
+                let (mx, my) = (w - 1 - x, h - 1 - y);
+                if map.in_bounds(mx, my) && map.elev_at(mx, my) == 0 {
+                    let i = map.idx(mx, my);
+                    map.kind[i] = TileKind::Blocked;
+                }
+            }
+        }
+    }
 
     map
 }

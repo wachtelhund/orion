@@ -1,81 +1,89 @@
 //! Map symmetry audit: a fair mirror map must be exactly 180-degree
-//! rotationally symmetric — terrain, elevation, resources, and starts.
+//! rotationally symmetric — terrain, elevation, resources, expansions,
+//! and starts. Checks every shipping map; exits non-zero on any breach.
 
-use orion_sim::map::{meridian, TilePos};
+use orion_sim::map::{by_name, TilePos, MAP_NAMES};
 
 fn main() {
-    let m = meridian();
-    let (w, h) = (m.width, m.height);
-    let mirror = |t: TilePos| TilePos::new(w - 1 - t.x, h - 1 - t.y);
+    let mut bad = false;
+    for name in MAP_NAMES {
+        let m = by_name(name).unwrap();
+        let (w, h) = (m.width, m.height);
+        let mirror = |t: TilePos| TilePos::new(w - 1 - t.x, h - 1 - t.y);
+        // Mirror of a footprint ORIGIN is offset by the footprint size.
+        let mirror_org = |t: TilePos, fw: i32, fh: i32| TilePos::new(w - fw - t.x, h - fh - t.y);
 
-    let mut terrain_bad = 0;
-    let mut elev_bad = 0;
-    for y in 0..h {
-        for x in 0..w {
-            let mt = mirror(TilePos::new(x, y));
-            if m.walkable(x, y) != m.walkable(mt.x, mt.y) {
-                terrain_bad += 1;
-                if terrain_bad <= 5 {
-                    println!("walkable asym at ({x},{y}) vs ({},{})", mt.x, mt.y);
+        let mut terrain_bad = 0;
+        let mut elev_bad = 0;
+        for y in 0..h {
+            for x in 0..w {
+                let mt = mirror(TilePos::new(x, y));
+                if m.walkable(x, y) != m.walkable(mt.x, mt.y) {
+                    terrain_bad += 1;
+                    if terrain_bad <= 5 {
+                        println!("{name}: walkable asym ({x},{y}) vs ({},{})", mt.x, mt.y);
+                    }
                 }
-            }
-            if m.elev_at(x, y) != m.elev_at(mt.x, mt.y) {
-                elev_bad += 1;
-                if elev_bad <= 5 {
-                    println!("elev asym at ({x},{y})={} vs ({},{})={}",
-                        m.elev_at(x, y), mt.x, mt.y, m.elev_at(mt.x, mt.y));
+                if m.elev_at(x, y) != m.elev_at(mt.x, mt.y) {
+                    elev_bad += 1;
+                    if elev_bad <= 5 {
+                        println!("{name}: elev asym ({x},{y})");
+                    }
                 }
             }
         }
-    }
 
-    let mut mins: Vec<(i32, i32, i32)> =
-        m.minerals.iter().map(|&(t, amt)| (t.x, t.y, amt)).collect();
-    let mut mins_mirrored: Vec<(i32, i32, i32)> = m
-        .minerals
-        .iter()
-        .map(|&(t, amt)| {
-            let mt = mirror(t);
-            (mt.x, mt.y, amt)
-        })
-        .collect();
-    mins.sort();
-    mins_mirrored.sort();
-    let min_sym = mins == mins_mirrored;
-
-    let mut gey: Vec<(i32, i32)> = m.geysers.iter().map(|&(t, _)| (t.x, t.y)).collect();
-    let mut gey_m: Vec<(i32, i32)> = m
-        .geysers
-        .iter()
-        .map(|&(t, _)| {
-            let mt = mirror(t);
-            (mt.x, mt.y)
-        })
-        .collect();
-    gey.sort();
-    gey_m.sort();
-    let gey_sym = gey == gey_m;
-
-    let starts_sym = m.starts.len() == 2 && mirror(m.starts[0]) == m.starts[1];
-
-    println!("terrain asymmetric tiles: {terrain_bad}");
-    println!("elev asymmetric tiles:    {elev_bad}");
-    println!("minerals mirrored:        {min_sym}");
-    println!("geysers mirrored:         {gey_sym}");
-    println!("starts mirrored:          {starts_sym} ({:?})", m.starts);
-    // Distance from each start to its nearest mineral patch center.
-    for (k, &s) in m.starts.iter().enumerate() {
-        let d = m
+        let sym_set = |pts: &[(i32, i32)], mirrored: &[(i32, i32)]| -> bool {
+            let mut a = pts.to_vec();
+            let mut b = mirrored.to_vec();
+            a.sort();
+            b.sort();
+            a == b
+        };
+        let mins: Vec<(i32, i32)> = m.minerals.iter().map(|&(t, _)| (t.x, t.y)).collect();
+        let mins_m: Vec<(i32, i32)> = m
             .minerals
             .iter()
-            .map(|&(t, _)| (t.x - s.x).abs() + (t.y - s.y).abs())
-            .min()
-            .unwrap();
-        println!("start {k} at {:?}: nearest patch manhattan {d}", s);
+            .map(|&(t, _)| {
+                let mt = mirror(t);
+                (mt.x, mt.y)
+            })
+            .collect();
+        let min_sym = sym_set(&mins, &mins_m);
+
+        let gey: Vec<(i32, i32)> = m.geysers.iter().map(|&(t, _)| (t.x, t.y)).collect();
+        let gey_m: Vec<(i32, i32)> = m
+            .geysers
+            .iter()
+            .map(|&(t, _)| {
+                let mt = mirror_org(t, 2, 2);
+                (mt.x, mt.y)
+            })
+            .collect();
+        let gey_sym = sym_set(&gey, &gey_m);
+
+        let exp: Vec<(i32, i32)> = m.expansions.iter().map(|t| (t.x, t.y)).collect();
+        let exp_m: Vec<(i32, i32)> = m
+            .expansions
+            .iter()
+            .map(|t| {
+                let mt = mirror_org(*t, 3, 3);
+                (mt.x, mt.y)
+            })
+            .collect();
+        let exp_sym = sym_set(&exp, &exp_m);
+
+        let starts_sym = m.starts.len() == 2 && mirror(m.starts[0]) == m.starts[1];
+
+        let ok = terrain_bad + elev_bad == 0 && min_sym && gey_sym && exp_sym && starts_sym;
+        println!(
+            "{name}: terrain {terrain_bad} elev {elev_bad} minerals {} geysers {} expansions {} starts {} -> {}",
+            min_sym, gey_sym, exp_sym, starts_sym,
+            if ok { "SYMMETRIC" } else { "ASYMMETRIC" }
+        );
+        bad |= !ok;
     }
-    if terrain_bad + elev_bad > 0 || !min_sym || !gey_sym || !starts_sym {
+    if bad {
         std::process::exit(1);
     }
-    println!("map is exactly 180-degree symmetric");
 }
-// (appended) — dump raw geyser origins for inspection

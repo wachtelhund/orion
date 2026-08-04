@@ -176,6 +176,7 @@ impl Bot {
         let mut siegers: Vec<u32> = Vec::new();
         let mut casters: Vec<u32> = Vec::new();
         let mut hq: Option<u32> = None;
+        let mut deposits = 0usize;
         let mut barracks: Vec<u32> = Vec::new();
         let mut forge: Vec<u32> = Vec::new();
         let mut condenser: Option<u32> = None;
@@ -219,8 +220,14 @@ impl Bot {
                 EntityKind::Building => {
                     if e.construction.is_some() {
                         constructing += 1;
+                        if s.data.buildings[e.def as usize].deposit {
+                            deposits += 1; // an expansion going up counts
+                        }
                     } else if s.data.buildings[e.def as usize].headquarters {
-                        hq = Some(i as u32);
+                        if hq.is_none() {
+                            hq = Some(i as u32);
+                        }
+                        deposits += 1;
                     } else if e.def == barracks_def {
                         barracks.push(i as u32);
                     } else if Some(e.def) == forge_def {
@@ -283,8 +290,16 @@ impl Bot {
         let depot_cost = s.data.buildings[depot_def as usize].cost_minerals;
         let cond_cost = s.data.buildings[condenser_def as usize].cost_minerals;
         let rax_cost = s.data.buildings[barracks_def as usize].cost_minerals;
+        // Expand to the natural on maps that have one, once the main is
+        // established (SC-style second base ~13 workers).
+        let hq_def = s.data.hq_of_race(race);
+        let hq_cost = s.data.buildings[hq_def as usize].cost_minerals;
+        let want_expand =
+            !s.map.expansions.is_empty() && deposits < 2 && workers.len() >= 13;
         if constructing == 0 && !building_worker_busy {
-            if want_depot && minerals >= depot_cost {
+            if want_expand && minerals >= hq_cost {
+                self.order_build_expansion(s, &workers, hq_def, &mut cmds);
+            } else if want_depot && minerals >= depot_cost {
                 self.order_build(s, &workers, depot_def, &mut cmds);
             } else if want_condenser && minerals >= cond_cost {
                 self.order_build_extractor(s, &workers, condenser_def, &mut cmds);
@@ -572,6 +587,33 @@ impl Bot {
                         return;
                     }
                 }
+            }
+        }
+    }
+
+    /// Expansion HQ on the nearest free suggested slot.
+    fn order_build_expansion(
+        &self,
+        s: &State,
+        workers: &[u32],
+        hq_def: DefId,
+        cmds: &mut Vec<Command>,
+    ) {
+        let Some(builder) = self.pick_builder(s, workers) else { return };
+        let Some(hq_tile) = self.hq_tile(s) else { return };
+        let mut slots: Vec<TilePos> = s.map.expansions.clone();
+        slots.sort_by_key(|t| {
+            ((t.x - hq_tile.x).pow(2) + (t.y - hq_tile.y).pow(2), t.x, t.y)
+        });
+        for site in slots {
+            if s.valid_building_site(hq_def, site, Some(builder)) {
+                cmds.push(Command::Build {
+                    worker: s.id_of(builder),
+                    building: hq_def,
+                    site,
+                    queued: false,
+                });
+                return;
             }
         }
     }
