@@ -164,10 +164,15 @@ player may be 1 (`App.human` — never hardcode player 0 in client code).
 ## Maps
 
 `map.rs` registry: `MAP_NAMES` + `by_name` — names are replay/net
-identifiers, never rename a shipped one. Two maps: meridian (single-base,
-mines out ~15 min by design) and caverns (Xel'Naga Caverns homage with
+identifiers, never rename a shipped one. Three maps: meridian (single-base,
+mines out ~15 min by design), caverns (Xel'Naga Caverns homage with
 natural expansions; `Map.expansions` holds suggested HQ origins and the bot
-takes its natural at ~13 workers). Every map MUST be exactly 180-degree
+takes its natural at ~13 workers), and thornwood (96x96, contested
+high-ground thirds, `Map.trees`/`Map.rocks` destructibles: RES_TREE blocks
+movement AND line of sight — fog runs a Bresenham occlusion pass against
+`State::vision_block`, skipped entirely on tree-free maps and for flyers —
+RES_ROCK blocks movement only; both die by hp to explicit AttackTarget,
+never auto-acquired). Every map MUST be exactly 180-degree
 rotationally symmetric — run `cargo run -p orion-sim --example symmetry`
 (terrain, elevation, resources, expansions, starts) and keep the sim
 point-symmetric (see `examples/mirror.rs`, the mirror-covariance probe that

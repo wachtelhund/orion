@@ -37,6 +37,7 @@ struct Shell {
     menu_shot: Option<(String, String)>,
     mp_auto: Option<String>,
     record: Option<(String, u32, u32, u32)>,
+    record_follow: bool,
     shot_cross: bool,
     replay_open: Option<String>,
     replay_shot: Option<(String, String, u32)>,
@@ -74,6 +75,7 @@ impl ApplicationHandler for Shell {
         app.shot_cross = self.shot_cross;
         if app.record.is_some() {
             app.shot_bot0 = Some(app::Bot2::new(0));
+            app.follow = self.record_follow;
         }
         if let Some(m) = &self.map_arg {
             if let Some(k) = orion_sim::map::MAP_NAMES.iter().position(|n| n == m) {
@@ -203,6 +205,7 @@ fn main() {
             ))
         });
     let shot_cross = args.iter().any(|a| a == "--shot-cross");
+    let record_follow = args.iter().any(|a| a == "--record-follow");
     let mp_auto = args
         .iter()
         .position(|a| a == "--mp-auto")
@@ -251,6 +254,7 @@ fn main() {
         menu_shot,
         mp_auto,
         record,
+        record_follow,
         shot_cross,
         replay_open,
         replay_shot,

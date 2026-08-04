@@ -177,6 +177,10 @@ pub struct App {
     pub replay_files: Vec<(String, std::path::PathBuf)>,
     /// Headless replay capture: (target tick, out path).
     pub replay_shot: Option<(u32, String)>,
+    /// Observer follow-cam for --record: EMA of recent combat positions.
+    pub follow: bool,
+    pub follow_pos: Option<(f32, f32)>,
+    pub follow_quiet: u32,
     pub page: MenuPage,
     pub rebinding: Option<Action>,
     pub settings: Settings,
@@ -328,6 +332,9 @@ impl App {
             record_replay: false,
             replay_files: Vec::new(),
             replay_shot: None,
+            follow: false,
+            follow_pos: None,
+            follow_quiet: 0,
             map_choice: 0,
             game_map: "meridian".into(),
             chosen_race: 0,
@@ -1464,6 +1471,27 @@ impl App {
                 self.sfx(Sfx::AckAttack);
                 return;
             }
+            // Destructibles: right-click orders armed units to clear them.
+            if e.kind == EntityKind::Resource
+                && (e.def == orion_sim::state::RES_TREE
+                    || e.def == orion_sim::state::RES_ROCK)
+            {
+                let armed: Vec<_> = units
+                    .iter()
+                    .copied()
+                    .filter(|id| {
+                        let u = &self.state.entities[id.idx as usize];
+                        self.state.data.units[u.def as usize].weapon.is_some()
+                    })
+                    .collect();
+                if !armed.is_empty() {
+                    self.pending
+                        .push((self.human, Command::AttackTarget { units: armed, target: tid }));
+                    self.ping(wx, wy, 1);
+                    self.sfx(Sfx::AckAttack);
+                    return;
+                }
+            }
             // Right-click own unfinished building with a builder: resume it.
             if e.owner == self.human && e.kind == EntityKind::Building && e.construction.is_some() {
                 let def = e.def;
@@ -2166,7 +2194,63 @@ impl App {
                     *r = (*r - TICK_DT as f32).max(0.0);
                 }
             }
-            if let Some((fx_, fy_)) = self.shot_focus {
+            if self.follow {
+                // Observer camera: drift toward where the fighting is —
+                // mean of this frame's attack events, else army midpoint.
+                let mut sum = (0.0f32, 0.0f32);
+                let mut n = 0.0f32;
+                for ev in &self.state.events {
+                    if let orion_sim::state::SimEvent::Attack { from, .. } = ev {
+                        let e = &self.state.entities[*from as usize];
+                        sum.0 += e.pos.x.to_f32();
+                        sum.1 += e.pos.y.to_f32();
+                        n += 1.0;
+                    }
+                }
+                self.follow_quiet = if n > 0.0 { 0 } else { self.follow_quiet + 1 };
+                let target = if n > 0.0 {
+                    Some((sum.0 / n, sum.1 / n))
+                } else if self.follow_quiet > 10 {
+                    // Long lull: drift to the DENSEST army clump (the
+                    // midpoint of two distant armies is empty ground).
+                    let armies: Vec<(f32, f32)> = self
+                        .state
+                        .entities
+                        .iter()
+                        .filter(|e| {
+                            e.alive
+                                && e.kind == EntityKind::Unit
+                                && !self.state.data.units[e.def as usize].harvester
+                        })
+                        .map(|e| (e.pos.x.to_f32(), e.pos.y.to_f32()))
+                        .collect();
+                    armies
+                        .iter()
+                        .max_by_key(|(x, y)| {
+                            armies
+                                .iter()
+                                .filter(|(ox, oy)| {
+                                    (ox - x).powi(2) + (oy - y).powi(2) < 64.0
+                                })
+                                .count()
+                        })
+                        .copied()
+                } else {
+                    None // linger on the last action spot
+                };
+                if let Some((tx_, ty_)) = target {
+                    let f = self.follow_pos.get_or_insert((tx_, ty_));
+                    // Fights snap hard, quiet moments drift gently.
+                    let k = if n > 0.0 { 0.4 } else { 0.10 };
+                    f.0 += (tx_ - f.0) * k;
+                    f.1 += (ty_ - f.1) * k;
+                }
+                if let Some((fx_, fy_)) = self.follow_pos {
+                    let (ix, iy) = iso::world_to_iso(fx_, fy_);
+                    self.cam.cx = ix;
+                    self.cam.cy = iy;
+                }
+            } else if let Some((fx_, fy_)) = self.shot_focus {
                 let (ix, iy) = iso::world_to_iso(fx_, fy_);
                 self.cam.cx = ix;
                 self.cam.cy = iy;
@@ -2965,6 +3049,22 @@ impl App {
                     if e.def == RES_GEYSER {
                         let r = book.geyser;
                         self.gfx.sprite(out, r, sx, sy - 6.0 * zoom, r.w as f32 * zoom, r.h as f32 * zoom, tint);
+                    } else if e.def == orion_sim::state::RES_TREE {
+                        let t = TilePos::of(e.pos);
+                        let v = (crate::atlas::hash2(t.x, t.y, 77) % 2) as usize;
+                        let r = book.trees[v];
+                        self.gfx.sprite(out, r, sx, sy - 9.0 * zoom, r.w as f32 * zoom, r.h as f32 * zoom, tint);
+                        if e.hp < orion_sim::state::TREE_HP {
+                            let frac = e.hp as f32 / orion_sim::state::TREE_HP as f32;
+                            self.bar(out, sx, sy - 24.0 * zoom, 16.0, frac, hp_color(frac));
+                        }
+                    } else if e.def == orion_sim::state::RES_ROCK {
+                        let r = book.rock_wall;
+                        self.gfx.sprite(out, r, sx, sy - 5.0 * zoom, r.w as f32 * zoom, r.h as f32 * zoom, tint);
+                        if e.hp < orion_sim::state::ROCK_HP {
+                            let frac = e.hp as f32 / orion_sim::state::ROCK_HP as f32;
+                            self.bar(out, sx, sy - 16.0 * zoom, 18.0, frac, hp_color(frac));
+                        }
                     } else {
                         let variant = if e.amount > 900 {
                             0

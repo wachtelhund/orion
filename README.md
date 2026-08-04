@@ -5,7 +5,7 @@ purpose-built deterministic simulation with a wgpu isometric renderer.
 Two asymmetric races, skirmish AI, and online multiplayer via lobby codes.
 All art and audio are procedurally generated at startup: zero asset files.
 
-![Orion gameplay](docs/media/orion.gif)
+![Orion gameplay — observer camera following a battle on Thornwood](docs/media/orion.gif)
 
 | ![Battle](docs/media/battle.png) | ![Kyth Assembly](docs/media/kyth-assembly.png) |
 |---|---|
@@ -77,10 +77,12 @@ Playable game — single player vs AI, or 1v1 multiplayer (direct connect):
 - Bot personalities (seeded timing/cap offsets) so games vary; escalation so
   they always finish; balance measured by
   `cargo run --release -p orion-sim --example balance`
-- Two maps: "Meridian" (two high-ground mains, ramps, chokepoints) and
-  "Caverns" (Xel'Naga Caverns homage: NE/SW mains, NATURAL EXPANSIONS with
-  their own mineral lines + geysers, cavern rocks splitting the center into
-  three routes) — pick per game; bots expand to their natural
+- Three maps: "Meridian" (two high-ground mains, ramps, chokepoints),
+  "Caverns" (Xel'Naga Caverns homage with natural expansions), and
+  "Thornwood" (96x96: mains, naturals, contested HIGH-GROUND third bases,
+  rock-sealed back doors, and sparse DESTRUCTIBLE FORESTS — trees block
+  movement and line of sight until chopped down; flyers cross and see
+  over everything) — pick per game; bots expand
 - Replays: every game auto-saves to ~/.orion-replays; watch from the
   REPLAYS menu with pause, speed, and per-player fog perspective
 - Main menu (vs AI at three difficulties), pause menu with settings:

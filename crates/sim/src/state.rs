@@ -17,6 +17,13 @@ pub const NEUTRAL: u8 = 255;
 /// Resource entity def ids (Entity.def for kind == Resource).
 pub const RES_MINERALS: u16 = 0;
 pub const RES_GEYSER: u16 = 1;
+/// Destructible tree: blocks the tile AND line of sight; killable by an
+/// explicit attack (never auto-acquired). Death opens both.
+pub const RES_TREE: u16 = 2;
+/// Destructible rock wall: blocks the tile only (vision passes).
+pub const RES_ROCK: u16 = 3;
+pub const TREE_HP: i32 = 120;
+pub const ROCK_HP: i32 = 500;
 /// Minerals carried per harvester trip.
 pub const CARRY_AMOUNT: i32 = 8;
 /// Ticks spent mining at a patch per trip.
@@ -222,6 +229,10 @@ pub struct State {
     pub fields: FieldPool,
     /// Dynamic blockers: building footprints + mineral patches.
     pub blocked: Vec<bool>,
+    /// Tiles that block LINE OF SIGHT (trees). Maintained with `blocked`.
+    pub vision_block: Vec<bool>,
+    /// Fast path: skip LOS raycasts entirely on maps without trees.
+    pub has_vision_blockers: bool,
     pub fog: Vec<FogGrid>,
     pub rng: SimRng,
     pub winner: Option<u8>,
@@ -269,6 +280,8 @@ impl State {
                 .collect(),
             fields: FieldPool::default(),
             blocked: vec![false; n_tiles],
+            vision_block: vec![false; n_tiles],
+            has_vision_blockers: false,
             fog: (0..n_players).map(|_| FogGrid::new(map.width, map.height)).collect(),
             rng: SimRng::new(seed),
             winner: None,
@@ -289,6 +302,12 @@ impl State {
         }
         for (origin, amount) in s.map.geysers.clone() {
             s.spawn_resource(RES_GEYSER, origin, (2, 2), amount);
+        }
+        for t in s.map.trees.clone() {
+            s.spawn_resource(RES_TREE, t, (1, 1), 0);
+        }
+        for t in s.map.rocks.clone() {
+            s.spawn_resource(RES_ROCK, t, (1, 1), 0);
         }
 
         // One HQ + starting workers per player, per their race.
@@ -406,15 +425,24 @@ impl State {
             owner: NEUTRAL,
             pos,
             prev_pos: pos,
-            hp: 1,
+            hp: match def {
+                RES_TREE => TREE_HP,
+                RES_ROCK => ROCK_HP,
+                _ => 1,
+            },
             amount,
             ..Entity::blank()
         };
+        let sees_through = def != RES_TREE;
         for x in origin.x..origin.x + size.0 {
             for y in origin.y..origin.y + size.1 {
                 if self.map.in_bounds(x, y) {
                     let i = self.map.idx(x, y);
                     self.blocked[i] = true;
+                    if !sees_through {
+                        self.vision_block[i] = true;
+                        self.has_vision_blockers = true;
+                    }
                 }
             }
         }
@@ -462,6 +490,7 @@ impl State {
                         if self.map.in_bounds(x, y) {
                             let i = self.map.idx(x, y);
                             self.blocked[i] = false;
+                            self.vision_block[i] = false;
                         }
                     }
                 }

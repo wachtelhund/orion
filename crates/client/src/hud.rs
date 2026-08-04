@@ -723,10 +723,11 @@ impl App {
                 (d.name.clone(), d.hp)
             }
             EntityKind::Resource => {
-                let n = if e.def == orion_sim::state::RES_GEYSER {
-                    "PLASMA GEYSER"
-                } else {
-                    "MINERAL FIELD"
+                let n = match e.def {
+                    orion_sim::state::RES_GEYSER => "PLASMA GEYSER",
+                    orion_sim::state::RES_TREE => "THORN TREE - DESTRUCTIBLE, BLOCKS SIGHT",
+                    orion_sim::state::RES_ROCK => "ROCK WALL - DESTRUCTIBLE",
+                    _ => "MINERAL FIELD",
                 };
                 (n.to_string(), 0)
             }

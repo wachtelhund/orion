@@ -51,6 +51,10 @@ pub struct Map {
     /// Suggested expansion HQ origins (3x3), nearest-to-start first per
     /// player. Empty on maps without expansions.
     pub expansions: Vec<TilePos>,
+    /// Destructible tree tiles (block movement AND line of sight).
+    pub trees: Vec<TilePos>,
+    /// Destructible rock tiles (block movement only).
+    pub rocks: Vec<TilePos>,
 }
 
 impl Map {
@@ -110,12 +114,13 @@ impl Map {
 
 /// All shipping maps, in menu order. Names are the replay/net identifiers —
 /// never rename one that shipped.
-pub const MAP_NAMES: &[&str] = &["meridian", "caverns"];
+pub const MAP_NAMES: &[&str] = &["meridian", "caverns", "thornwood"];
 
 pub fn by_name(name: &str) -> Option<Map> {
     match name {
         "meridian" => Some(meridian()),
         "caverns" => Some(caverns()),
+        "thornwood" => Some(thornwood()),
         _ => None,
     }
 }
@@ -136,6 +141,8 @@ pub fn meridian() -> Map {
         minerals: Vec::new(),
         geysers: Vec::new(),
         expansions: Vec::new(),
+        trees: Vec::new(),
+        rocks: Vec::new(),
     };
 
     // Border wall.
@@ -263,6 +270,8 @@ pub fn caverns() -> Map {
         minerals: Vec::new(),
         geysers: Vec::new(),
         expansions: Vec::new(),
+        trees: Vec::new(),
+        rocks: Vec::new(),
     };
 
     for x in 0..w {
@@ -400,4 +409,174 @@ mod tests {
             }
         }
     }
+}
+
+/// Third 1v1 map: "Thornwood". 96x96, the busy one: NW/SE high-ground
+/// mains with naturals, two contested low-ground third bases, a pair of
+/// central high-ground perches, rock-sealed back doors, and sparse
+/// destructible forests that block sight but leave gaps an army can
+/// squeeze through. 180-degree symmetric; every feature is pushed with
+/// its mirrored twin.
+pub fn thornwood() -> Map {
+    let w = 96;
+    let h = 96;
+    let mut map = Map {
+        width: w,
+        height: h,
+        kind: vec![TileKind::Ground; (w * h) as usize],
+        elev: vec![0u8; (w * h) as usize],
+        starts: vec![TilePos::new(16, 16), TilePos::new(w - 17, h - 17)],
+        minerals: Vec::new(),
+        geysers: Vec::new(),
+        expansions: Vec::new(),
+        trees: Vec::new(),
+        rocks: Vec::new(),
+    };
+    for x in 0..w {
+        for y in 0..h {
+            if x == 0 || y == 0 || x == w - 1 || y == h - 1 {
+                map.kind[(y * w + x) as usize] = TileKind::Blocked;
+            }
+        }
+    }
+
+    // Main plateaus (26x26, NW + SE mirror), cliff-ringed.
+    let plateau = |map: &mut Map, ox: i32, oy: i32, size: i32| {
+        for x in ox..ox + size {
+            for y in oy..oy + size {
+                if map.in_bounds(x, y) {
+                    let i = map.idx(x, y);
+                    map.elev[i] = 1;
+                }
+            }
+        }
+        for x in ox - 1..=ox + size {
+            for y in oy - 1..=oy + size {
+                let inside = x >= ox && x < ox + size && y >= oy && y < oy + size;
+                if !inside && map.in_bounds(x, y) {
+                    let i = map.idx(x, y);
+                    map.kind[i] = TileKind::Blocked;
+                    map.elev[i] = 1;
+                }
+            }
+        }
+    };
+    plateau(&mut map, 1, 1, 26);
+    plateau(&mut map, w - 27, h - 27, 26);
+    // Central perches: two mirrored 10x10 high grounds flanking the middle.
+    plateau(&mut map, 58, 24, 10);
+    plateau(&mut map, w - 68, h - 34, 10);
+
+    let ramp = |map: &mut Map, tiles: &[(i32, i32)]| {
+        for &(x, y) in tiles {
+            let i = map.idx(x, y);
+            map.kind[i] = TileKind::Ramp;
+            map.elev[i] = 0;
+            let (mx, my) = (map.width - 1 - x, map.height - 1 - y);
+            let j = map.idx(mx, my);
+            map.kind[j] = TileKind::Ramp;
+            map.elev[j] = 0;
+        }
+    };
+    // Main ramps: SE corner of the NW plateau (mirrored automatically).
+    ramp(&mut map, &[(27, 22), (27, 23), (27, 24), (27, 25), (28, 22), (28, 23), (28, 24), (28, 25)]);
+    // Perch ramps: west and south sides of the NE perch (+ mirrors).
+    ramp(&mut map, &[(57, 28), (57, 29), (57, 30)]);
+    ramp(&mut map, &[(62, 34), (63, 34), (64, 34)]);
+
+    const PATCH: i32 = 1000;
+    let patches = |map: &mut Map, line: &[(i32, i32)], amount: i32| {
+        for &(x, y) in line {
+            map.minerals.push((TilePos::new(x, y), amount));
+            map.minerals
+                .push((TilePos::new(map.width - 1 - x, map.height - 1 - y), amount));
+        }
+    };
+    // Main line: arced into the NW corner.
+    patches(
+        &mut map,
+        &[(5, 8), (4, 10), (4, 12), (4, 14), (4, 16), (4, 18), (5, 20), (6, 22)],
+        PATCH,
+    );
+    // Natural: south of the main ramp, tucked against the west edge.
+    patches(&mut map, &[(4, 34), (4, 36), (4, 38), (4, 40), (5, 42), (6, 44)], PATCH);
+    map.expansions.push(TilePos::new(10, 36));
+    map.expansions
+        .push(TilePos::new(w - 3 - 10, h - 3 - 36));
+    // Contested third: ON the SW high-ground perch — a defensible
+    // expansion worth fighting over (mirror = NE perch).
+    patches(&mut map, &[(29, 64), (29, 66), (29, 68), (31, 70), (33, 70), (35, 70)], PATCH);
+    map.expansions.push(TilePos::new(30, 62));
+    map.expansions
+        .push(TilePos::new(w - 3 - 30, h - 3 - 62));
+
+    const GAS: i32 = 2500;
+    let geysers = |map: &mut Map, origins: &[(i32, i32)]| {
+        for &(x, y) in origins {
+            map.geysers.push((TilePos::new(x, y), GAS));
+            map.geysers
+                .push((TilePos::new(map.width - 2 - x, map.height - 2 - y), GAS));
+        }
+    };
+    geysers(&mut map, &[(20, 4), (12, 40), (35, 65)]); // main, natural, third
+
+    // Back-door corridors along the west/east edges, sealed by rocks.
+    let rocks = |map: &mut Map, tiles: &[(i32, i32)]| {
+        for &(x, y) in tiles {
+            map.rocks.push(TilePos::new(x, y));
+            map.rocks
+                .push(TilePos::new(map.width - 1 - x, map.height - 1 - y));
+        }
+    };
+    rocks(&mut map, &[(2, 50), (3, 50), (4, 50), (5, 50)]);
+
+    // Sparse forests: hash-scattered singles with guaranteed gaps (no
+    // tree may touch another orthogonally), placed in three mirrored
+    // bands between the bases and the center. Armies squeeze through;
+    // sight does not.
+    let bands: [(i32, i32, i32, i32); 3] = [
+        (34, 8, 18, 22),  // north approach woods
+        (12, 48, 16, 18), // between natural and third
+        (40, 40, 16, 16), // center woods
+    ];
+    let mut tree_set: Vec<i32> = Vec::new();
+    for &(bx, by, bw, bh) in &bands {
+        for y in by..by + bh {
+            for x in bx..bx + bw {
+                if atlas_free_hash(x, y) % 10 >= 3 {
+                    continue;
+                }
+                if !map.in_bounds(x, y) || map.kind[(y * w + x) as usize] != TileKind::Ground {
+                    continue;
+                }
+                if map.elev[(y * w + x) as usize] != 0 {
+                    continue;
+                }
+                // Enforce breathing room: skip if any orthogonal
+                // neighbor (or its mirror partner) already has a tree.
+                let (mx, my) = (w - 1 - x, h - 1 - y);
+                let touches = |set: &Vec<i32>, tx: i32, ty: i32| {
+                    [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+                        .iter()
+                        .any(|(dx, dy)| set.contains(&((ty + dy) * w + tx + dx)))
+                };
+                if touches(&tree_set, x, y) || touches(&tree_set, mx, my) {
+                    continue;
+                }
+                tree_set.push(y * w + x);
+                tree_set.push(my * w + mx);
+                map.trees.push(TilePos::new(x, y));
+                map.trees.push(TilePos::new(mx, my));
+            }
+        }
+    }
+
+    map
+}
+
+/// Deterministic tile hash for map generation (no client dependency).
+pub fn atlas_free_hash(x: i32, y: i32) -> u32 {
+    let mut h = (x as u32).wrapping_mul(374761393) ^ (y as u32).wrapping_mul(668265263) ^ 1013;
+    h = (h ^ (h >> 13)).wrapping_mul(1274126177);
+    h ^ (h >> 16)
 }

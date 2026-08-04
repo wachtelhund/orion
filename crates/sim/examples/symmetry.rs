@@ -73,12 +73,39 @@ fn main() {
             .collect();
         let exp_sym = sym_set(&exp, &exp_m);
 
+        let tr: Vec<(i32, i32)> = m.trees.iter().map(|t| (t.x, t.y)).collect();
+        let tr_m: Vec<(i32, i32)> = m
+            .trees
+            .iter()
+            .map(|t| {
+                let mt = mirror(*t);
+                (mt.x, mt.y)
+            })
+            .collect();
+        let tree_sym = sym_set(&tr, &tr_m);
+        let rk: Vec<(i32, i32)> = m.rocks.iter().map(|t| (t.x, t.y)).collect();
+        let rk_m: Vec<(i32, i32)> = m
+            .rocks
+            .iter()
+            .map(|t| {
+                let mt = mirror(*t);
+                (mt.x, mt.y)
+            })
+            .collect();
+        let rock_sym = sym_set(&rk, &rk_m);
+
         let starts_sym = m.starts.len() == 2 && mirror(m.starts[0]) == m.starts[1];
 
-        let ok = terrain_bad + elev_bad == 0 && min_sym && gey_sym && exp_sym && starts_sym;
+        let ok = terrain_bad + elev_bad == 0
+            && min_sym
+            && gey_sym
+            && exp_sym
+            && starts_sym
+            && tree_sym
+            && rock_sym;
         println!(
-            "{name}: terrain {terrain_bad} elev {elev_bad} minerals {} geysers {} expansions {} starts {} -> {}",
-            min_sym, gey_sym, exp_sym, starts_sym,
+            "{name}: terrain {terrain_bad} elev {elev_bad} minerals {} geysers {} expansions {} starts {} trees {} ({}) rocks {} -> {}",
+            min_sym, gey_sym, exp_sym, starts_sym, tree_sym, m.trees.len(), rock_sym,
             if ok { "SYMMETRIC" } else { "ASYMMETRIC" }
         );
         bad |= !ok;

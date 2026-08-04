@@ -241,6 +241,9 @@ pub struct SpriteBook {
     // world objects
     pub minerals: [Region; 3],
     pub geyser: Region,
+    /// Destructible trees (two variants) + the rock wall boulder.
+    pub trees: [Region; 2],
+    pub rock_wall: Region,
     /// [unit_type][team][facing][frame]. 0-6: Vanguard Combine (worker,
     /// trooper, vanguard, breaker, skywing, stormcaller, breaker-sieged).
     /// 7-12: Kyth Assembly (drone, skitter, spitter, ravager, wisp, weaver).
@@ -387,6 +390,17 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
         }
     }
 
+    // Destructible flora + rocks.
+    let trees = [p.place(&tree_canvas(0)), p.place(&tree_canvas(1))];
+    let rock_wall = {
+        let mut c = Canvas::new(22, 18);
+        c.ellipse_shaded(7.0, 11.0, 6.5, 5.0, [96, 92, 88]);
+        c.ellipse_shaded(15.0, 12.0, 6.0, 4.5, [88, 84, 82]);
+        c.ellipse_shaded(11.0, 7.0, 5.0, 4.0, [104, 100, 94]);
+        c.outline([30, 28, 26, 255]);
+        p.place(&c)
+    };
+
     // Effects.
     let flash = p.place(&star_flash());
     let spark = {
@@ -522,6 +536,8 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
         cliff_right,
         minerals,
         geyser,
+        trees,
+        rock_wall,
         units,
         buildings,
         building_px_h,
@@ -545,6 +561,29 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
         glyphs,
     };
     (p.px, book)
+}
+
+/// A gnarled alien conifer: dark trunk, layered teal-green canopy. Two
+/// variants via `v` so forests don't tile visibly.
+fn tree_canvas(v: i32) -> Canvas {
+    let mut c = Canvas::new(20, 26);
+    // Trunk.
+    c.rect(9, 18, 2, 6, [58, 44, 34, 255]);
+    c.rect(8, 22, 4, 2, [48, 36, 28, 255]);
+    // Canopy: three stacked shaded blobs, slightly skewed per variant.
+    let sk = if v == 0 { 0.0 } else { 1.5 };
+    c.ellipse_shaded(10.0 + sk, 14.0, 8.0, 5.0, [38, 92, 74]);
+    c.ellipse_shaded(10.0 - sk, 9.0, 6.5, 4.5, [46, 108, 82]);
+    c.ellipse_shaded(10.0, 5.0, 4.5, 3.5, [58, 124, 92]);
+    // Sparse lighter needles.
+    for k in 0..10 {
+        let h = hash2(k, v, 421);
+        let x = 4 + (h % 12) as i32;
+        let y = 3 + ((h >> 8) % 12) as i32;
+        c.blend(x, y, [92, 160, 118, 160]);
+    }
+    c.outline([16, 26, 22, 255]);
+    c
 }
 
 // -------------------------------------------------------- console chrome ----

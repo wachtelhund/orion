@@ -484,7 +484,9 @@ impl State {
         }
         for i in 0..self.entities.len() {
             let e = &self.entities[i];
-            if e.alive && e.hp <= 0 && e.kind != EntityKind::Resource {
+            let destructible = e.kind == EntityKind::Resource
+                && (e.def == crate::state::RES_TREE || e.def == crate::state::RES_ROCK);
+            if e.alive && e.hp <= 0 && (e.kind != EntityKind::Resource || destructible) {
                 self.kill(i as u32);
             }
         }
