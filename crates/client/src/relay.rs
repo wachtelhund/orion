@@ -447,3 +447,28 @@ pub fn open_url(url: &str) {
     c.arg(url);
     let _ = c.spawn();
 }
+
+/// A leaderboard row from the relay.
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct LadderRow {
+    pub id: String,
+    pub name: String,
+    pub mmr: i32,
+    pub games: u32,
+}
+
+/// Top players by MMR (ranked games only).
+pub fn fetch_ladder_async(base: String) -> Receiver<Option<Vec<LadderRow>>> {
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let url = format!("{}/leaderboard", http_base(&base));
+        let got = ureq::get(&url)
+            .timeout(Duration::from_secs(6))
+            .call()
+            .ok()
+            .and_then(|r| r.into_string().ok())
+            .and_then(|b| serde_json::from_str::<Vec<LadderRow>>(&b).ok());
+        let _ = tx.send(got);
+    });
+    rx
+}

@@ -144,6 +144,9 @@ pub struct App {
     pub mm_rating_rx: Option<std::sync::mpsc::Receiver<Option<(i32, u32)>>>,
     /// Alternates ack variations so spam clicks don't grate.
     pub ack_flip: bool,
+    /// Ladder page contents + pending fetch.
+    pub ladder: Option<Vec<crate::relay::LadderRow>>,
+    pub ladder_rx: Option<std::sync::mpsc::Receiver<Option<Vec<crate::relay::LadderRow>>>>,
     /// Newer release on GitHub: (tag, html url).
     pub update: Option<(String, String)>,
     pub update_rx: Option<std::sync::mpsc::Receiver<Option<(String, String)>>>,
@@ -305,6 +308,8 @@ impl App {
             mm_rating: None,
             mm_rating_rx: None,
             ack_flip: false,
+            ladder: None,
+            ladder_rx: None,
             update: None,
             update_rx: Some(crate::relay::check_update_async()),
             replay: None,
@@ -1015,6 +1020,7 @@ impl App {
             MenuPage::Difficulty | MenuPage::Multiplayer | MenuPage::Replays => {
                 self.page = MenuPage::MainRoot
             }
+            MenuPage::Ladder => self.page = MenuPage::Multiplayer,
             MenuPage::MainRoot => {}
         }
     }
@@ -1956,6 +1962,17 @@ impl App {
                 "settings" => self.page = MenuPage::Settings { from_game: false },
                 "difficulty" => self.page = MenuPage::Difficulty,
                 "mp" => self.page = MenuPage::Multiplayer,
+                "ladder" => {
+                    // Blocking fetch so the capture shows real rows.
+                    if let Ok(Some(rows)) = crate::relay::fetch_ladder_async(
+                        self.settings.relay_url.clone(),
+                    )
+                    .recv()
+                    {
+                        self.ladder = Some(rows);
+                    }
+                    self.page = MenuPage::Ladder;
+                }
                 "esc" => {
                     self.in_game = true;
                     self.page = MenuPage::EscRoot;
@@ -2343,6 +2360,13 @@ impl App {
                     self.mm_queue = None;
                     self.mm_status.clear();
                 }
+            }
+        }
+        // Ladder fetch result.
+        if let Some(rx) = &self.ladder_rx {
+            if let Ok(got) = rx.try_recv() {
+                self.ladder = got;
+                self.ladder_rx = None;
             }
         }
         // Update check result (one-shot at startup).

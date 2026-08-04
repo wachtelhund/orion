@@ -317,6 +317,10 @@ export class Matchmaker {
         } catch (_) {}
       }
       const { mmr, games } = await this.rating(id);
+      // Remember the display name for the leaderboard.
+      const rec = await this.rating(id);
+      rec.name = name;
+      await this.state.storage.put(`mmr:${id}`, rec);
       const entry = {
         id,
         ws: server,
@@ -372,6 +376,22 @@ export class Matchmaker {
     if (url.pathname === "/rating") {
       const id = (url.searchParams.get("id") || "").slice(0, 32);
       return this.json(await this.rating(id));
+    }
+
+    if (url.pathname === "/leaderboard") {
+      const all = await this.state.storage.list({ prefix: "mmr:" });
+      const rows = [];
+      for (const [key, r] of all) {
+        if ((r.games || 0) < 1) continue;
+        rows.push({
+          id: key.slice(4, 12), // prefix only: identify yourself, dox nobody
+          name: r.name || "UNKNOWN",
+          mmr: Math.round(r.mmr),
+          games: r.games,
+        });
+      }
+      rows.sort((a, b) => b.mmr - a.mmr);
+      return this.json(rows.slice(0, 25));
     }
 
     return new Response("not found", { status: 404 });
@@ -543,7 +563,11 @@ export default {
       const id = env.MATCHMAKER.idFromName("matchmaker");
       return env.MATCHMAKER.get(id).fetch(request);
     }
-    if (url.pathname === "/result" || url.pathname === "/rating") {
+    if (
+      url.pathname === "/result" ||
+      url.pathname === "/rating" ||
+      url.pathname === "/leaderboard"
+    ) {
       if (await rateLimited(env.LIST_LIMITER, ip)) return tooMany();
       const id = env.MATCHMAKER.idFromName("matchmaker");
       return env.MATCHMAKER.get(id).fetch(request);

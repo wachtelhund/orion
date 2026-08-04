@@ -14,6 +14,7 @@ pub enum MenuPage {
     MainRoot,
     Difficulty,
     Multiplayer,
+    Ladder,
     Replays,
     Settings { from_game: bool },
     EscRoot,
@@ -46,6 +47,8 @@ enum MenuAction {
     CancelMp,
     FindMatch,
     CancelSearch,
+    OpenLadder,
+    Noop,
     OpenReplays,
     PlayReplay(usize),
     OpenUpdate,
@@ -166,6 +169,7 @@ impl App {
                     };
                     let mut rows = vec![
                         (find, MenuAction::FindMatch),
+                        ("LADDER".into(), MenuAction::OpenLadder),
                         (
                             format!("NAME: {}{}", self.settings.player_name, name_marker),
                             MenuAction::FocusName,
@@ -209,6 +213,35 @@ impl App {
                     rows.push(("BACK".into(), MenuAction::Back));
                     stack(rows, h * 0.24);
                 }
+            }
+            MenuPage::Ladder => {
+                let mut rows: Vec<(String, MenuAction)> = Vec::new();
+                match &self.ladder {
+                    None => rows.push(("FETCHING LADDER...".into(), MenuAction::Noop)),
+                    Some(list) if list.is_empty() => {
+                        rows.push(("NO RANKED GAMES PLAYED YET".into(), MenuAction::Noop))
+                    }
+                    Some(list) => {
+                        let me = &self.settings.player_id;
+                        for (k, r) in list.iter().take(10).enumerate() {
+                            let you = me.starts_with(&r.id);
+                            let mark = if you { "  < YOU" } else { "" };
+                            rows.push((
+                                format!(
+                                    "{}. {}  {} MMR  ({} GAMES){}",
+                                    k + 1,
+                                    r.name,
+                                    r.mmr,
+                                    r.games,
+                                    mark
+                                ),
+                                MenuAction::Noop,
+                            ));
+                        }
+                    }
+                }
+                rows.push(("BACK".into(), MenuAction::Back));
+                stack(rows, h * 0.26);
             }
             MenuPage::Replays => {
                 let mut rows: Vec<(String, MenuAction)> = self
@@ -382,6 +415,7 @@ impl App {
             MenuPage::Settings { .. } => ("SETTINGS", ""),
             MenuPage::Difficulty => ("SELECT DIFFICULTY", ""),
             MenuPage::Multiplayer => ("MULTIPLAYER", ""),
+            MenuPage::Ladder => ("LADDER", ""),
             MenuPage::Replays => ("REPLAYS", ""),
             _ => ("ORION", "A DETERMINISTIC ISOMETRIC RTS"),
         };
@@ -572,6 +606,7 @@ impl App {
                 self.settings.save();
                 self.page = match self.page {
                     MenuPage::Settings { from_game: true } => MenuPage::EscRoot,
+                    MenuPage::Ladder => MenuPage::Multiplayer,
                     _ => MenuPage::MainRoot,
                 };
                 self.rebinding = None;
@@ -691,6 +726,13 @@ impl App {
                 let n = self.state.data.race_names.len() as u8;
                 self.enemy_race_choice = (self.enemy_race_choice + 1) % (n + 1).max(1);
             }
+            MenuAction::OpenLadder => {
+                self.ladder = None;
+                self.ladder_rx =
+                    Some(crate::relay::fetch_ladder_async(self.settings.relay_url.clone()));
+                self.page = MenuPage::Ladder;
+            }
+            MenuAction::Noop => {}
             MenuAction::OpenReplays => {
                 self.replay_files = crate::replays::list(&self.state.data.race_names);
                 self.page = MenuPage::Replays;
