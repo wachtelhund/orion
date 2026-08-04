@@ -1040,12 +1040,24 @@ impl App {
                     if self.any_selected_siege() {
                         list.push((
                             key_of(crate::config::Action::SiegeToggle),
-                            "SIEGE".into(),
+                            "DEPLOY".into(),
                             CardIcon::Letter,
                             CardAction::SiegeBtn,
                             Self::tip_action(
-                                "SIEGE MODE",
-                                "DEPLOY: IMMOBILE, LONG RANGE, SPLASH DAMAGE, MIN RANGE.",
+                                "DEPLOY",
+                                "SIEGE: LONG RANGE SPLASH. BULWARK: PROJECT A SHIELD FIELD. IMMOBILE WHILE DEPLOYED.",
+                            ),
+                        ));
+                    }
+                    if self.any_selected_burrow() {
+                        list.push((
+                            key_of(crate::config::Action::SiegeToggle),
+                            "BURROW".into(),
+                            CardIcon::Letter,
+                            CardAction::SiegeBtn,
+                            Self::tip_action(
+                                "BURROW",
+                                "HIDE UNDERGROUND: UNTARGETABLE BUT CANNOT ACT. AREA DAMAGE STILL HITS.",
                             ),
                         ));
                     }

@@ -392,6 +392,8 @@ pub struct SpriteBook {
     pub geyser: Region,
     /// Destructible trees (two variants) + the rock wall boulder.
     pub trees: [Region; 4],
+    /// Disturbed-earth mound marking a friendly burrowed unit.
+    pub burrow_mound: Region,
     pub rock_wall: Region,
     /// [unit_type][team][facing][frame]. 0-6: Vanguard Combine (worker,
     /// trooper, vanguard, breaker, skywing, stormcaller, breaker-sieged).
@@ -498,7 +500,7 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
 
     // Units: [type][team][facing][frame].
     let mut units = Vec::new();
-    for unit_type in 0..13 {
+    for unit_type in 0..16 {
         for team in 0..2 {
             for facing in 0..N_FACINGS {
                 for frame in 0..N_FRAMES {
@@ -515,7 +517,10 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
                         9 => paint_spitter(facing, frame, TEAMS[team]),
                         10 => paint_ravager(facing, frame, TEAMS[team]),
                         11 => paint_wisp(facing, frame, TEAMS[team]),
-                        _ => paint_weaver(facing, frame, TEAMS[team]),
+                        12 => paint_weaver(facing, frame, TEAMS[team]),
+                        13 => paint_bulwark(facing, frame, TEAMS[team]),
+                        14 => paint_bulwark_deployed(facing, frame, TEAMS[team]),
+                        _ => paint_burrower(facing, frame, TEAMS[team]),
                     };
                     units.push(p.place_s(&c, SS));
                 }
@@ -551,6 +556,20 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
 
     // Destructible flora + rocks.
     let trees = std::array::from_fn(|i| p.place_s(&tree_canvas(i as i32), SS));
+    let burrow_mound = {
+        let mut c = Canvas::new(72, 40);
+        c.ellipse(36.0, 26.0, 30.0, 10.0, [30, 24, 20, 150]);
+        c.dome(36.0, 22.0, 24.0, 10.0, [58, 46, 36]);
+        c.dome(28.0, 20.0, 9.0, 5.0, [66, 52, 40]);
+        c.dome(46.0, 21.0, 8.0, 4.5, [52, 41, 32]);
+        // Cracked earth lines radiating.
+        for k in 0..4 {
+            let a = 0.5 + k as f32 * 1.6;
+            c.line(36.0, 22.0, 36.0 + a.cos() * 22.0, 24.0 + a.sin().abs() * 8.0, 1.4, rgba([34, 27, 22]));
+        }
+        c.outline_t([20, 16, 13, 255], 2);
+        p.place_s(&c, SS)
+    };
     let rock_wall = {
         let mut c = Canvas::new(88, 72);
         // Angular basalt slabs: dark mass, lit top facets, cracks.
@@ -726,6 +745,7 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
         minerals,
         geyser,
         trees,
+        burrow_mound,
         rock_wall,
         units,
         buildings,
@@ -1738,6 +1758,79 @@ fn paint_stormcaller(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c
 }
 
+/// Bulwark: shield projector rig, mobile. 112x104.
+fn paint_bulwark(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(112, 104);
+    let (dx, dy) = facing_vec(f);
+    let cx = 56.0;
+    let cy = 58.0;
+    // Tracked base.
+    plate(&mut c, &[(26.0, 74.0), (86.0, 74.0), (90.0, 88.0), (22.0, 88.0)], [38, 41, 48], 1.0);
+    for k in 0..6 {
+        let notch = 28 + k * 10 + (frame as i32) * 5;
+        if notch < 84 {
+            c.rect(notch, 78, 2, 8, rgba([70, 76, 88]));
+        }
+    }
+    // Hull with a sloped front toward facing.
+    plate(&mut c, &[(30.0, 52.0), (82.0, 52.0), (86.0, 74.0), (26.0, 74.0)], GUNMETAL, 1.0);
+    c.poly(&[(38.0 + dx * 6.0, 54.0), (56.0 + dx * 10.0, 50.0 + dy * 3.0), (56.0 + dx * 10.0, 68.0), (42.0 + dx * 6.0, 72.0)], rgba(scale_rgb(GUNMETAL, 1.15)));
+    c.rect(32, 68, 48, 4, rgba(team));
+    // Folded emitter petals on the roof: three angular vanes.
+    for (px, lean) in [(40.0f32, -6.0f32), (56.0, 0.0), (72.0, 6.0)] {
+        c.poly(&[(px - 4.0, 52.0), (px + 4.0, 52.0), (px + lean + 2.0, 26.0), (px + lean - 2.0, 26.0)], rgba(STEEL_LIT));
+        c.set((px + lean) as i32, 26, rgba(scale_rgb(team, 1.3)));
+        c.glow(px + lean, 25.0, 4.0, team, 0.5);
+    }
+    // Core emitter eye.
+    c.glow(cx + dx * 6.0, cy - 2.0 + dy * 4.0, 9.0, team, 0.8);
+    c.ellipse(cx + dx * 6.0, cy - 2.0 + dy * 4.0, 3.5, 3.0, rgba(scale_rgb(team, 1.35)));
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.28);
+    c
+}
+
+/// Bulwark deployed: petals open into a crown, field humming. 128x116.
+fn paint_bulwark_deployed(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(128, 116);
+    let (dx, dy) = facing_vec(f);
+    let _ = (dx, dy);
+    let cx = 64.0;
+    // Anchor feet splayed.
+    for (lx, ly) in [(-34.0f32, 22.0f32), (34.0, 22.0), (-22.0, 32.0), (22.0, 32.0)] {
+        c.line(cx, 70.0, cx + lx, 70.0 + ly, 6.0, rgba(GUNMETAL_DARK));
+        plate(&mut c, &[(cx + lx - 7.0, 68.0 + ly), (cx + lx + 7.0, 68.0 + ly), (cx + lx + 9.0, 74.0 + ly), (cx + lx - 9.0, 74.0 + ly)], [34, 37, 44], 1.0);
+    }
+    // Lowered hull.
+    plate(&mut c, &[(34.0, 58.0), (94.0, 58.0), (98.0, 78.0), (30.0, 78.0)], GUNMETAL, 1.0);
+    c.rect(38, 72, 52, 4, rgba(team));
+    // Open emitter crown: five vanes fanned out, tips alight.
+    for k in 0..5 {
+        let a = -1.35 + k as f32 * 0.675;
+        let px = cx + a.sin() * 34.0;
+        let py = 52.0 - a.cos() * 26.0;
+        c.line(cx, 56.0, px, py, 4.5, rgba(STEEL_LIT));
+        c.poly(&[(px - 3.0, py + 2.0), (px + 3.0, py + 2.0), (px, py - 6.0)], rgba(scale_rgb(team, 1.2)));
+        c.glow(px, py - 2.0, 6.0, team, 0.7);
+    }
+    // Humming field arcs between vane tips (pulse with frame).
+    let pulse = if frame == 0 { 0.35 } else { 0.6 };
+    for k in 0..4 {
+        let a0 = -1.35 + k as f32 * 0.675;
+        let a1 = a0 + 0.675;
+        let (x0, y0) = (cx + a0.sin() * 34.0, 50.0 - a0.cos() * 26.0);
+        let (x1, y1) = (cx + a1.sin() * 34.0, 50.0 - a1.cos() * 26.0);
+        c.line(x0, y0 - 3.0, (x0 + x1) * 0.5, (y0 + y1) * 0.5 - 8.0, 1.4, [team[0], team[1], team[2], (pulse * 255.0) as u8]);
+        c.line((x0 + x1) * 0.5, (y0 + y1) * 0.5 - 8.0, x1, y1 - 3.0, 1.4, [team[0], team[1], team[2], (pulse * 200.0) as u8]);
+    }
+    // Core blazing.
+    c.glow(cx, 62.0, 13.0, team, 0.9);
+    c.ellipse(cx, 62.0, 4.5, 3.5, rgba([250, 252, 255]));
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.25);
+    c
+}
+
 // ----------------------------------------------------- Kyth Assembly ----
 
 const CHITIN: [u8; 3] = [58, 46, 70];
@@ -2012,6 +2105,57 @@ fn paint_weaver(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     if dy > -0.4 {
         c.set((cx + dx * 6.0 - 2.0) as i32, (cy - 22.0) as i32, rgba([220, 255, 180]));
         c.set((cx + dx * 6.0 + 2.0) as i32, (cy - 22.0) as i32, rgba([220, 255, 180]));
+    }
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.3);
+    c
+}
+
+/// Burrower: low ambush predator with digging scythes. 104x88.
+fn paint_burrower(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(104, 88);
+    let (dx, dy) = facing_vec(f);
+    let cx = 52.0;
+    let cy = 46.0;
+    let step = if frame == 0 { 4.0 } else { -4.0 };
+    // Six digging legs, low and wide.
+    for k in 0..3 {
+        let off = -12.0 + k as f32 * 12.0;
+        let l = if k % 2 == 0 { step } else { -step };
+        kleg(&mut c, cx + off, cy + 4.0, cx + off - 12.0, cy + 12.0 - l * 0.4, cx + off - 15.0, cy + 24.0 + l * 0.4, 3.0);
+        kleg(&mut c, cx + off, cy + 4.0, cx + off + 12.0, cy + 13.0 + l * 0.4, cx + off + 15.0, cy + 25.0 - l * 0.4, 3.0);
+    }
+    // Low wedge body: armored plates sloping to a spade head.
+    c.poly(&[
+        (cx - dx * 26.0 - dy * 10.0, cy - dy * 12.0 + dx * 6.0),
+        (cx + dx * 12.0, cy + dy * 6.0 - 12.0),
+        (cx + dx * 26.0, cy + dy * 13.0),
+        (cx + dx * 12.0, cy + dy * 6.0 + 9.0),
+        (cx - dx * 26.0 + dy * 10.0, cy - dy * 12.0 - dx * 6.0),
+    ], rgba(CHITIN));
+    c.dome(cx - dx * 8.0, cy - 4.0, 14.0, 9.0, scale_rgb(CHITIN, 1.12));
+    scallop(&mut c, cx - dx * 8.0, cy - 2.0, 12.0, 16.0);
+    // Dorsal team ridge.
+    for k in 0..3 {
+        let sx = cx - dx * 16.0 + k as f32 * 7.0 * dx - 7.0 + 7.0 * k as f32 * (1.0 - dx.abs());
+        c.poly(&[(sx - 2.0, cy - 12.0), (sx, cy - 19.0), (sx + 2.0, cy - 12.0)], rgba(team));
+    }
+    // Digging scythes: broad spade claws toward facing.
+    for side in [-1.0f32, 1.0] {
+        let px = cx + dx * 20.0 - dy * side * 9.0;
+        let py = cy + dy * 11.0 + dx * side * 5.0;
+        c.poly(&[
+            (px - 3.0, py - 4.0),
+            (px + dx * 16.0 + 2.0, py + dy * 9.0 - 2.0),
+            (px + dx * 18.0, py + dy * 10.0 + 4.0),
+            (px + dx * 8.0, py + dy * 5.0 + 6.0),
+        ], rgba(CHITIN_LIGHT));
+        c.line(px, py, px + dx * 16.0, py + dy * 9.0, 1.6, rgba(team));
+    }
+    if dy > -0.5 {
+        c.set((cx + dx * 10.0 - 2.0) as i32, (cy + dy * 5.0 - 4.0) as i32, rgba(KYTH_GLOW));
+        c.set((cx + dx * 10.0 + 2.0) as i32, (cy + dy * 5.0 - 4.0) as i32, rgba(KYTH_GLOW));
+        c.glow(cx + dx * 10.0, cy + dy * 5.0 - 4.0, 5.0, KYTH_GLOW, 0.7);
     }
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.3);

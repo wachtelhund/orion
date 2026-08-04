@@ -372,7 +372,7 @@ impl Bot {
             if !e.alive || e.owner == p || e.owner == crate::state::NEUTRAL {
                 continue;
             }
-            if e.kind == EntityKind::Resource {
+            if e.kind == EntityKind::Resource || e.burrowed {
                 continue;
             }
             if !s.fog[p as usize].visible(&s.map, TilePos::of(e.pos)) {
@@ -893,6 +893,7 @@ impl Bot {
                     && e.owner != p
                     && e.owner != crate::state::NEUTRAL
                     && e.kind != EntityKind::Resource
+                    && !e.burrowed
                     && s.fog[p as usize].visible(&s.map, TilePos::of(e.pos))
             })
             .map(|e| (e.pos, e.kind == EntityKind::Unit))

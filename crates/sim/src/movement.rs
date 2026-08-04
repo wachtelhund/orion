@@ -50,7 +50,7 @@ impl State {
         // Flyers only separate against other flyers; ground against ground.
         for i in 0..n {
             let e = &self.entities[i];
-            if !e.alive || e.kind != EntityKind::Unit {
+            if !e.alive || e.kind != EntityKind::Unit || e.burrowed {
                 continue;
             }
             let i_fly = self.data.units[e.def as usize].fly;
@@ -68,7 +68,7 @@ impl State {
                             continue; // each pair once
                         }
                         let o = &self.entities[j];
-                        if !o.alive {
+                        if !o.alive || o.burrowed {
                             continue;
                         }
                         if self.data.units[o.def as usize].fly != i_fly {
@@ -103,8 +103,8 @@ impl State {
             if !e.alive || e.kind != EntityKind::Unit {
                 continue;
             }
-            if e.sieged {
-                continue; // deployed: immune to drift and pushes
+            if e.sieged || e.burrowed {
+                continue; // deployed/underground: immune to drift and pushes
             }
             let old = e.pos;
             let from = TilePos::of(old);

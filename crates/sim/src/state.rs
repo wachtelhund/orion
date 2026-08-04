@@ -106,6 +106,9 @@ pub struct Entity {
     pub energy: u16,
     /// Siege-capable unit is deployed (immobile, uses weapon_siege).
     pub sieged: bool,
+    /// Burrow-capable unit is underground: hidden, untargetable by direct
+    /// fire (area damage still hits), cannot move or attack.
+    pub burrowed: bool,
     /// Ticks remaining of a siege/unsiege transform (unit is busy).
     pub transform: u16,
     /// Building: active research (index into data.research, progress ticks).
@@ -140,6 +143,7 @@ impl Entity {
             carry_gas: false,
             energy: 0,
             sieged: false,
+            burrowed: false,
             transform: 0,
             research: None,
             queue: Vec::new(),
@@ -188,6 +192,8 @@ pub enum Command {
     Research { building: EntityId, research: u8 },
     /// Toggle siege mode on capable units.
     Siege { units: Vec<EntityId> },
+    /// Toggle burrow on capable units.
+    Burrow { units: Vec<EntityId> },
     /// Cast Plasma Storm at a point (caster walks into range first).
     Cast { caster: EntityId, target: FxVec2 },
     Build { worker: EntityId, building: DefId, site: TilePos, queued: bool },
@@ -785,6 +791,7 @@ impl State {
             mix(e.order_queue.len() as u64);
             mix(e.energy as u64);
             mix(e.sieged as u64);
+            mix(e.burrowed as u64);
         }
         h
     }

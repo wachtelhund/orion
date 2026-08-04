@@ -248,6 +248,8 @@ impl App {
                 "breaker" => 3,
                 "skywing" => 4,
                 "stormcaller" => 5,
+                "bulwark" => 13,
+                "burrower" => 15,
                 "kdrone" => 7,
                 "skitter" => 8,
                 "spitter" => 9,
@@ -1020,7 +1022,9 @@ impl App {
             }
         }
         // Unit-context abilities take priority over generic fallbacks.
-        if self.any_selected_siege() && self.settings.key_for(Action::SiegeToggle) == code {
+        if (self.any_selected_siege() || self.any_selected_burrow())
+            && self.settings.key_for(Action::SiegeToggle) == code
+        {
             return Some(Action::SiegeToggle);
         }
         if self.any_selected_caster() && self.settings.key_for(Action::CastStorm) == code {
@@ -1041,7 +1045,15 @@ impl App {
     pub(crate) fn any_selected_siege(&self) -> bool {
         self.own_selected_units().any(|id| {
             let e = &self.state.entities[id.idx as usize];
-            self.state.data.units[e.def as usize].weapon_siege.is_some()
+            let d = &self.state.data.units[e.def as usize];
+            d.weapon_siege.is_some() || d.shield_aura.is_some()
+        })
+    }
+
+    pub(crate) fn any_selected_burrow(&self) -> bool {
+        self.own_selected_units().any(|id| {
+            let e = &self.state.entities[id.idx as usize];
+            self.state.data.units[e.def as usize].burrow
         })
     }
 
@@ -1134,15 +1146,26 @@ impl App {
             }
             Action::Train2 => self.train_hotkey(2),
             Action::SiegeToggle => {
-                let units: Vec<_> = self
+                let deployers: Vec<_> = self
                     .own_selected_units()
                     .filter(|id| {
                         let e = &self.state.entities[id.idx as usize];
-                        self.state.data.units[e.def as usize].weapon_siege.is_some()
+                        let d = &self.state.data.units[e.def as usize];
+                        d.weapon_siege.is_some() || d.shield_aura.is_some()
                     })
                     .collect();
-                if !units.is_empty() {
-                    self.pending.push((self.human, Command::Siege { units }));
+                if !deployers.is_empty() {
+                    self.pending.push((self.human, Command::Siege { units: deployers }));
+                }
+                let diggers: Vec<_> = self
+                    .own_selected_units()
+                    .filter(|id| {
+                        let e = &self.state.entities[id.idx as usize];
+                        self.state.data.units[e.def as usize].burrow
+                    })
+                    .collect();
+                if !diggers.is_empty() {
+                    self.pending.push((self.human, Command::Burrow { units: diggers }));
                 }
             }
             Action::CastStorm => {
@@ -3026,6 +3049,7 @@ impl App {
             let vis = match e.kind {
                 EntityKind::Resource => true, // terrain-like: visible through fog
                 _ if e.owner == self.human => true,
+                _ if e.burrowed => false, // underground: hidden from the enemy
                 _ => self.visible(t),
             };
             if !vis {
@@ -3122,8 +3146,29 @@ impl App {
                 }
                 EntityKind::Unit => {
                     let d = &self.state.data.units[e.def as usize];
+                    if e.burrowed {
+                        let r = book.burrow_mound;
+                        if selected {
+                            let rw = d.radius.to_f32() * 44.0 * zoom + 8.0 * zoom;
+                            self.gfx.sprite(out, book.ring, sx, sy + 2.0 * zoom, rw, rw * 0.5, [0.35, 1.0, 0.35, 0.9]);
+                        }
+                        self.gfx.sprite(
+                            out,
+                            r,
+                            sx,
+                            sy - 2.0 * zoom,
+                            r.w as f32 / r.scale * zoom,
+                            r.h as f32 / r.scale * zoom,
+                            tint,
+                        );
+                        continue;
+                    }
                     // Sieged breakers use their deployed sprite set.
-                    let utype = if e.sieged { 6 } else { self.unit_type[e.def as usize] };
+                    let utype = if e.sieged {
+                        if self.unit_type[e.def as usize] == 13 { 14 } else { 6 }
+                    } else {
+                        self.unit_type[e.def as usize]
+                    };
                     let team = (e.owner as usize).min(1);
                     let facing = self.facings.get(i as usize).copied().unwrap_or(2) as usize;
                     let moving = e.pos != e.prev_pos;
@@ -3170,6 +3215,16 @@ impl App {
                         r.h as f32 / r.scale * zoom,
                         [tint[0] * flash, tint[1] * flash, tint[2] * flash, tint[3]],
                     );
+                    if e.sieged {
+                        if let Some((r_aura, _)) = d.shield_aura {
+                            // Translucent field dome + rim over the aura radius.
+                            let rad = r_aura.to_f32() * iso::TILE_HALF_W * 2.0 * zoom;
+                            let tc = TEAM_COLORS[(e.owner as usize).min(1)];
+                            let pulse = 0.10 + 0.04 * (self.state.tick as f32 * 0.2).sin();
+                            self.gfx.sprite(out, book.circle, sx, sy, rad, rad * 0.5, [tc[0], tc[1], tc[2], pulse]);
+                            self.gfx.sprite(out, book.ring, sx, sy, rad, rad * 0.5, [tc[0], tc[1], tc[2], 0.4]);
+                        }
+                    }
                     if e.amount > 0 {
                         // Carried cargo: a bobbing chunk so full workers read
                         // at a glance.

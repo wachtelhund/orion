@@ -38,9 +38,9 @@ impl State {
         dmg.max(1)
     }
 
-    pub(crate) fn tick_behavior(&mut self) -> Vec<(u32, i32)> {
+    pub(crate) fn tick_behavior(&mut self) -> Vec<(u32, i32, bool)> {
         self.rebuild_buckets();
-        let mut hits: Vec<(u32, i32)> = Vec::new();
+        let mut hits: Vec<(u32, i32, bool)> = Vec::new();
         let n = self.entities.len();
         for i in 0..n {
             self.scratch_vel[i] = FxVec2::ZERO;
@@ -55,6 +55,11 @@ impl State {
                 // Mid-transform units are busy.
                 if e.transform > 0 {
                     e.transform -= 1;
+                    continue;
+                }
+                // Underground units hold position and do nothing.
+                if e.burrowed {
+                    e.engage = None;
                     continue;
                 }
             }
@@ -168,6 +173,9 @@ impl State {
     }
 
     fn can_hit(&self, i: usize, target: &crate::state::Entity) -> bool {
+        if target.burrowed {
+            return false;
+        }
         let Some(w) = self.active_weapon(i) else { return false };
         let flying = target.kind == EntityKind::Unit
             && self.data.units[target.def as usize].fly;
@@ -176,7 +184,7 @@ impl State {
 
     /// Attack `t` if in range (emitting hits when off cooldown, with splash),
     /// else return a chase velocity (zero when sieged).
-    fn attack_behavior(&mut self, i: usize, t: u32, hits: &mut Vec<(u32, i32)>) -> FxVec2 {
+    fn attack_behavior(&mut self, i: usize, t: u32, hits: &mut Vec<(u32, i32, bool)>) -> FxVec2 {
         let Some(w) = self.active_weapon(i).cloned() else {
             return FxVec2::ZERO;
         };
@@ -192,7 +200,7 @@ impl State {
             }
             if self.entities[i].cooldown == 0 {
                 let dmg = self.upgraded_damage(w.damage, attacker_owner, t);
-                hits.push((t, dmg));
+                hits.push((t, dmg, false));
                 // Splash: half damage to everything else near the impact
                 // (friendly fire included — position your army).
                 if w.splash.0 > 0 {
@@ -207,7 +215,7 @@ impl State {
                         {
                             let half =
                                 self.upgraded_damage(w.damage / 2, attacker_owner, j as u32);
-                            hits.push((j as u32, half));
+                            hits.push((j as u32, half, true));
                         }
                     }
                 }

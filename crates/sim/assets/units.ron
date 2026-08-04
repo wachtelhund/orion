@@ -98,6 +98,21 @@
             energy: 200,
             requires: Some("archive"),
         ),
+        (
+            id: "bulwark",
+            desc: "Deployable shield projector. Deployed: nearby allies take 35 pct less damage. Cannot attack.",
+            name: "Bulwark",
+            hp: 140,
+            speed: 2.2,
+            radius: 0.5,
+            sight: 8,
+            cost_minerals: 100,
+            cost_gas: 75,
+            supply: 2,
+            build_time_s: 26.0,
+            weapon: None,
+            shield_aura: Some((4.0, 35)),
+        ),
         // ---------------- Kyth Assembly (race 1): the swarm ----------------
         (
             id: "kdrone",
@@ -191,6 +206,22 @@
             energy: 200,
             requires: Some("cortex"),
         ),
+        (
+            id: "burrower",
+            race: 1,
+            desc: "Ambush predator. Burrows underground: hidden and untargetable, but cannot act. Area damage still hits.",
+            name: "Burrower",
+            hp: 90,
+            speed: 2.9,
+            radius: 0.4,
+            sight: 8,
+            cost_minerals: 75,
+            cost_gas: 50,
+            supply: 2,
+            build_time_s: 20.0,
+            weapon: Some((damage: 18, range: 0.5, cooldown_s: 1.3)),
+            burrow: true,
+        ),
     ],
     buildings: [
         (
@@ -253,7 +284,7 @@
             cost_gas: 50,
             supply_provided: 0,
             build_time_s: 45.0,
-            trains: ["breaker"],
+            trains: ["breaker", "bulwark"],
             requires: Some("barracks"),
         ),
         (
@@ -350,7 +381,7 @@
             cost_gas: 50,
             supply_provided: 0,
             build_time_s: 45.0,
-            trains: ["ravager"],
+            trains: ["ravager", "burrower"],
             requires: Some("warren"),
         ),
         (

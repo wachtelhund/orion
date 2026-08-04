@@ -202,12 +202,27 @@ impl State {
                 for id in units {
                     if let Some(i) = self.owned_unit(player, *id) {
                         let e = &self.entities[i];
-                        let has_siege =
-                            self.data.units[e.def as usize].weapon_siege.is_some();
+                        let d = &self.data.units[e.def as usize];
+                        let has_siege = d.weapon_siege.is_some() || d.shield_aura.is_some();
                         if has_siege && e.transform == 0 {
                             let e = &mut self.entities[i];
                             e.sieged = !e.sieged;
                             e.transform = 36; // 1.5s transform
+                            e.order = Order::Idle;
+                            e.order_queue.clear();
+                            e.engage = None;
+                        }
+                    }
+                }
+            }
+            Command::Burrow { units } => {
+                for id in units {
+                    if let Some(i) = self.owned_unit(player, *id) {
+                        let e = &self.entities[i];
+                        if self.data.units[e.def as usize].burrow && e.transform == 0 {
+                            let e = &mut self.entities[i];
+                            e.burrowed = !e.burrowed;
+                            e.transform = 24; // 1s dig
                             e.order = Order::Idle;
                             e.order_queue.clear();
                             e.engage = None;
@@ -447,7 +462,7 @@ impl State {
     /// Plasma Storms pulse damage in their radius every 8 ticks. A unit
     /// inside several storms takes ONE pulse, not one per storm — stacked
     /// storms would otherwise multiply damage past any counterplay.
-    fn tick_storms(&mut self, hits: &mut Vec<(u32, i32)>) {
+    fn tick_storms(&mut self, hits: &mut Vec<(u32, i32, bool)>) {
         let radius = crate::STORM_RADIUS;
         let r_sq = (radius.0 as i64) * (radius.0 as i64);
         // Pulses ride the global clock (not per-storm phase) so "one pulse
@@ -465,7 +480,7 @@ impl State {
                         && dist_sq_raw(pos, e.pos) <= r_sq
                     {
                         struck[i] = true;
-                        hits.push((i as u32, crate::STORM_PULSE_DMG));
+                        hits.push((i as u32, crate::STORM_PULSE_DMG, true));
                     }
                 }
             }
@@ -475,12 +490,41 @@ impl State {
 
     // ---- damage ----
 
-    fn apply_damage(&mut self, hits: &[(u32, i32)]) {
-        for &(target, dmg) in hits {
-            let e = &mut self.entities[target as usize];
-            if e.alive {
-                e.hp -= dmg;
+    fn apply_damage(&mut self, hits: &[(u32, i32, bool)]) {
+        for &(target, dmg, area) in hits {
+            let te = &self.entities[target as usize];
+            if !te.alive {
+                continue;
             }
+            // Underground: direct fire misses; area damage (splash, storms)
+            // still connects.
+            if te.burrowed && !area {
+                continue;
+            }
+            // Shield aura: any allied shield projector deployed in radius
+            // soaks a percentage. Strongest single aura applies (no stacking);
+            // index-order scan with max keeps it deterministic.
+            let (tpos, towner) = (te.pos, te.owner);
+            let mut soak = 0i32;
+            for j in 0..self.entities.len() {
+                let sp = &self.entities[j];
+                if !sp.alive
+                    || sp.owner != towner
+                    || sp.kind != EntityKind::Unit
+                    || !sp.sieged
+                {
+                    continue;
+                }
+                if let Some((r, pct)) = self.data.units[sp.def as usize].shield_aura {
+                    let dx = (sp.pos.x - tpos.x).0 as i64;
+                    let dy = (sp.pos.y - tpos.y).0 as i64;
+                    if dx * dx + dy * dy <= (r.0 as i64) * (r.0 as i64) {
+                        soak = soak.max(pct);
+                    }
+                }
+            }
+            let dealt = if soak > 0 { (dmg - dmg * soak / 100).max(1) } else { dmg };
+            self.entities[target as usize].hp -= dealt;
         }
         for i in 0..self.entities.len() {
             let e = &self.entities[i];

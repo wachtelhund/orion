@@ -64,6 +64,13 @@ pub struct UnitRaw {
     /// Which race this belongs to (index into race_names).
     #[serde(default)]
     pub race: u8,
+    /// Deployable shield projector: (radius tiles, damage reduction %).
+    /// Deploying uses the siege toggle; the aura is active while deployed.
+    #[serde(default)]
+    pub shield_aura: Option<(f64, u32)>,
+    /// Can burrow: hidden and untargetable underground, but cannot act.
+    #[serde(default)]
+    pub burrow: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -161,6 +168,8 @@ pub struct UnitDef {
     pub requires: Option<DefId>,
     pub desc: String,
     pub race: u8,
+    pub shield_aura: Option<(Fx, i32)>,
+    pub burrow: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -256,6 +265,10 @@ impl GameData {
                 requires: u.requires.as_deref().map(building_index),
                 desc: u.desc.clone(),
                 race: u.race,
+                shield_aura: u
+                    .shield_aura
+                    .map(|(r, pct)| (Fx::from_f64_data(r), pct as i32)),
+                burrow: u.burrow,
             })
             .collect();
 
