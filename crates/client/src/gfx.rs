@@ -34,10 +34,13 @@ pub struct Gfx {
     pub queue: wgpu::Queue,
     pub config: wgpu::SurfaceConfiguration,
     pipeline: wgpu::RenderPipeline,
+    pipeline_add: wgpu::RenderPipeline,
     globals_buf: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     inst_buf: wgpu::Buffer,
     inst_cap: usize,
+    glow_buf: wgpu::Buffer,
+    glow_cap: usize,
     pub book: SpriteBook,
     /// When set, the next rendered frame is written to this path as PPM.
     pub capture: Option<String>,
@@ -215,10 +218,67 @@ impl Gfx {
             cache: None,
         });
 
+        // Additive variant: same shader, light accumulates instead of
+        // blending — the emissive/glow pass.
+        let additive = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::SrcAlpha,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+        };
+        let pipeline_add = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("sprites-additive"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Inst>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x2, 1 => Float32x2, 2 => Float32x2,
+                        3 => Float32x2, 4 => Float32x4, 5 => Float32x2
+                    ],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(additive),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
         let inst_cap = 1 << 15;
         let inst_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("instances"),
             size: (inst_cap * std::mem::size_of::<Inst>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let glow_cap = 1 << 12;
+        let glow_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("glow-instances"),
+            size: (glow_cap * std::mem::size_of::<Inst>()) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -229,10 +289,13 @@ impl Gfx {
             queue,
             config,
             pipeline,
+            pipeline_add,
             globals_buf,
             bind_group,
             inst_buf,
             inst_cap,
+            glow_buf,
+            glow_cap,
             book,
             capture: None,
         }
@@ -247,7 +310,10 @@ impl Gfx {
         self.surface.configure(&self.device, &self.config);
     }
 
-    pub fn render(&mut self, instances: &[Inst]) {
+    /// Draw world sprites (alpha), then the glow list (additive), then UI
+    /// sprites (alpha) — `world_n` splits `instances` into world/UI halves
+    /// so glow light lands under the console, not over it.
+    pub fn render(&mut self, instances: &[Inst], world_n: usize, glows: &[Inst]) {
         if instances.len() > self.inst_cap {
             self.inst_cap = instances.len().next_power_of_two();
             self.inst_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -257,7 +323,19 @@ impl Gfx {
                 mapped_at_creation: false,
             });
         }
+        if glows.len() > self.glow_cap {
+            self.glow_cap = glows.len().next_power_of_two();
+            self.glow_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("glow-instances"),
+                size: (self.glow_cap * std::mem::size_of::<Inst>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
         self.queue.write_buffer(&self.inst_buf, 0, bytemuck::cast_slice(instances));
+        if !glows.is_empty() {
+            self.queue.write_buffer(&self.glow_buf, 0, bytemuck::cast_slice(glows));
+        }
         let globals = Globals {
             screen: [self.config.width as f32, self.config.height as f32],
             _pad: [0.0; 2],
@@ -296,7 +374,16 @@ impl Gfx {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_vertex_buffer(0, self.inst_buf.slice(..));
-            pass.draw(0..4, 0..instances.len() as u32);
+            let world_n = world_n.min(instances.len()) as u32;
+            pass.draw(0..4, 0..world_n);
+            if !glows.is_empty() {
+                pass.set_pipeline(&self.pipeline_add);
+                pass.set_vertex_buffer(0, self.glow_buf.slice(..));
+                pass.draw(0..4, 0..glows.len() as u32);
+                pass.set_pipeline(&self.pipeline);
+                pass.set_vertex_buffer(0, self.inst_buf.slice(..));
+            }
+            pass.draw(0..4, world_n..instances.len() as u32);
         }
         self.queue.submit([encoder.finish()]);
         if let Some(path) = self.capture.take() {

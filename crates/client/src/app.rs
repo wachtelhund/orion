@@ -2957,18 +2957,22 @@ impl App {
 
     fn render(&mut self) {
         let mut out: Vec<Inst> = Vec::with_capacity(1 << 15);
+        let mut glow: Vec<Inst> = Vec::with_capacity(1 << 10);
         self.draw_terrain(&mut out);
         self.draw_ground_effects(&mut out);
         self.draw_pending_builds(&mut out);
-        self.draw_entities(&mut out);
-        self.draw_air_effects(&mut out);
+        self.draw_entities(&mut out, &mut glow);
+        self.draw_air_effects(&mut out, &mut glow);
         self.draw_waypoints(&mut out);
         self.draw_saturation(&mut out);
         self.draw_placement_ghost(&mut out);
         self.draw_selection_box(&mut out);
+        // Everything above lives in the world; glow adds on top of it,
+        // and the console/menus draw over both.
+        let world_n = out.len();
         self.draw_hud(&mut out);
         self.draw_menu(&mut out);
-        self.gfx.render(&out);
+        self.gfx.render(&out, world_n, &glow);
     }
 
     pub(crate) fn visible(&self, t: TilePos) -> bool {
@@ -3061,7 +3065,7 @@ impl App {
         }
     }
 
-    fn draw_entities(&self, out: &mut Vec<Inst>) {
+    fn draw_entities(&self, out: &mut Vec<Inst>, glow: &mut Vec<Inst>) {
         let zoom = self.cam.zoom;
         let book = &self.gfx.book;
         let mut order: Vec<(f32, u32)> = Vec::new();
@@ -3098,6 +3102,8 @@ impl App {
                     if e.def == RES_GEYSER {
                         let r = book.geyser;
                         self.gfx.sprite(out, r, sx, sy - 6.0 * zoom, r.w as f32 / r.scale * zoom, r.h as f32 / r.scale * zoom, tint);
+                        let breathe = 0.16 + 0.06 * (self.state.tick as f32 * 0.11 + (i % 5) as f32).sin();
+                        self.gfx.sprite(glow, book.glow_soft, sx, sy - 10.0 * zoom, 44.0 * zoom, 24.0 * zoom, [0.25, 0.9, 0.8, breathe * dim]);
                     } else if e.def == orion_sim::state::RES_TREE {
                         let t = TilePos::of(e.pos);
                         let h = crate::atlas::hash2(t.x, t.y, 77);
@@ -3129,6 +3135,9 @@ impl App {
                         };
                         let r = book.minerals[variant];
                         self.gfx.sprite(out, r, sx, sy - 5.0 * zoom, r.w as f32 / r.scale * zoom, r.h as f32 / r.scale * zoom, tint);
+                        // Crystal shimmer: slow per-patch phase offset.
+                        let ph = (self.state.tick as f32 * 0.06 + (i % 7) as f32).sin() * 0.04;
+                        self.gfx.sprite(glow, book.glow_soft, sx, sy - 9.0 * zoom, 30.0 * zoom, 20.0 * zoom, [0.35, 0.85, 1.0, (0.13 + ph) * dim]);
                     }
                 }
                 EntityKind::Building => {
@@ -3152,6 +3161,29 @@ impl App {
                         [tint[0], tint[1], tint[2], alpha],
                     );
                     let d = &self.state.data.buildings[e.def as usize];
+                    if e.construction.is_none() {
+                        let tc = TEAM_COLORS[team];
+                        match btype {
+                            // Pylon obelisk + Ferron capacitor mast: standing light.
+                            1 => {
+                                let pu = 0.22 + 0.06 * (self.state.tick as f32 * 0.13 + i as f32).sin();
+                                self.gfx.sprite(glow, book.glow_soft, sx, sy - 26.0 * zoom, 36.0 * zoom, 44.0 * zoom, [tc[0], tc[1], tc[2], pu * dim]);
+                            }
+                            15 => {
+                                let pu = 0.20 + 0.05 * (self.state.tick as f32 * 0.17 + i as f32).sin();
+                                self.gfx.sprite(glow, book.glow_soft, sx, sy - 30.0 * zoom, 30.0 * zoom, 50.0 * zoom, [0.62, 0.52, 1.0, pu * dim]);
+                            }
+                            // Hive maw + smelter crucibles: furnace light.
+                            7 => {
+                                self.gfx.sprite(glow, book.glow_soft, sx, sy + 6.0 * zoom, 30.0 * zoom, 16.0 * zoom, [0.55, 1.0, 0.35, 0.16 * dim]);
+                            }
+                            4 | 14 => {
+                                let fl = 0.14 + 0.05 * (self.state.tick as f32 * 0.4 + i as f32).sin().abs();
+                                self.gfx.sprite(glow, book.glow_soft, sx - 8.0 * zoom, sy - 14.0 * zoom, 26.0 * zoom, 18.0 * zoom, [1.0, 0.55, 0.2, fl * dim]);
+                            }
+                            _ => {}
+                        }
+                    }
                     if let Some(p) = e.construction {
                         let w = d.footprint.0 as f32 * iso::TILE_HALF_W * 1.6 * zoom;
                         self.gfx.beam(out, sx - w * 0.5, sy, sx + w * 0.5, sy - 14.0 * zoom, 1.5, [0.85, 0.75, 0.4, 0.8]);
@@ -3319,7 +3351,7 @@ impl App {
         }
     }
 
-    fn draw_air_effects(&self, out: &mut Vec<Inst>) {
+    fn draw_air_effects(&self, out: &mut Vec<Inst>, glow: &mut Vec<Inst>) {
         let zoom = self.cam.zoom;
         let book = &self.gfx.book;
         // Active Plasma Storms: crackling zone.
@@ -3331,6 +3363,9 @@ impl App {
             let (sx, sy) = self.world_to_screen_elev(s.pos.x.to_f32(), s.pos.y.to_f32());
             let rad = orion_sim::STORM_RADIUS.to_f32() * 32.0 * zoom;
             self.gfx.sprite(out, book.blast_ring, sx, sy, rad * 2.0, rad, [0.5, 0.9, 1.0, 0.35]);
+            // Charged air: pulsing additive dome over the zone.
+            let pulse = 0.10 + 0.05 * (self.state.tick as f32 * 0.35).sin();
+            self.gfx.sprite(glow, book.glow_soft, sx, sy, rad * 2.2, rad * 1.1, [0.45, 0.85, 1.0, pulse]);
             for k in 0..7 {
                 let h = crate::atlas::hash2(k, (self.state.tick / 2) as i32, 913);
                 let a = (h % 628) as f32 / 100.0;
@@ -3347,6 +3382,7 @@ impl App {
                     [0.7, 0.95, 1.0, 0.85],
                 );
                 self.gfx.sprite(out, book.spark, bx, by, 5.0 * zoom, 5.0 * zoom, [0.7, 0.95, 1.0, 0.9]);
+                self.gfx.sprite(glow, book.glow_soft, bx, by, 16.0 * zoom, 10.0 * zoom, [0.5, 0.9, 1.0, 0.5]);
             }
         }
         for e in &self.effects {
@@ -3356,11 +3392,13 @@ impl App {
                     let (sx, sy) = self.world_to_screen_elev(e.ax, e.ay);
                     let s = (11.0 + f * 4.0) * zoom;
                     self.gfx.sprite(out, book.flash, sx, sy - 7.0 * zoom, s, s, [1.0, 1.0, 1.0, 1.0 - f]);
+                    self.gfx.sprite(glow, book.glow_soft, sx, sy - 7.0 * zoom, s * 2.6, s * 2.0, [1.0, 0.8, 0.45, (1.0 - f) * 0.7]);
                 }
                 EffKind::Tracer => {
                     let (x0, y0) = self.world_to_screen_elev(e.ax, e.ay);
                     let (x1, y1) = self.world_to_screen_elev(e.bx, e.by);
                     self.gfx.beam(out, x0, y0 - 7.0 * zoom, x1, y1 - 6.0 * zoom, 1.5 * zoom, [1.0, 0.95, 0.6, (1.0 - f) * 0.9]);
+                    self.gfx.beam(glow, x0, y0 - 7.0 * zoom, x1, y1 - 6.0 * zoom, 4.5 * zoom, [1.0, 0.8, 0.4, (1.0 - f) * 0.35]);
                 }
                 EffKind::Spark => {
                     let (sx, sy) = self.world_to_screen_elev(e.ax, e.ay);

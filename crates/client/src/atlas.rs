@@ -394,6 +394,8 @@ pub struct SpriteBook {
     pub trees: [Region; 4],
     /// Disturbed-earth mound marking a friendly burrowed unit.
     pub burrow_mound: Region,
+    /// Soft radial gradient for the additive glow pass.
+    pub glow_soft: Region,
     pub rock_wall: Region,
     /// [unit_type][team][facing][frame]. 0-6: Vanguard Combine (worker,
     /// trooper, vanguard, breaker, skywing, stormcaller, breaker-sieged).
@@ -583,6 +585,23 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
 
     // Destructible flora + rocks.
     let trees = std::array::from_fn(|i| p.place_s(&tree_canvas(i as i32), SS));
+    let glow_soft = {
+        let mut c = Canvas::new(128, 128);
+        for y in 0..128 {
+            for x in 0..128 {
+                let dx = (x as f32 + 0.5 - 64.0) / 64.0;
+                let dy = (y as f32 + 0.5 - 64.0) / 64.0;
+                let d = (dx * dx + dy * dy).sqrt();
+                if d < 1.0 {
+                    let a = ((1.0 - d).powi(2) * 255.0) as u8;
+                    if a > 2 {
+                        c.set(x, y, [255, 255, 255, a]);
+                    }
+                }
+            }
+        }
+        p.place(&c)
+    };
     let burrow_mound = {
         let mut c = Canvas::new(72, 40);
         c.ellipse(36.0, 26.0, 30.0, 10.0, [30, 24, 20, 150]);
@@ -828,6 +847,7 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
         geyser,
         trees,
         burrow_mound,
+        glow_soft,
         rock_wall,
         units,
         buildings,
