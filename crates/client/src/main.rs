@@ -11,6 +11,7 @@ mod hud;
 mod iso;
 mod menu;
 mod relay;
+mod replays;
 
 use std::sync::Arc;
 
@@ -37,6 +38,8 @@ struct Shell {
     mp_auto: Option<String>,
     record: Option<(String, u32, u32, u32)>,
     shot_cross: bool,
+    replay_open: Option<String>,
+    replay_shot: Option<(String, String, u32)>,
 }
 
 impl ApplicationHandler for Shell {
@@ -71,10 +74,18 @@ impl ApplicationHandler for Shell {
         if app.record.is_some() {
             app.shot_bot0 = Some(app::Bot2::new(0));
         }
+        if let Some(path) = &self.replay_open {
+            app.start_replay(std::path::Path::new(path));
+        }
+        if let Some((path, out, tick)) = &self.replay_shot {
+            app.start_replay(std::path::Path::new(path));
+            app.replay_shot = Some((*tick, out.clone()));
+        }
         let headless = self.smoke
             || self.shot.is_some()
             || self.script.is_some()
-            || self.menu_shot.is_some();
+            || self.menu_shot.is_some()
+            || self.replay_shot.is_some();
         if !headless {
             app.init_audio();
         }
@@ -186,6 +197,21 @@ fn main() {
         .position(|a| a == "--mp-auto")
         .and_then(|i| args.get(i + 1))
         .cloned();
+    // --replay path — open straight into the replay viewer.
+    let replay_open = args
+        .iter()
+        .position(|a| a == "--replay")
+        .and_then(|i| args.get(i + 1))
+        .cloned();
+    // --replay-shot path:out.ppm:tick — headless replay capture + checksum.
+    let replay_shot = args
+        .iter()
+        .position(|a| a == "--replay-shot")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|s| {
+            let p: Vec<&str> = s.split(':').collect();
+            Some((p.first()?.to_string(), p.get(1)?.to_string(), p.get(2)?.parse().ok()?))
+        });
     // --menu-shot page:path — capture a menu page (main/settings/esc).
     let menu_shot = args
         .iter()
@@ -208,6 +234,8 @@ fn main() {
         mp_auto,
         record,
         shot_cross,
+        replay_open,
+        replay_shot,
         ..Default::default()
     };
     event_loop.run_app(&mut shell).expect("run app");

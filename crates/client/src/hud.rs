@@ -1031,18 +1031,53 @@ impl App {
                 return;
             }
         }
+        // Replay viewer chrome: status strip on top, neutral end banner.
+        if let Some(replay) = &self.replay {
+            let w = self.cam.screen_w;
+            let ts = self.ts(1.5);
+            let view = match self.replay_view {
+                2 => "ALL".to_string(),
+                v => format!("P{}", v + 1),
+            };
+            let status = if self.replay_paused { "PAUSED" } else { "PLAYING" };
+            let line = format!(
+                "REPLAY  {status}  {:.0}X  VIEW {view}   [SPACE] PAUSE  [TAB] VIEW  [1/2/3] SPEED",
+                self.replay_speed
+            );
+            let tw = self.gfx.text_width(ts, &line);
+            let y0 = 34.0 * self.ui(); // below the resource bar
+            self.gfx.quad(out, (w - tw) * 0.5 - 10.0, y0, tw + 20.0, 22.0 * self.ui(), [0.02, 0.05, 0.08, 0.7]);
+            self.gfx.text(out, (w - tw) * 0.5, y0 + 4.0, ts, [0.8, 0.9, 1.0, 0.95], &line);
+            if self.state.tick >= replay.duration_ticks && self.state.winner.is_none() {
+                let h = self.cam.screen_h;
+                let msg = "END OF REPLAY";
+                self.gfx.quad(out, 0.0, h * 0.5 - 50.0 * self.ui(), w, 100.0 * self.ui(), [0.02, 0.02, 0.03, 0.85]);
+                let ts = self.ts(5.0);
+                let tw = self.gfx.text_width(ts, msg);
+                self.gfx.text(out, (w - tw) * 0.5, h * 0.5 - 20.0 * self.ui(), ts, [0.8, 0.85, 0.9, 1.0], msg);
+                return;
+            }
+        }
         let Some(winner) = self.state.winner else { return };
         let w = self.cam.screen_w;
         let h = self.cam.screen_h;
-        let (msg, color) = if winner == self.human {
-            ("VICTORY!", [0.4, 1.0, 0.4, 1.0])
+        let (msg, color): (String, [f32; 4]) = if self.replay.is_some() {
+            // Winner banner from the observer's chair, not VICTORY/DEFEAT.
+            let name = self
+                .replay
+                .as_ref()
+                .and_then(|r| r.player_names.get(winner as usize).cloned())
+                .unwrap_or_else(|| format!("PLAYER {}", winner + 1));
+            (format!("{name} WINS"), [0.5, 0.9, 1.0, 1.0])
+        } else if winner == self.human {
+            ("VICTORY!".into(), [0.4, 1.0, 0.4, 1.0])
         } else {
-            ("DEFEAT", [1.0, 0.35, 0.3, 1.0])
+            ("DEFEAT".into(), [1.0, 0.35, 0.3, 1.0])
         };
         self.gfx.quad(out, 0.0, h * 0.5 - 70.0 * self.ui(), w, 140.0 * self.ui(), [0.02, 0.02, 0.03, 0.85]);
         let ts = self.ts(6.0);
-        let tw = self.gfx.text_width(ts, msg);
-        self.gfx.text(out, (w - tw) * 0.5, h * 0.5 - 40.0 * self.ui(), ts, color, msg);
+        let tw = self.gfx.text_width(ts, &msg);
+        self.gfx.text(out, (w - tw) * 0.5, h * 0.5 - 40.0 * self.ui(), ts, color, &msg);
         // Match stats.
         let secs = self.state.tick / 24;
         let ts3 = self.ts(1.4);

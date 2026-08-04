@@ -22,6 +22,12 @@ impl State {
             e.prev_pos = e.pos;
         }
 
+        // Replay capture: the full input stream, whatever its source
+        // (human, bot, or remote peer) — this IS the game.
+        for (p, c) in commands {
+            self.command_log.push((self.tick, *p, c.clone()));
+        }
+
         self.apply_commands(commands);
         self.tick_production();
         self.tick_energy();

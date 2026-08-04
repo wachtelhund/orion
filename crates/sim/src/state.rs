@@ -231,6 +231,11 @@ pub struct State {
     pub scratch_vel: Vec<FxVec2>,
     pub buckets: Vec<Vec<u32>>,
     pub buckets_used: Vec<u32>,
+    /// The seed this state was created with (for replays).
+    pub seed: u64,
+    /// Every command ever stepped, as (tick, player, command) — the full
+    /// input stream. With `seed` this reproduces the game bit-exactly.
+    pub command_log: Vec<(u32, u8, Command)>,
 }
 
 impl State {
@@ -272,6 +277,8 @@ impl State {
             scratch_vel: Vec::new(),
             buckets: vec![Vec::new(); n_tiles],
             buckets_used: Vec::new(),
+            seed,
+            command_log: Vec::new(),
             data,
             map,
         };

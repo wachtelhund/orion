@@ -23,6 +23,7 @@ pub mod movement;
 pub mod net;
 pub mod path;
 pub mod qa;
+pub mod replay;
 pub mod rng;
 pub mod state;
 pub mod step;

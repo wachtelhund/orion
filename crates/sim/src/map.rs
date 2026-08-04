@@ -109,6 +109,17 @@ impl Map {
 /// a low-ground center, one ramp each, mineral line per main, blocked rock
 /// clusters shaping the middle. 180°-rotation symmetric for fairness.
 /// Deterministic by construction (pure function, no RNG).
+/// All shipping maps, in menu order. Names are the replay/net identifiers —
+/// never rename one that shipped.
+pub const MAP_NAMES: &[&str] = &["meridian"];
+
+pub fn by_name(name: &str) -> Option<Map> {
+    match name {
+        "meridian" => Some(meridian()),
+        _ => None,
+    }
+}
+
 pub fn meridian() -> Map {
     let w = 80;
     let h = 80;

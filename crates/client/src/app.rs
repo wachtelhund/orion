@@ -137,6 +137,20 @@ pub struct App {
     /// Race picked for the human, and the enemy choice (0/1, 2 = random).
     pub chosen_race: u8,
     pub enemy_race_choice: u8,
+    // Replay session (Some = watching, not playing).
+    pub replay: Option<orion_sim::replay::Replay>,
+    pub replay_cursor: usize,
+    pub replay_paused: bool,
+    pub replay_speed: f32,
+    /// Fog perspective while watching: player index, or 2 = reveal all.
+    pub replay_view: u8,
+    /// Auto-save guard: set for real games, cleared for scripted/shot modes
+    /// and once a save happens.
+    pub record_replay: bool,
+    /// REPLAYS menu contents: (label, path).
+    pub replay_files: Vec<(String, std::path::PathBuf)>,
+    /// Headless replay capture: (target tick, out path).
+    pub replay_shot: Option<(u32, String)>,
     pub page: MenuPage,
     pub rebinding: Option<Action>,
     pub settings: Settings,
@@ -267,6 +281,14 @@ impl App {
             lobby_list: Vec::new(),
             lobby_fetch: None,
             lobby_fetch_at: None,
+            replay: None,
+            replay_cursor: 0,
+            replay_paused: false,
+            replay_speed: 1.0,
+            replay_view: 2,
+            record_replay: false,
+            replay_files: Vec::new(),
+            replay_shot: None,
             chosen_race: 0,
             enemy_race_choice: 2,
             page: if headless { MenuPage::None } else { MenuPage::MainRoot },
@@ -409,6 +431,8 @@ impl App {
         self.mp = None;
         self.mp_waiting = None;
         self.human = 0;
+        self.replay = None;
+        self.record_replay = true;
         let enemy = match self.enemy_race_choice {
             2 => {
                 // Pre-game choice, not sim: wall clock is fine here.
@@ -445,6 +469,8 @@ impl App {
 
     pub fn start_mp_game(&mut self, started: Started) {
         self.mp_lobby_code = None;
+        self.replay = None;
+        self.record_replay = true;
         self.state = new_game_mp(started.seed, started.races[0], started.races[1]);
         self.human = started.local_player;
         self.mp = Some(Lockstep::new(started.net, started.local_player));
@@ -501,6 +527,96 @@ impl App {
             if self.mouse.1 >= self.cam.screen_h - m {
                 self.cam.cy += es;
             }
+        }
+    }
+
+    /// Start watching a replay from disk.
+    pub fn start_replay(&mut self, path: &std::path::Path) {
+        let Ok(src) = std::fs::read_to_string(path) else {
+            self.mp_error = Some("cannot read replay".into());
+            return;
+        };
+        let replay = match orion_sim::replay::Replay::from_ron(&src) {
+            Ok(r) => r,
+            Err(e) => {
+                self.mp_error = Some(format!("bad replay: {e}"));
+                return;
+            }
+        };
+        let Some(state) = replay.start_state(GameData::load_default()) else {
+            self.mp_error = Some(format!("unknown map '{}'", replay.map));
+            return;
+        };
+        self.state = state;
+        self.replay = Some(replay);
+        self.replay_cursor = 0;
+        self.replay_paused = false;
+        self.replay_speed = 1.0;
+        self.replay_view = 2;
+        self.record_replay = false;
+        self.mp = None;
+        self.mp_waiting = None;
+        self.human = 0;
+        self.reveal_all = true;
+        self.pending.clear();
+        self.selection.clear();
+        self.groups = Default::default();
+        self.mode = Mode::Normal;
+        self.effects.clear();
+        self.facings.clear();
+        self.subgroup_offset = 0;
+        self.acc = 0.0;
+        self.in_game = true;
+        self.page = MenuPage::None;
+        let start = self.state.map.starts[0];
+        let (cx, cy) = iso::world_to_iso(start.x as f32 + 0.5, start.y as f32 + 0.5);
+        self.cam.cx = cx;
+        self.cam.cy = cy;
+    }
+
+    /// Auto-save the current game's replay once (game end or quit).
+    pub fn save_replay(&mut self) {
+        if !self.record_replay || self.state.tick < 24 * 20 {
+            return;
+        }
+        self.record_replay = false;
+        let me = self.settings.player_name.clone();
+        let names = if self.mp.is_some() {
+            if self.human == 0 { vec![me, "OPPONENT".into()] } else { vec!["OPPONENT".into(), me] }
+        } else {
+            vec![me, "BOT".into()]
+        };
+        let replay = orion_sim::replay::Replay::from_state(&self.state, "meridian", names);
+        if let Err(e) = crate::replays::save(&replay) {
+            eprintln!("replay save failed: {e}");
+        }
+    }
+
+    /// Replay frame: step recorded commands on the sim clock; the viewer
+    /// only controls camera, speed, pause, and fog perspective.
+    fn replay_frame(&mut self, dt: f64) {
+        self.camera_input(dt);
+        let Some(replay) = &self.replay else { return };
+        let done = self.state.tick >= replay.duration_ticks;
+        if !self.replay_paused && !done && self.page == MenuPage::None {
+            self.acc += dt * self.replay_speed as f64;
+            while self.acc >= TICK_DT {
+                let replay = self.replay.as_ref().unwrap();
+                if self.state.tick >= replay.duration_ticks {
+                    break;
+                }
+                let cmds = replay.commands_for(self.state.tick, &mut self.replay_cursor);
+                self.pending.clear(); // viewers don't command anyone
+                self.step_sim(cmds);
+                self.acc -= TICK_DT;
+            }
+        }
+        for e in &mut self.effects {
+            e.age += dt as f32;
+        }
+        self.effects.retain(|e| e.age < e.ttl);
+        for r in &mut self.recoil {
+            *r = (*r - dt as f32).max(0.0);
         }
     }
 
@@ -670,8 +786,41 @@ impl App {
             return;
         }
 
+        // Replay viewer controls swallow the conflicting game keys.
+        if self.replay.is_some() {
+            match code {
+                KeyCode::Space => {
+                    self.replay_paused = !self.replay_paused;
+                    return;
+                }
+                KeyCode::Tab => {
+                    self.replay_view = (self.replay_view + 1) % 3;
+                    if self.replay_view == 2 {
+                        self.reveal_all = true;
+                    } else {
+                        self.reveal_all = false;
+                        self.human = self.replay_view;
+                    }
+                    return;
+                }
+                KeyCode::Digit1 => {
+                    self.replay_speed = 1.0;
+                    return;
+                }
+                KeyCode::Digit2 => {
+                    self.replay_speed = 2.0;
+                    return;
+                }
+                KeyCode::Digit3 => {
+                    self.replay_speed = 4.0;
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         // Restart after game over.
-        if code == KeyCode::KeyR && self.state.winner.is_some() {
+        if code == KeyCode::KeyR && self.state.winner.is_some() && self.replay.is_none() {
             let d = self.difficulty;
             self.start_game(d);
             return;
@@ -798,7 +947,9 @@ impl App {
                 self.page = if from_game { MenuPage::EscRoot } else { MenuPage::MainRoot };
             }
             MenuPage::EscRoot => self.page = MenuPage::None,
-            MenuPage::Difficulty | MenuPage::Multiplayer => self.page = MenuPage::MainRoot,
+            MenuPage::Difficulty | MenuPage::Multiplayer | MenuPage::Replays => {
+                self.page = MenuPage::MainRoot
+            }
             MenuPage::MainRoot => {}
         }
     }
@@ -1508,6 +1659,9 @@ impl App {
 
     /// Render-side bookkeeping after any sim step (SP or lockstep).
     pub(crate) fn step_post(&mut self) {
+        if self.state.winner.is_some() {
+            self.save_replay();
+        }
         self.facings.resize(self.state.entities.len(), 2);
         self.recoil.resize(self.state.entities.len(), 0.0);
         for i in 0..self.state.entities.len() {
@@ -1852,6 +2006,41 @@ impl App {
             self.record_done += 1;
             return;
         }
+        // Replay capture mode: fast-forward a loaded replay, shoot, exit.
+        if let Some((target, path)) = self.replay_shot.clone() {
+            if self.replay.is_none() {
+                eprintln!("replay-shot: no replay loaded");
+                self.finished = true;
+                return;
+            }
+            let chunk = 96u32;
+            for _ in 0..chunk {
+                let replay = self.replay.as_ref().unwrap();
+                if self.state.tick >= target || self.state.tick >= replay.duration_ticks {
+                    break;
+                }
+                let cmds = replay.commands_for(self.state.tick, &mut self.replay_cursor);
+                self.step_sim(cmds);
+                for e in &mut self.effects {
+                    e.age += TICK_DT as f32;
+                }
+                self.effects.retain(|e| e.age < e.ttl);
+            }
+            let replay = self.replay.as_ref().unwrap();
+            if self.state.tick >= target || self.state.tick >= replay.duration_ticks {
+                println!(
+                    "replay-shot: tick {} checksum {:016x}",
+                    self.state.tick,
+                    self.state.checksum()
+                );
+                self.gfx.capture = Some(path);
+                self.render();
+                self.finished = true;
+                return;
+            }
+            self.render();
+            return;
+        }
         if let Some((target, path)) = self.shot.clone() {
             if self.shot_cross && self.state.tick == 0 {
                 self.state = new_game_with(0, 1);
@@ -1997,6 +2186,13 @@ impl App {
             }
         }
 
+        if self.in_game && self.replay.is_some() {
+            self.replay_frame(dt);
+            self.clamp_camera();
+            self.selection.retain(|id| self.state.get(*id).is_some());
+            self.render();
+            return;
+        }
         if self.in_game && self.mp.is_some() {
             self.mp_frame(dt);
             if let Some((_, t0)) = &self.error_flash {

@@ -14,6 +14,7 @@ pub enum MenuPage {
     MainRoot,
     Difficulty,
     Multiplayer,
+    Replays,
     Settings { from_game: bool },
     EscRoot,
 }
@@ -42,6 +43,8 @@ enum MenuAction {
     FocusName,
     FocusCode,
     CancelMp,
+    OpenReplays,
+    PlayReplay(usize),
     Rebind(Action),
 }
 
@@ -84,10 +87,11 @@ impl App {
                     vec![
                         ("PLAY VS AI".into(), MenuAction::OpenDifficulty),
                         ("MULTIPLAYER".into(), MenuAction::OpenMultiplayer),
+                        ("REPLAYS".into(), MenuAction::OpenReplays),
                         ("SETTINGS".into(), MenuAction::OpenSettings),
                         ("QUIT".into(), MenuAction::QuitApp),
                     ],
-                    h * 0.42,
+                    h * 0.40,
                 );
             }
             MenuPage::Difficulty => {
@@ -162,6 +166,19 @@ impl App {
                     rows.push(("BACK".into(), MenuAction::Back));
                     stack(rows, h * 0.24);
                 }
+            }
+            MenuPage::Replays => {
+                let mut rows: Vec<(String, MenuAction)> = self
+                    .replay_files
+                    .iter()
+                    .enumerate()
+                    .map(|(k, (label, _))| (label.clone(), MenuAction::PlayReplay(k)))
+                    .collect();
+                if rows.is_empty() {
+                    rows.push(("NO REPLAYS YET - PLAY A GAME".into(), MenuAction::Back));
+                }
+                rows.push(("BACK".into(), MenuAction::Back));
+                stack(rows, h * 0.30);
             }
             MenuPage::EscRoot => {
                 stack(
@@ -285,6 +302,7 @@ impl App {
             MenuPage::Settings { .. } => ("SETTINGS", ""),
             MenuPage::Difficulty => ("SELECT DIFFICULTY", ""),
             MenuPage::Multiplayer => ("MULTIPLAYER", ""),
+            MenuPage::Replays => ("REPLAYS", ""),
             _ => ("ORION", "A DETERMINISTIC ISOMETRIC RTS"),
         };
         let big = if self.page == MenuPage::MainRoot { self.ts(8.0) } else { self.ts(4.0) };
@@ -427,8 +445,10 @@ impl App {
             }
             MenuAction::Resume => self.page = MenuPage::None,
             MenuAction::QuitToMenu => {
+                self.save_replay(); // abandoned games are replays too
                 self.in_game = false;
                 self.mp = None; // closes the socket; peer sees a disconnect
+                self.replay = None;
                 self.page = MenuPage::MainRoot;
             }
             MenuAction::QuitApp => {
@@ -508,6 +528,16 @@ impl App {
             MenuAction::CycleEnemyRace => {
                 let n = self.state.data.race_names.len() as u8;
                 self.enemy_race_choice = (self.enemy_race_choice + 1) % (n + 1).max(1);
+            }
+            MenuAction::OpenReplays => {
+                self.replay_files = crate::replays::list(&self.state.data.race_names);
+                self.page = MenuPage::Replays;
+            }
+            MenuAction::PlayReplay(k) => {
+                if let Some((_, path)) = self.replay_files.get(k) {
+                    let path = path.clone();
+                    self.start_replay(&path);
+                }
             }
             MenuAction::Rebind(a) => {
                 self.rebinding = Some(a);

@@ -403,3 +403,32 @@ fn gas_economy_works() {
     assert_eq!(s.entities[b.idx as usize].queue.len(), 1, "gas train rejected");
     assert_eq!(s.players[0].gas, 450, "gas not deducted");
 }
+
+/// A recorded bot game re-simulated from its replay file must land on the
+/// exact same checksum — the property the whole replay feature stands on,
+/// including the RON round-trip.
+#[test]
+fn replay_reproduces_checksum() {
+    use orion_sim::replay::Replay;
+
+    let mut s = build_state(99);
+    let mut bots = [
+        Bot::with_style(0, Difficulty::Normal, 5),
+        Bot::with_style(1, Difficulty::Normal, 9),
+    ];
+    for _ in 0..24 * 90 {
+        let mut cmds = Vec::new();
+        for bot in &mut bots {
+            cmds.extend(bot.think(&s));
+        }
+        s.step(&cmds);
+    }
+    let live = s.checksum();
+
+    let replay = Replay::from_state(&s, "meridian", vec!["A".into(), "B".into()]);
+    let ron = replay.to_ron();
+    let parsed = Replay::from_ron(&ron).expect("replay round-trips through RON");
+    let replayed = parsed.resimulate(GameData::load_default()).expect("known map");
+    assert_eq!(replayed.tick, s.tick);
+    assert_eq!(replayed.checksum(), live, "replay diverged from the live game");
+}
