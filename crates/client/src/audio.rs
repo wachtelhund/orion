@@ -32,6 +32,9 @@ pub enum Sfx {
     SelVcWorker,
     SelKyth1,
     SelKyth2,
+    /// Ferron Compact: metallic FM clangs.
+    SelFer1,
+    SelFer2,
     SelBuilding,
     // Command acknowledgments: "moving out" / "engaging" / "on it".
     AckMove1,
@@ -44,7 +47,7 @@ pub enum Sfx {
     CountGo,
 }
 
-pub const ALL_SFX: [Sfx; 25] = [
+pub const ALL_SFX: [Sfx; 27] = [
     Sfx::Click,
     Sfx::Error,
     Sfx::Shot,
@@ -62,6 +65,8 @@ pub const ALL_SFX: [Sfx; 25] = [
     Sfx::SelVcWorker,
     Sfx::SelKyth1,
     Sfx::SelKyth2,
+    Sfx::SelFer1,
+    Sfx::SelFer2,
     Sfx::SelBuilding,
     Sfx::AckMove1,
     Sfx::AckMove2,
@@ -149,87 +154,117 @@ fn saw(t: f32, hz: f32) -> f32 {
 }
 
 fn synth_sfx(s: Sfx) -> Vec<f32> {
-    let mut rng = Rng(0x0510CAFE);
     match s {
-        Sfx::Click => render(0.05, |t, total, _| {
-            square(t, 1400.0) * 0.25 * env(t, 0.002, total)
-        }, &mut rng),
+        Sfx::Click => render(0.045, |t, total, _| {
+            (sine(t, 1900.0) * 0.5 + sine(t, 950.0) * 0.3) * 0.22 * env(t, 0.002, total)
+        }),
         Sfx::Error => render(0.28, |t, total, _| {
             let hz = if t < 0.14 { 220.0 } else { 155.0 };
-            (square(t, hz) * 0.7 + square(t, hz * 1.01) * 0.3) * 0.28 * env(t, 0.005, total)
-        }, &mut rng),
-        Sfx::Shot => render(0.09, |t, total, r| {
-            let n = r * 0.8 + sine(t, 900.0 - t * 5000.0) * 0.3;
-            n * 0.35 * env(t, 0.002, total)
-        }, &mut rng),
-        Sfx::Cannon => render(0.45, |t, total, r| {
-            let boom = sine(t, 65.0 - t * 40.0) * 0.8 + r * 0.35 * (1.0 - t * 1.5).max(0.0);
-            boom * 0.55 * env(t, 0.004, total)
-        }, &mut rng),
-        Sfx::Explosion => render(0.5, |t, total, r| {
-            (r * 0.7 + sine(t, 90.0 - t * 80.0) * 0.4) * 0.45 * env(t, 0.01, total)
-        }, &mut rng),
-        Sfx::BigExplosion => render(1.0, |t, total, r| {
-            (r * 0.8 + sine(t, 55.0 - t * 30.0) * 0.6) * 0.55 * env(t, 0.02, total)
-        }, &mut rng),
-        Sfx::UnitReady => melody(&[(660.0, 0.09), (880.0, 0.14)], 0.22),
-        Sfx::BuildDone => melody(&[(523.0, 0.09), (659.0, 0.09), (784.0, 0.16)], 0.22),
-        Sfx::ResearchDone => melody(
-            &[(523.0, 0.09), (659.0, 0.09), (784.0, 0.09), (1046.0, 0.2)],
-            0.2,
-        ),
-        Sfx::Storm => render(0.7, |t, total, r| {
-            let crackle = if r.abs() > 0.75 { r } else { r * 0.15 };
-            (crackle * 0.6 + sine(t, 180.0 + r * 60.0) * 0.15) * 0.4 * env(t, 0.01, total)
-        }, &mut rng),
+            (square(t, hz) * 0.55 + square(t, hz * 1.01) * 0.25) * 0.26 * env(t, 0.005, total)
+        }),
+        // Shot: dry CRACK — noise transient, descending zap, tight tail.
+        Sfx::Shot => layered(0.11, |t, total, r, lp| {
+            let crack = r * (1.0 - t * 40.0).max(0.0) * 1.2;
+            let zap = sine(t, 1500.0 - t * 9000.0) * 0.4 * (1.0 - t * 12.0).max(0.0);
+            let tail = lp.run(r * 0.5, 0.12) * (1.0 - t * 9.0).max(0.0);
+            (crack + zap + tail) * 0.4 * env(t, 0.001, total)
+        }),
+        // Cannon: metal clang into a deep boom with a closing-filter tail.
+        Sfx::Cannon => layered(0.62, |t, total, r, lp| {
+            let clang = (sine(t, 420.0) + sine(t, 420.0 * 2.76) * 0.5 + sine(t, 420.0 * 5.4) * 0.25)
+                * (1.0 - t * 7.0).max(0.0)
+                * 0.35;
+            let boom = sine(t, 62.0 - t * 34.0) * 0.85 * (1.0 - t * 1.6).max(0.0);
+            let cutoff = (0.35 * (1.0 - t * 1.8)).max(0.02);
+            let tail = lp.run(r, cutoff) * 0.7 * (1.0 - t * 1.5).max(0.0);
+            (clang + boom + tail) * 0.6 * env(t, 0.002, total)
+        }),
+        // Explosion: sub thump + noise washed through a closing lowpass.
+        Sfx::Explosion => layered(0.65, |t, total, r, lp| {
+            let sub = sine(t, 78.0 - t * 55.0) * 0.7 * (1.0 - t * 1.9).max(0.0);
+            let cutoff = (0.4 * (1.0 - t * 1.4)).max(0.025);
+            let wash = lp.run(r, cutoff) * 1.0 * (1.0 - t * 1.4).max(0.0);
+            let crackle = if r.abs() > 0.93 { r * (1.0 - t).max(0.0) * 0.5 } else { 0.0 };
+            (sub + wash + crackle) * 0.55 * env(t, 0.004, total)
+        }),
+        Sfx::BigExplosion => layered(1.35, |t, total, r, lp| {
+            let sub = sine(t, 52.0 - t * 20.0) * 0.85 * (1.0 - t * 0.8).max(0.0);
+            let rumble = 1.0 + 0.35 * sine(t, 9.0);
+            let cutoff = (0.35 * (1.0 - t * 0.7)).max(0.015);
+            let wash = lp.run(r, cutoff) * rumble * (1.0 - t * 0.75).max(0.0);
+            let debris = if t > 0.35 && r.abs() > 0.96 { r * (1.3 - t).max(0.0) * 0.6 } else { 0.0 };
+            (sub + wash + debris) * 0.6 * env(t, 0.008, total)
+        }),
+        Sfx::UnitReady => chime(&[(660.0, 0.09), (880.0, 0.16)], 0.2),
+        Sfx::BuildDone => chime(&[(523.0, 0.09), (659.0, 0.09), (784.0, 0.18)], 0.2),
+        Sfx::ResearchDone => {
+            chime(&[(523.0, 0.09), (659.0, 0.09), (784.0, 0.09), (1046.0, 0.22)], 0.18)
+        }
+        // Storm: arc bursts over a rising charged hum.
+        Sfx::Storm => layered(0.75, |t, total, r, lp| {
+            let gate = if (t * 31.0).fract() < 0.4 { 1.0 } else { 0.25 };
+            let arc = if r.abs() > 0.62 { r * gate } else { r * 0.1 };
+            let hum = sine(t, 130.0 + t * 160.0) * 0.18;
+            let sizzle = lp.run(arc, 0.6) * 0.8;
+            (sizzle + hum) * 0.42 * env(t, 0.01, total)
+        }),
         Sfx::Alarm => render(0.5, |t, total, _| {
             let hz = if (t * 8.0) as i32 % 2 == 0 { 660.0 } else { 495.0 };
-            square(t, hz) * 0.2 * env(t, 0.01, total)
-        }, &mut rng),
-        // VC selection: crisp two-tone radio blips with a click of static.
-        Sfx::SelVc1 => melody(&[(740.0, 0.05), (988.0, 0.07)], 0.16),
-        Sfx::SelVc2 => melody(&[(660.0, 0.05), (880.0, 0.05), (988.0, 0.05)], 0.15),
-        Sfx::SelVcWorker => melody(&[(523.0, 0.06), (659.0, 0.08)], 0.13),
-        // Kyth selection: warbling organic chirps.
-        Sfx::SelKyth1 => render(0.16, |t, total, _| {
-            let hz = 620.0 + (t * 34.0).sin() * 160.0 + t * 500.0;
-            (sine(t, hz) * 0.7 + sine(t, hz * 1.99) * 0.3) * 0.3 * env(t, 0.01, total)
-        }, &mut rng),
-        Sfx::SelKyth2 => render(0.18, |t, total, _| {
-            let hz = 840.0 - t * 900.0 + (t * 55.0).sin() * 90.0;
-            sine(t, hz) * 0.32 * env(t, 0.012, total)
-        }, &mut rng),
-        // Building select: low mechanical thunk + hum.
-        Sfx::SelBuilding => render(0.14, |t, total, _| {
-            (sine(t, 180.0) * 0.5 + square(t, 90.0) * 0.12 + sine(t, 361.0) * 0.2)
-                * 0.4
-                * env(t, 0.004, total)
-        }, &mut rng),
-        // Command acks.
-        Sfx::AckMove1 => melody(&[(587.0, 0.05), (784.0, 0.06)], 0.14),
-        Sfx::AckMove2 => melody(&[(659.0, 0.04), (740.0, 0.04), (880.0, 0.05)], 0.14),
-        Sfx::AckAttack => render(0.17, |t, total, _| {
-            let hz = if t < 0.06 { 392.0 } else { 587.0 };
-            (square(t, hz) * 0.5 + saw(t, hz * 0.5) * 0.3) * 0.26 * env(t, 0.004, total)
-        }, &mut rng),
-        Sfx::AckGather => melody(&[(784.0, 0.04), (659.0, 0.06)], 0.13),
+            (sine(t, hz) * 0.5 + square(t, hz) * 0.12) * 0.26 * env(t, 0.01, total)
+        }),
+        // VC selection: radio squelch opens, two-tone blip, squelch closes.
+        Sfx::SelVc1 => radio(&[(740.0, 0.05), (988.0, 0.08)]),
+        Sfx::SelVc2 => radio(&[(660.0, 0.045), (880.0, 0.045), (988.0, 0.06)]),
+        Sfx::SelVcWorker => radio(&[(523.0, 0.06), (659.0, 0.08)]),
+        // Kyth selection: formant warbles — a living throat, not a beep.
+        Sfx::SelKyth1 => formant(0.2, 340.0, 90.0, 11.0),
+        Sfx::SelKyth2 => formant(0.24, 260.0, -70.0, 7.5),
+        // Ferron selection: struck-metal FM ring.
+        Sfx::SelFer1 => metal(0.3, 392.0),
+        Sfx::SelFer2 => metal(0.26, 294.0),
+        Sfx::SelBuilding => layered(0.16, |t, total, _r, lp| {
+            let thunk = sine(t, 170.0) * 0.5 * (1.0 - t * 9.0).max(0.0);
+            let servo = lp.run(saw(t, 900.0 - t * 2400.0), 0.25) * 0.18 * (1.0 - t * 5.0).max(0.0);
+            let hum = sine(t, 356.0) * 0.14;
+            (thunk + servo + hum) * 0.45 * env(t, 0.004, total)
+        }),
+        Sfx::AckMove1 => radio(&[(587.0, 0.05), (784.0, 0.07)]),
+        Sfx::AckMove2 => radio(&[(659.0, 0.04), (740.0, 0.04), (880.0, 0.06)]),
+        // Attack ack: clipped aggressive stab.
+        Sfx::AckAttack => layered(0.18, |t, total, r, _lp| {
+            let stab = if t < 0.05 { r * 0.5 } else { 0.0 };
+            let hz = if t < 0.07 { 392.0 } else { 587.0 };
+            let tone = (square(t, hz) * 0.45 + saw(t, hz * 0.5) * 0.3).clamp(-0.6, 0.6);
+            (stab + tone) * 0.3 * env(t, 0.003, total)
+        }),
+        Sfx::AckGather => radio(&[(784.0, 0.04), (659.0, 0.06)]),
         Sfx::AckBuild => render(0.13, |t, total, _| {
-            // Quick ratchet: three ticks rising.
             let k = (t * 24.0) as i32;
             let hz = 500.0 + k as f32 * 160.0;
-            square(t, hz) * 0.22 * env(t, 0.003, total) * if t * 24.0 % 1.0 < 0.6 { 1.0 } else { 0.2 }
-        }, &mut rng),
+            square(t, hz)
+                * 0.2
+                * env(t, 0.003, total)
+                * if (t * 24.0).fract() < 0.6 { 1.0 } else { 0.2 }
+        }),
         Sfx::CountTick => render(0.12, |t, total, _| {
             (sine(t, 880.0) * 0.6 + sine(t, 1760.0) * 0.2) * 0.4 * env(t, 0.004, total)
-        }, &mut rng),
-        Sfx::CountGo => melody(&[(523.0, 0.10), (659.0, 0.10), (784.0, 0.10), (1046.0, 0.22)], 0.3),
-        Sfx::Ping => render(0.08, |t, total, _| {
-            sine(t, 1200.0) * 0.18 * env(t, 0.002, total)
-        }, &mut rng),
+        }),
+        Sfx::CountGo => chime(&[(523.0, 0.1), (659.0, 0.1), (784.0, 0.1), (1046.0, 0.24)], 0.28),
+        Sfx::Ping => render(0.08, |t, total, _| sine(t, 1200.0) * 0.18 * env(t, 0.002, total)),
     }
 }
 
-fn render(dur: f32, f: impl Fn(f32, f32, f32) -> f32, rng: &mut Rng) -> Vec<f32> {
+/// One-pole lowpass; coefficient per call so cutoffs can close over time.
+struct Lp(f32);
+impl Lp {
+    fn run(&mut self, x: f32, a: f32) -> f32 {
+        self.0 += (x - self.0) * a;
+        self.0
+    }
+}
+
+fn render(dur: f32, f: impl Fn(f32, f32, f32) -> f32) -> Vec<f32> {
+    let mut rng = Rng(0x0510CAFE);
     (0..secs(dur))
         .map(|i| {
             let t = i as f32 / RATE as f32;
@@ -239,62 +274,169 @@ fn render(dur: f32, f: impl Fn(f32, f32, f32) -> f32, rng: &mut Rng) -> Vec<f32>
         .collect()
 }
 
-fn melody(notes: &[(f32, f32)], vol: f32) -> Vec<f32> {
+/// Render with a private lowpass — for anything with a filtered noise body.
+fn layered(dur: f32, f: impl Fn(f32, f32, f32, &mut Lp) -> f32) -> Vec<f32> {
+    let mut rng = Rng(0x0510CAFE);
+    let mut lp = Lp(0.0);
+    (0..secs(dur))
+        .map(|i| {
+            let t = i as f32 / RATE as f32;
+            let r = rng.next();
+            f(t, dur, r, &mut lp).clamp(-1.0, 1.0)
+        })
+        .collect()
+}
+
+/// Completion chime: notes with a soft chorused triangle-ish voice.
+fn chime(notes: &[(f32, f32)], vol: f32) -> Vec<f32> {
     let mut out = Vec::new();
     for &(hz, dur) in notes {
         for i in 0..secs(dur) {
             let t = i as f32 / RATE as f32;
-            let v = (sine(t, hz) * 0.7 + sine(t, hz * 2.0) * 0.2) * vol * env(t, 0.01, dur);
+            let v = (sine(t, hz) * 0.6
+                + sine(t, hz * 1.003) * 0.25
+                + sine(t, hz * 2.0) * 0.18
+                + sine(t, hz * 3.0) * 0.06)
+                * vol
+                * env(t, 0.012, dur);
             out.push(v);
         }
     }
     out
 }
 
-/// ~51s ambient loop: slow minor-key pads with a deep bass pulse and an
-/// occasional sparkle. Sci-fi desert vibes, quiet enough to sit under combat.
+/// VC radio ack: static squelch opens, tones speak, squelch closes.
+fn radio(notes: &[(f32, f32)]) -> Vec<f32> {
+    let mut rng = Rng(0x0510CAFE);
+    let mut out = Vec::new();
+    // Squelch open: 18ms of bright static.
+    for i in 0..secs(0.018) {
+        let t = i as f32 / RATE as f32;
+        out.push(rng.next() * 0.22 * (1.0 - t * 40.0).max(0.2));
+    }
+    for &(hz, dur) in notes {
+        for i in 0..secs(dur) {
+            let t = i as f32 / RATE as f32;
+            let tone = (square(t, hz) * 0.32 + sine(t, hz) * 0.3) * env(t, 0.004, dur);
+            let hiss = rng.next() * 0.03;
+            out.push(tone + hiss);
+        }
+    }
+    for i in 0..secs(0.02) {
+        let t = i as f32 / RATE as f32;
+        out.push(rng.next() * 0.16 * (1.0 - t * 45.0).max(0.0));
+    }
+    out
+}
+
+/// Kyth formant warble: a gliding voiced tone with throat resonances.
+fn formant(dur: f32, f0: f32, glide: f32, vib: f32) -> Vec<f32> {
+    (0..secs(dur))
+        .map(|i| {
+            let t = i as f32 / RATE as f32;
+            let base = f0 + glide * t * 6.0 + (t * vib * std::f32::consts::TAU).sin() * 24.0;
+            let voiced = sine(t, base) * 0.5
+                + sine(t, base * 2.4) * 0.3 * (1.0 + (t * 17.0).sin() * 0.5)
+                + sine(t, base * 3.9) * 0.12;
+            (voiced * 0.34 * env(t, 0.015, dur)).clamp(-1.0, 1.0)
+        })
+        .collect()
+}
+
+/// Ferron struck metal: inharmonic partials ringing down.
+fn metal(dur: f32, hz: f32) -> Vec<f32> {
+    (0..secs(dur))
+        .map(|i| {
+            let t = i as f32 / RATE as f32;
+            let ring = sine(t, hz) * 0.5
+                + sine(t, hz * 2.76) * 0.35 * (1.0 - t * 2.0).max(0.0)
+                + sine(t, hz * 5.4) * 0.2 * (1.0 - t * 4.0).max(0.0)
+                + sine(t, hz * 8.9) * 0.1 * (1.0 - t * 7.0).max(0.0);
+            (ring * 0.32 * env(t, 0.002, dur)).clamp(-1.0, 1.0)
+        })
+        .collect()
+}
+
+/// ~64s dark ambient bed: detuned root drones under wandering wind, a
+/// sparse minor motif and a distant metallic knell. Dystopian, quiet,
+/// sits under combat without fighting it.
 fn synth_music() -> Vec<f32> {
-    // A minor-ish progression: Am, F, C, G — as root frequencies.
-    const CHORDS: [[f32; 3]; 4] = [
-        [220.0, 261.63, 329.63], // A C E
-        [174.61, 220.0, 261.63], // F A C
-        [130.81, 164.81, 196.0], // C E G
-        [196.0, 246.94, 293.66], // G B D
-    ];
-    let bar = 12.8f32; // seconds per chord
-    let total = bar * CHORDS.len() as f32;
+    // Root movement: A1, F1, G1, E1 — 16s each.
+    const ROOTS: [f32; 4] = [55.0, 43.65, 49.0, 41.2];
+    let bar = 16.0f32;
+    let total = bar * ROOTS.len() as f32;
     let n = secs(total);
     let mut out = vec![0.0f32; n];
-    let mut lp = 0.0f32; // one-pole lowpass state
+    let mut lp = Lp(0.0);
+    let mut wind_lp = Lp(0.0);
     let mut rng = Rng(0xBADA55);
+
+    // Sparse motif: (bar_offset_seconds, semitone_ratio, length).
+    const MOTIF: [(f32, f32, f32); 3] = [(6.0, 4.0, 2.2), (9.5, 4.755, 1.8), (12.0, 3.564, 2.6)];
 
     for i in 0..n {
         let t = i as f32 / RATE as f32;
-        let bar_i = ((t / bar) as usize) % CHORDS.len();
+        let bar_i = ((t / bar) as usize) % ROOTS.len();
         let bt = t % bar;
-        let chord = &CHORDS[bar_i];
-        // Crossfade at bar edges.
-        let fade = (bt / 1.5).min(1.0).min(((bar - bt) / 1.5).min(1.0));
+        let root = ROOTS[bar_i];
+        let fade = (bt / 2.5).min(1.0).min(((bar - bt) / 2.5).min(1.0));
 
-        let mut v = 0.0;
-        for (k, &hz) in chord.iter().enumerate() {
-            let detune = 1.0 + 0.0015 * (k as f32 - 1.0);
-            let slow = 0.5 + 0.5 * sine(t, 0.07 + 0.013 * k as f32);
-            v += (saw(t, hz * 0.5 * detune) * 0.16 + sine(t, hz * 0.5) * 0.22) * slow;
+        // Drone: detuned pair + dark fifth, breathing slowly.
+        let breathe = 0.6 + 0.4 * sine(t, 0.043);
+        let mut v = (saw(t, root) * 0.10 + saw(t, root * 1.006) * 0.10 + sine(t, root * 1.5) * 0.08)
+            * breathe;
+        // Sub anchor.
+        v += sine(t, root * 0.5) * 0.16;
+        // Wind: noise through a slowly wandering filter.
+        let wind_cut = 0.015 + 0.012 * (1.0 + sine(t, 0.05));
+        v += wind_lp.run(rng.next(), wind_cut) * 0.5;
+        // Motif notes above the drone.
+        for &(off, ratio, len) in MOTIF.iter() {
+            let nt = bt - off;
+            if nt > 0.0 && nt < len {
+                let hz = root * 4.0 * ratio / 4.0;
+                v += (sine(nt, hz) * 0.6 + sine(nt, hz * 2.0) * 0.15)
+                    * 0.10
+                    * env(nt, 0.4, len);
+            }
         }
-        // Bass pulse on the root, twice a bar.
-        let pulse_t = bt % (bar / 2.0);
-        v += sine(t, chord[0] * 0.25) * 0.3 * (1.0 - pulse_t / 3.0).max(0.0);
-        // Sparkle: rare soft high blip.
-        let r = rng.next();
-        if r > 0.99993 {
-            v += 0.0; // keep deterministic length; sparkles via LFO below
+        // Distant knell once a bar.
+        let kt = bt - 14.0;
+        if kt > 0.0 && kt < 1.6 {
+            let khz = root * 6.0;
+            v += (sine(kt, khz) * 0.5 + sine(kt, khz * 2.76) * 0.3)
+                * 0.05
+                * (1.0 - kt / 1.6).powi(2);
         }
-        v += sine(t, chord[2] * 4.0) * 0.02 * (0.5 + 0.5 * sine(t, 0.031)).powi(4);
 
-        // Lowpass to soften everything.
-        lp += (v - lp) * 0.08;
-        out[i] = (lp * fade * 0.5).clamp(-1.0, 1.0);
+        let filtered = lp.run(v, 0.06);
+        out[i] = (filtered * fade * 0.55).clamp(-1.0, 1.0);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_sfx_render_clean() {
+        for s in ALL_SFX {
+            let buf = synth_sfx(s);
+            assert!(!buf.is_empty(), "{s:?} rendered empty");
+            assert!(
+                buf.iter().all(|v| v.is_finite() && v.abs() <= 1.0),
+                "{s:?} has out-of-range samples"
+            );
+            let peak = buf.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+            assert!(peak > 0.05, "{s:?} is near-silent (peak {peak})");
+        }
+    }
+
+    #[test]
+    fn music_loop_renders_clean() {
+        let m = synth_music();
+        assert!(m.len() > RATE as usize * 60, "music loop under a minute");
+        assert!(m.iter().all(|v| v.is_finite() && v.abs() <= 1.0));
+    }
 }
