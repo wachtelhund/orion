@@ -233,6 +233,270 @@ export class Lobby {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Automatic matchmaking: a singleton DO holding the ranked queue + ratings.
+//
+// Clients hold a WebSocket to /queue while searching. A pass every few
+// seconds pairs players whose MMR gap fits inside BOTH players' tolerance
+// (which widens the longer they wait) AND whose combined relay latency fits
+// their latency window (also widening). Matched players get a fresh lobby
+// code and reconnect through the ordinary Lobby relay — the matchmaker is
+// only an introducer. Ratings are Elo (K=32, start 1200), updated when both
+// players report the same winner; a single report resolves after a timeout
+// so a rage-quit can't freeze ratings. Humans only by construction: every
+// queue entry is a live client socket.
+
+const MM_PASS_MS = 3000;
+const MM_START_MMR = 1200;
+const MM_K = 32;
+const MM_TOL_BASE = 100; // +- MMR at 0s wait
+const MM_TOL_STEP = 60; // widens per 10s waited
+const MM_LAT_BASE = 250; // combined ms allowed at 0s wait
+const MM_LAT_STEP = 80;
+const MM_RESULT_TIMEOUT_MS = 120 * 1000;
+const MM_QUEUE_CAP = 500;
+
+export class Matchmaker {
+  constructor(state) {
+    this.state = state;
+    this.queue = new Map(); // id -> entry
+  }
+
+  async rating(id) {
+    return (
+      (await this.state.storage.get(`mmr:${id}`)) || {
+        mmr: MM_START_MMR,
+        games: 0,
+      }
+    );
+  }
+
+  json(obj, status = 200) {
+    return new Response(JSON.stringify(obj), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  async armAlarm() {
+    const cur = await this.state.storage.getAlarm();
+    if (cur === null) {
+      await this.state.storage.setAlarm(Date.now() + MM_PASS_MS);
+    }
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+
+    if (url.pathname === "/queue") {
+      if (request.headers.get("Upgrade") !== "websocket") {
+        return new Response("expected websocket", { status: 400 });
+      }
+      const id = (url.searchParams.get("id") || "").slice(0, 32);
+      const name = (url.searchParams.get("name") || "COMMANDER").slice(0, 16);
+      const race = parseInt(url.searchParams.get("race") || "0", 10) || 0;
+      const rtt = Math.min(
+        2000,
+        parseInt(url.searchParams.get("rtt") || "100", 10) || 100,
+      );
+      const pair = new WebSocketPair();
+      const [client, server] = Object.values(pair);
+      server.accept();
+      if (!id || this.queue.size >= MM_QUEUE_CAP) {
+        try {
+          server.send(JSON.stringify({ type: "error", reason: "queue full" }));
+          server.close(1008, "queue full");
+        } catch (_) {}
+        return new Response(null, { status: 101, webSocket: client });
+      }
+      // Re-queueing the same id replaces the old socket (client restarted).
+      const prev = this.queue.get(id);
+      if (prev) {
+        try {
+          prev.ws.close(1000, "requeued");
+        } catch (_) {}
+      }
+      const { mmr, games } = await this.rating(id);
+      const entry = {
+        id,
+        ws: server,
+        name,
+        race,
+        rtt,
+        continent: (request.cf && request.cf.continent) || "??",
+        mmr,
+        games,
+        since: Date.now(),
+      };
+      this.queue.set(id, entry);
+      const drop = () => {
+        if (this.queue.get(id) === entry) this.queue.delete(id);
+      };
+      server.addEventListener("close", drop);
+      server.addEventListener("error", drop);
+      try {
+        server.send(JSON.stringify({ type: "queued", mmr, games }));
+      } catch (_) {}
+      await this.armAlarm();
+      return new Response(null, { status: 101, webSocket: client });
+    }
+
+    if (url.pathname === "/result" && request.method === "POST") {
+      const { code, id, winner_slot } = await request.json();
+      if (typeof code !== "string" || typeof id !== "string") {
+        return this.json({ error: "bad report" }, 400);
+      }
+      const key = `match:${code}`;
+      const match = await this.state.storage.get(key);
+      if (!match) return this.json({ error: "unknown match" }, 404);
+      const slot = match.ids.indexOf(id);
+      if (slot === -1) return this.json({ error: "not your match" }, 403);
+      if (winner_slot !== 0 && winner_slot !== 1) {
+        return this.json({ error: "bad winner" }, 400);
+      }
+      match.reports[slot] = winner_slot;
+      const [ra, rb] = match.reports;
+      if (ra !== null && rb !== null) {
+        if (ra === rb) {
+          await this.resolve(code, match, ra);
+        } else {
+          await this.state.storage.delete(key); // liars: discard
+        }
+      } else {
+        await this.state.storage.put(key, match);
+        await this.armAlarm(); // timeout resolution needs a tick
+      }
+      return this.json({ ok: true });
+    }
+
+    if (url.pathname === "/rating") {
+      const id = (url.searchParams.get("id") || "").slice(0, 32);
+      return this.json(await this.rating(id));
+    }
+
+    return new Response("not found", { status: 404 });
+  }
+
+  // Elo update + cleanup for a decided match.
+  async resolve(code, match, winnerSlot) {
+    const [a, b] = match.ids;
+    const ra = await this.rating(a);
+    const rb = await this.rating(b);
+    const expA = 1 / (1 + Math.pow(10, (rb.mmr - ra.mmr) / 400));
+    const scoreA = winnerSlot === 0 ? 1 : 0;
+    const delta = Math.round(MM_K * (scoreA - expA));
+    ra.mmr += delta;
+    rb.mmr -= delta;
+    ra.games += 1;
+    rb.games += 1;
+    await this.state.storage.put(`mmr:${a}`, ra);
+    await this.state.storage.put(`mmr:${b}`, rb);
+    await this.state.storage.delete(`match:${code}`);
+  }
+
+  async alarm() {
+    const now = Date.now();
+
+    // Resolve single-report matches past the timeout; expire ancient ones.
+    const matches = await this.state.storage.list({ prefix: "match:" });
+    for (const [key, match] of matches) {
+      const [ra, rb] = match.reports;
+      const one = ra !== null ? ra : rb;
+      if (one !== null && now - match.created > MM_RESULT_TIMEOUT_MS) {
+        await this.resolve(key.slice("match:".length), match, one);
+      } else if (now - match.created > 4 * 60 * 60 * 1000) {
+        await this.state.storage.delete(key); // nobody ever reported
+      }
+    }
+
+    // Matching pass: longest-waiting first, best-scoring partner that fits
+    // both players' (widening) MMR and latency windows.
+    const entries = [...this.queue.values()].sort((x, y) => x.since - y.since);
+    const tol = (e) =>
+      MM_TOL_BASE + MM_TOL_STEP * Math.floor((now - e.since) / 10000);
+    const latCap = (e) =>
+      MM_LAT_BASE + MM_LAT_STEP * Math.floor((now - e.since) / 10000);
+    const taken = new Set();
+    for (const a of entries) {
+      if (taken.has(a.id)) continue;
+      let best = null;
+      for (const b of entries) {
+        if (b.id === a.id || taken.has(b.id)) continue;
+        const gap = Math.abs(a.mmr - b.mmr);
+        const lat = a.rtt + b.rtt + (a.continent !== b.continent ? 150 : 0);
+        if (gap > Math.min(tol(a), tol(b))) continue;
+        if (lat > Math.min(latCap(a), latCap(b))) continue;
+        const score = gap + lat;
+        if (!best || score < best.score) best = { b, score };
+      }
+      if (best) {
+        taken.add(a.id);
+        taken.add(best.b.id);
+        await this.pair(a, best.b);
+      } else {
+        // Keep searchers informed of their widening window.
+        try {
+          a.ws.send(
+            JSON.stringify({
+              type: "searching",
+              tol: tol(a),
+              waited_s: Math.floor((now - a.since) / 1000),
+            }),
+          );
+        } catch (_) {}
+      }
+    }
+
+    if (this.queue.size > 0) {
+      await this.state.storage.setAlarm(Date.now() + MM_PASS_MS);
+    } else {
+      const matches = await this.state.storage.list({ prefix: "match:" });
+      for (const [, m] of matches) {
+        if (m.reports[0] !== null || m.reports[1] !== null) {
+          await this.state.storage.setAlarm(Date.now() + MM_PASS_MS);
+          break;
+        }
+      }
+    }
+  }
+
+  async pair(a, b) {
+    // Random ranked code (M-prefixed, can't collide with 5-letter lobbies)
+    // and a random map from the ranked pool.
+    const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+    let code = "M";
+    for (let i = 0; i < 5; i++) {
+      code += letters[Math.floor(Math.random() * letters.length)];
+    }
+    const maps = ["meridian", "caverns"];
+    const map = maps[Math.floor(Math.random() * maps.length)];
+    await this.state.storage.put(`match:${code}`, {
+      ids: [a.id, b.id],
+      reports: [null, null],
+      created: Date.now(),
+    });
+    const tell = (e, role, opp) => {
+      try {
+        e.ws.send(
+          JSON.stringify({
+            type: "match",
+            code,
+            role,
+            map,
+            opp_name: opp.name,
+            opp_mmr: Math.round(opp.mmr),
+          }),
+        );
+        e.ws.close(1000, "matched");
+      } catch (_) {}
+    };
+    tell(a, "host", b);
+    tell(b, "join", a);
+    this.queue.delete(a.id);
+    this.queue.delete(b.id);
+  }
+}
+
 // Cloudflare's rate-limit binding, applied at the edge so a rejected request
 // never costs a Durable Object invocation. Guarded on every axis: if the
 // binding is absent or throws, we fail open. Losing the limiter must never
@@ -271,6 +535,23 @@ export default {
       if (await rateLimited(env.LIST_LIMITER, ip)) return tooMany();
       const id = env.DIRECTORY.idFromName("directory");
       return env.DIRECTORY.get(id).fetch(request);
+    }
+    // Ranked matchmaking: queue socket + result/rating endpoints, all on
+    // the singleton Matchmaker DO.
+    if (url.pathname === "/queue") {
+      if (await rateLimited(env.WS_LIMITER, ip)) return tooMany();
+      const id = env.MATCHMAKER.idFromName("matchmaker");
+      return env.MATCHMAKER.get(id).fetch(request);
+    }
+    if (url.pathname === "/result" || url.pathname === "/rating") {
+      if (await rateLimited(env.LIST_LIMITER, ip)) return tooMany();
+      const id = env.MATCHMAKER.idFromName("matchmaker");
+      return env.MATCHMAKER.get(id).fetch(request);
+    }
+    // RTT probe for the latency half of matchmaking. Answered at the edge —
+    // measuring it must not cost a DO hop.
+    if (url.pathname === "/ping") {
+      return new Response("pong\n", { status: 200 });
     }
     if (url.pathname === "/") {
       return new Response("orion relay up\n", { status: 200 });

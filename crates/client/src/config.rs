@@ -243,8 +243,27 @@ pub struct Settings {
     /// Name shown in the multiplayer lobby list.
     #[serde(default = "default_name")]
     pub player_name: String,
+    /// Anonymous persistent identity for ranked matchmaking (random hex,
+    /// generated on first launch). The MMR on the relay is keyed by this.
+    #[serde(default = "fresh_player_id")]
+    pub player_id: String,
     /// action name -> key name; missing entries use defaults.
     pub binds: BTreeMap<String, String>,
+}
+
+/// 16 hex chars from OS entropy (client-side identity, never sim-side).
+fn fresh_player_id() -> String {
+    let mut t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(12345);
+    t ^= std::process::id() as u64 * 0x9E3779B97F4A7C15;
+    let mut s = String::new();
+    for _ in 0..2 {
+        t = t.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s.push_str(&format!("{:08x}", (t >> 24) as u32));
+    }
+    s
 }
 
 impl Default for Settings {
@@ -258,6 +277,7 @@ impl Default for Settings {
             sfx_volume: default_sfx(),
             relay_url: default_relay(),
             player_name: default_name(),
+            player_id: fresh_player_id(),
             binds: BTreeMap::new(),
         }
     }

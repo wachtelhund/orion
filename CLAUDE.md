@@ -175,6 +175,21 @@ found the spawn bias: fixed-point Mul truncation, flow-field tie-break
 mirroring, spawn-arc symmetry all live downstream of it). The MP handshake
 carries the host's map choice; soak alternates maps per matchup cycle.
 
+## Ranked matchmaking
+
+`Matchmaker` DO on the relay (singleton): clients hold a WebSocket to
+`/queue` while searching; a pass every 3s pairs players whose MMR gap and
+combined relay RTT fit inside both players' windows (both widen with wait
+time; continent mismatch adds a latency penalty). Matched players get an
+M-prefixed code and reconnect through the ordinary Lobby relay — the
+matchmaker only introduces. Ratings: Elo K=32 start 1200, stored per
+anonymous `player_id` (random hex in settings); both clients report
+`winner_slot` (host = slot 0), agreement resolves, single report resolves
+after 120s (rage-quit protection), disagreement discards. Client flow
+lives in `relay.rs::find_match_async` (one thread: RTT probe -> queue ws ->
+lobby handshake). E2E: two `--mp-auto queue:X` processes + curl /result +
+/rating. Humans only by construction — every queue entry is a live socket.
+
 ## Races
 
 Defs carry `race: u8`; players pick races; Train/Build validate race. The

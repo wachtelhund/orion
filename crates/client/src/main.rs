@@ -98,6 +98,7 @@ impl ApplicationHandler for Shell {
             || self.replay_shot.is_some();
         if !headless {
             app.init_audio();
+            app.persist_identity();
         }
         // Persisted fullscreen preference (not in capture modes).
         if app.settings.fullscreen && self.shot.is_none() && self.script.is_none() && !self.smoke

@@ -1109,6 +1109,15 @@ impl App {
             self.gfx.text(out, (w - lw) * 0.5, y, ts3, [c[0], c[1], c[2], 1.0], &line);
             y += 18.0 * self.ui();
         }
+        // Ranked games show the (freshly refreshed) rating.
+        if self.mm_code.is_some() {
+            if let Some((mmr, games)) = self.mm_rating {
+                let line = format!("RANKED  MMR {mmr}  ({games} GAMES)");
+                let lw = self.gfx.text_width(ts3, &line);
+                self.gfx.text(out, (w - lw) * 0.5, y, ts3, [1.0, 0.85, 0.3, 1.0], &line);
+                y += 18.0 * self.ui();
+            }
+        }
         let sub = "R: PLAY AGAIN   ESC: MENU";
         let ts2 = self.ts(2.0);
         let sw = self.gfx.text_width(ts2, sub);

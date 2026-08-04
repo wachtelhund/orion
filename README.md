@@ -22,10 +22,11 @@ precompiled, no install step:
 | Windows 10/11 | `orion-windows-x86_64.zip` | Unzip → double-click **orion.exe**. If SmartScreen objects: More info → Run anyway |
 | Linux (x86_64) | `orion-linux-x86_64.tar.gz` | `tar xzf && ./orion` (needs Vulkan drivers + ALSA `libasound2`) |
 
-Multiplayer needs zero setup and never shows an IP: **CREATE LOBBY** lists
-your game for anyone to click and join; **CREATE PRIVATE LOBBY** gives you a
-5-letter code that doubles as the password. Settings live in
-`~/.orion-settings.ron`.
+Multiplayer needs zero setup and never shows an IP: **FIND MATCH** pairs you
+with a stranger near your skill and latency (ranked, Elo-rated); **CREATE
+LOBBY** lists your game for anyone to click and join; **CREATE PRIVATE
+LOBBY** gives you a 5-letter code that doubles as the password. Settings
+live in `~/.orion-settings.ron`.
 
 **Build from source** (any platform, Rust 1.80+):
 
@@ -63,6 +64,12 @@ Playable game — single player vs AI, or 1v1 multiplayer (direct connect):
   the password — all through a Cloudflare Worker relay, no IPs, no port
   forwarding. WebSocket lockstep, input-delay 4 ticks, checksum desync
   detection; menus don't pause MP
+- **Ranked matchmaking**: FIND MATCH queues you by MMR (Elo, K=32, start
+  1200) *and* latency — the search window widens the longer you wait. No
+  bots, humans only; matches are made on a random map from the pool, both
+  players report the result and the matchmaker updates your rating (a
+  rage-quit resolves against the quitter on a timeout). Your MMR shows on
+  the FIND MATCH button and the end-of-match screen
 - Race select + enemy race choice on the difficulty screen
 - End-of-match stats (time, units built/lost, resources mined)
 - Bot personalities (seeded timing/cap offsets) so games vary; escalation so

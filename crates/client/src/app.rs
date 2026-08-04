@@ -134,6 +134,14 @@ pub struct App {
     pub lobby_list: Vec<crate::relay::LobbyInfo>,
     pub lobby_fetch: Option<std::sync::mpsc::Receiver<Option<Vec<crate::relay::LobbyInfo>>>>,
     pub lobby_fetch_at: Option<Instant>,
+    // Ranked matchmaking session state.
+    pub mm_queue: Option<std::sync::mpsc::Receiver<crate::relay::QueueEvent>>,
+    pub mm_status: String,
+    /// Ranked code of the running game — present = report the result.
+    pub mm_code: Option<String>,
+    pub mm_reported: bool,
+    pub mm_rating: Option<(i32, u32)>,
+    pub mm_rating_rx: Option<std::sync::mpsc::Receiver<Option<(i32, u32)>>>,
     /// Race picked for the human, and the enemy choice (0/1, 2 = random).
     pub chosen_race: u8,
     pub enemy_race_choice: u8,
@@ -285,6 +293,12 @@ impl App {
             lobby_list: Vec::new(),
             lobby_fetch: None,
             lobby_fetch_at: None,
+            mm_queue: None,
+            mm_status: String::new(),
+            mm_code: None,
+            mm_reported: false,
+            mm_rating: None,
+            mm_rating_rx: None,
             replay: None,
             replay_cursor: 0,
             replay_paused: false,
@@ -330,6 +344,13 @@ impl App {
             error_flash: None,
             last_alarm_sfx: None,
         }
+    }
+
+    /// Persist settings once at startup so the freshly generated ranked
+    /// player_id survives (serde default regenerates it on every load
+    /// until it lands in the file).
+    pub fn persist_identity(&self) {
+        self.settings.save();
     }
 
     /// Init audio (skipped in headless capture modes).
@@ -1667,9 +1688,33 @@ impl App {
     }
 
     /// Render-side bookkeeping after any sim step (SP or lockstep).
+    /// Report a ranked result once and schedule a rating refresh for the
+    /// end screen (delayed so the opponent's confirming report can land).
+    pub(crate) fn report_ranked(&mut self, winner_slot: u8) {
+        if self.mm_reported {
+            return;
+        }
+        let Some(code) = self.mm_code.clone() else { return };
+        self.mm_reported = true;
+        crate::relay::report_result_async(
+            self.settings.relay_url.clone(),
+            code,
+            self.settings.player_id.clone(),
+            winner_slot,
+        );
+        self.mm_rating_rx = Some(crate::relay::fetch_rating_async_delayed(
+            self.settings.relay_url.clone(),
+            self.settings.player_id.clone(),
+            2500,
+        ));
+    }
+
     pub(crate) fn step_post(&mut self) {
         if self.state.winner.is_some() {
             self.save_replay();
+            if let Some(w) = self.state.winner {
+                self.report_ranked(w);
+            }
         }
         self.facings.resize(self.state.entities.len(), 2);
         self.recoil.resize(self.state.entities.len(), 0.0);
@@ -2100,8 +2145,20 @@ impl App {
 
         // Automated MP smoke driver.
         if let Some(role) = self.mp_auto.clone() {
-            if self.mp.is_none() && self.mp_waiting.is_none() {
-                if let Some(code) = role.strip_prefix("host-pub:") {
+            if self.mp.is_none() && self.mp_waiting.is_none() && self.mm_queue.is_none() {
+                if let Some(suffix) = role.strip_prefix("queue:") {
+                    // Ranked E2E: fresh identity per process so the
+                    // matchmaker sees two distinct players.
+                    let id = format!("qa{}{}", suffix, std::process::id());
+                    self.settings.player_id = id.clone();
+                    println!("mm queue as {id}");
+                    self.mm_queue = Some(crate::relay::find_match_async(
+                        self.settings.relay_url.clone(),
+                        id,
+                        format!("QA {suffix}"),
+                        0,
+                    ));
+                } else if let Some(code) = role.strip_prefix("host-pub:") {
                     let (shown, rx) = crate::relay::host_relay_async_full(
                         self.settings.relay_url.clone(),
                         code.to_string(),
@@ -2193,6 +2250,52 @@ impl App {
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.mp_waiting = None;
                 }
+            }
+        }
+
+        // Ranked queue events.
+        if let Some(rx) = &self.mm_queue {
+            use crate::relay::QueueEvent;
+            match rx.try_recv() {
+                Ok(QueueEvent::Queued { mmr, games }) => {
+                    self.mm_rating = Some((mmr, games));
+                    self.mm_status = format!("IN QUEUE  MMR {mmr}");
+                }
+                Ok(QueueEvent::Searching { tol, waited_s }) => {
+                    self.mm_status =
+                        format!("SEARCHING {waited_s}S  RANGE +-{tol} MMR");
+                }
+                Ok(QueueEvent::Matched { opp_name, opp_mmr }) => {
+                    self.mm_status = format!("FOUND: {opp_name} ({opp_mmr})  CONNECTING...");
+                }
+                Ok(QueueEvent::Started(Ok((started, code)))) => {
+                    self.mm_queue = None;
+                    if self.mp_auto.is_some() {
+                        println!("mm matched code {code}");
+                    }
+                    self.mm_code = Some(code);
+                    self.mm_reported = false;
+                    self.start_mp_game(started);
+                }
+                Ok(QueueEvent::Started(Err(e))) => {
+                    self.mm_queue = None;
+                    self.mm_status.clear();
+                    self.mp_error = Some(format!("MATCHMAKING FAILED: {e}"));
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.mm_queue = None;
+                    self.mm_status.clear();
+                }
+            }
+        }
+        // Rating for the FIND MATCH row.
+        if let Some(rx) = &self.mm_rating_rx {
+            if let Ok(got) = rx.try_recv() {
+                if got.is_some() {
+                    self.mm_rating = got;
+                }
+                self.mm_rating_rx = None;
             }
         }
 

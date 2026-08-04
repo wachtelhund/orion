@@ -180,3 +180,219 @@ pub fn join_relay_async(base: String, code: String, my_race: u8) -> Receiver<io:
     });
     rx
 }
+
+// ------------------------------------------------------------- ranked ----
+
+/// Events streamed back to the UI while FIND MATCH runs.
+pub enum QueueEvent {
+    Queued { mmr: i32, games: u32 },
+    Searching { tol: i32, waited_s: u32 },
+    Matched { opp_name: String, opp_mmr: i32 },
+    /// Terminal: the lockstep session (plus the ranked match code used for
+    /// result reporting), or the error that ended the search.
+    Started(io::Result<(Started, String)>),
+}
+
+/// Round-trip time to the relay edge, for the latency half of matchmaking.
+fn measure_rtt(base: &str) -> u32 {
+    let url = format!("{}/ping", http_base(base));
+    let mut best = 2000u32;
+    for _ in 0..2 {
+        let t0 = std::time::Instant::now();
+        if ureq::get(&url)
+            .timeout(Duration::from_secs(2))
+            .call()
+            .is_ok()
+        {
+            best = best.min(t0.elapsed().as_millis() as u32);
+        }
+    }
+    if best == 2000 {
+        200 // probe failed: assume average, let the server decide
+    } else {
+        best
+    }
+}
+
+/// Queue for a ranked match. The whole lifecycle runs in one thread:
+/// measure RTT -> hold a /queue socket -> on match, run the ordinary lobby
+/// handshake (host or join as told) -> emit Started.
+pub fn find_match_async(
+    base: String,
+    id: String,
+    name: String,
+    race: u8,
+) -> Receiver<QueueEvent> {
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let rtt = measure_rtt(&base);
+        let clean: String = name
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == ' ')
+            .take(16)
+            .collect();
+        let url = format!(
+            "{}/queue?id={}&name={}&race={}&rtt={}",
+            base.trim_end_matches('/'),
+            id,
+            clean.replace(' ', "%20"),
+            race,
+            rtt
+        );
+        let req = match url.clone().into_client_request() {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = tx.send(QueueEvent::Started(Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    e.to_string(),
+                ))));
+                return;
+            }
+        };
+        let mut socket = match tungstenite::connect(req) {
+            Ok((s, _)) => s,
+            Err(e) => {
+                let _ = tx.send(QueueEvent::Started(Err(io::Error::new(
+                    io::ErrorKind::ConnectionRefused,
+                    e.to_string(),
+                ))));
+                return;
+            }
+        };
+        // Wait for match. The server talks every few seconds; failing to
+        // forward an event means the UI cancelled — close and bail.
+        let (code, role, map) = loop {
+            match socket.read() {
+                Ok(Message::Text(t)) => {
+                    let Ok(v) = serde_json::from_str::<serde_json::Value>(t.as_str()) else {
+                        continue;
+                    };
+                    match v["type"].as_str() {
+                        Some("queued") => {
+                            let ev = QueueEvent::Queued {
+                                mmr: v["mmr"].as_i64().unwrap_or(1200) as i32,
+                                games: v["games"].as_u64().unwrap_or(0) as u32,
+                            };
+                            if tx.send(ev).is_err() {
+                                let _ = socket.close(None);
+                                return;
+                            }
+                        }
+                        Some("searching") => {
+                            let ev = QueueEvent::Searching {
+                                tol: v["tol"].as_i64().unwrap_or(100) as i32,
+                                waited_s: v["waited_s"].as_u64().unwrap_or(0) as u32,
+                            };
+                            if tx.send(ev).is_err() {
+                                let _ = socket.close(None);
+                                return;
+                            }
+                        }
+                        Some("match") => {
+                            let ev = QueueEvent::Matched {
+                                opp_name: v["opp_name"].as_str().unwrap_or("?").to_string(),
+                                opp_mmr: v["opp_mmr"].as_i64().unwrap_or(0) as i32,
+                            };
+                            let _ = tx.send(ev);
+                            break (
+                                v["code"].as_str().unwrap_or("").to_string(),
+                                v["role"].as_str().unwrap_or("join").to_string(),
+                                v["map"].as_str().unwrap_or("meridian").to_string(),
+                            );
+                        }
+                        _ => {
+                            let _ = tx.send(QueueEvent::Started(Err(io::Error::new(
+                                io::ErrorKind::Other,
+                                "matchmaker rejected the queue",
+                            ))));
+                            return;
+                        }
+                    }
+                }
+                Ok(Message::Close(_)) | Err(_) => {
+                    let _ = tx.send(QueueEvent::Started(Err(io::Error::new(
+                        io::ErrorKind::ConnectionAborted,
+                        "matchmaking connection lost",
+                    ))));
+                    return;
+                }
+                Ok(_) => {}
+            }
+        };
+        // Reconnect through the normal lobby relay for the actual game.
+        let result = if role == "host" {
+            let url = format!("{}&private=1", ws_url(&base, &code, "host"));
+            ws_net(&url)
+                .and_then(|net| host_handshake(net, race, orion_sim::net::fresh_seed(), &map))
+        } else {
+            // The host needs a beat to open the lobby; retry briefly.
+            let mut last = io::Error::new(io::ErrorKind::NotFound, "host never arrived");
+            let mut ok = None;
+            for _ in 0..8 {
+                std::thread::sleep(Duration::from_millis(400));
+                match ws_net(&ws_url(&base, &code, "join"))
+                    .and_then(|net| join_handshake(net, race))
+                {
+                    Ok(s) => {
+                        ok = Some(s);
+                        break;
+                    }
+                    Err(e) => last = e,
+                }
+            }
+            ok.ok_or(last)
+        };
+        let _ = tx.send(QueueEvent::Started(result.map(|s| (s, code))));
+    });
+    rx
+}
+
+/// Fire-and-forget result report: both clients report, the matchmaker
+/// updates Elo when they agree (or on timeout with one report).
+pub fn report_result_async(base: String, code: String, id: String, winner_slot: u8) {
+    std::thread::spawn(move || {
+        let url = format!("{}/result", http_base(&base));
+        let _ = ureq::post(&url)
+            .timeout(Duration::from_secs(6))
+            .send_json(serde_json::json!({
+                "code": code,
+                "id": id,
+                "winner_slot": winner_slot,
+            }));
+    });
+}
+
+/// Current rating for the FIND MATCH row / end screen.
+pub fn fetch_rating_async(base: String, id: String) -> Receiver<Option<(i32, u32)>> {
+    fetch_rating_async_delayed(base, id, 0)
+}
+
+/// Delayed variant: the end screen waits a beat so the opponent's
+/// confirming report can land before we read the updated Elo.
+pub fn fetch_rating_async_delayed(
+    base: String,
+    id: String,
+    delay_ms: u64,
+) -> Receiver<Option<(i32, u32)>> {
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        if delay_ms > 0 {
+            std::thread::sleep(Duration::from_millis(delay_ms));
+        }
+        let url = format!("{}/rating?id={}", http_base(&base), id);
+        let got = ureq::get(&url)
+            .timeout(Duration::from_secs(5))
+            .call()
+            .ok()
+            .and_then(|r| r.into_string().ok())
+            .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok())
+            .map(|v| {
+                (
+                    v["mmr"].as_f64().unwrap_or(1200.0).round() as i32,
+                    v["games"].as_u64().unwrap_or(0) as u32,
+                )
+            });
+        let _ = tx.send(got);
+    });
+    rx
+}

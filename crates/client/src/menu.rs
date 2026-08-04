@@ -44,6 +44,8 @@ enum MenuAction {
     FocusName,
     FocusCode,
     CancelMp,
+    FindMatch,
+    CancelSearch,
     OpenReplays,
     PlayReplay(usize),
     Rebind(Action),
@@ -132,12 +134,28 @@ impl App {
                     .cloned()
                     .unwrap_or_default()
                     .to_uppercase();
-                if self.mp_waiting.is_some() {
+                if self.mm_queue.is_some() {
+                    // Ranked search in progress: status + cancel.
+                    stack(
+                        vec![
+                            (self.mm_status.clone(), MenuAction::CancelSearch),
+                            ("CANCEL SEARCH".into(), MenuAction::CancelSearch),
+                        ],
+                        h * 0.55,
+                    );
+                } else if self.mp_waiting.is_some() {
                     stack(vec![("CANCEL".into(), MenuAction::CancelMp)], h * 0.64);
                 } else {
                     let name_marker = if self.name_focus { "_" } else { "" };
                     let code_marker = if self.name_focus { "" } else { "_" };
+                    let find = match self.mm_rating {
+                        Some((mmr, games)) => {
+                            format!("FIND MATCH  (MMR {mmr} - {games} GAMES)")
+                        }
+                        None => "FIND MATCH".to_string(),
+                    };
                     let mut rows = vec![
+                        (find, MenuAction::FindMatch),
                         (
                             format!("NAME: {}{}", self.settings.player_name, name_marker),
                             MenuAction::FocusName,
@@ -446,7 +464,15 @@ impl App {
         match action {
             MenuAction::OpenDifficulty => self.page = MenuPage::Difficulty,
             MenuAction::StartGame(d) => self.start_game(d),
-            MenuAction::OpenMultiplayer => self.page = MenuPage::Multiplayer,
+            MenuAction::OpenMultiplayer => {
+                self.page = MenuPage::Multiplayer;
+                if !self.settings.relay_url.is_empty() {
+                    self.mm_rating_rx = Some(crate::relay::fetch_rating_async(
+                        self.settings.relay_url.clone(),
+                        self.settings.player_id.clone(),
+                    ));
+                }
+            }
             MenuAction::OpenSettings => {
                 self.page = MenuPage::Settings { from_game: self.in_game };
             }
@@ -461,8 +487,16 @@ impl App {
             MenuAction::Resume => self.page = MenuPage::None,
             MenuAction::QuitToMenu => {
                 self.save_replay(); // abandoned games are replays too
+                // Leaving a ranked game with no winner is a forfeit — unless
+                // the opponent already disconnected, in which case it's ours.
+                if self.state.winner.is_none() && self.mm_code.is_some() {
+                    let peer_gone = self.mp.as_ref().is_some_and(|m| m.disconnected);
+                    let w = if peer_gone { self.human } else { 1 - self.human };
+                    self.report_ranked(w);
+                }
                 self.in_game = false;
                 self.mp = None; // closes the socket; peer sees a disconnect
+                self.mm_code = None;
                 self.replay = None;
                 self.page = MenuPage::MainRoot;
             }
@@ -532,6 +566,23 @@ impl App {
             }
             MenuAction::FocusCode => {
                 self.name_focus = false;
+            }
+            MenuAction::FindMatch => {
+                self.mp_error = None;
+                self.settings.save(); // persist name + identity
+                self.mm_status = "CONNECTING TO MATCHMAKER...".into();
+                self.mm_queue = Some(crate::relay::find_match_async(
+                    self.settings.relay_url.clone(),
+                    self.settings.player_id.clone(),
+                    self.settings.player_name.clone(),
+                    self.chosen_race,
+                ));
+            }
+            MenuAction::CancelSearch => {
+                // Dropping the receiver ends the queue thread on its next
+                // server message; the socket close removes us server-side.
+                self.mm_queue = None;
+                self.mm_status.clear();
             }
             MenuAction::CancelMp => {
                 self.mp_waiting = None;
