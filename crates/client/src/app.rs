@@ -142,6 +142,8 @@ pub struct App {
     pub mm_reported: bool,
     pub mm_rating: Option<(i32, u32)>,
     pub mm_rating_rx: Option<std::sync::mpsc::Receiver<Option<(i32, u32)>>>,
+    /// Alternates ack variations so spam clicks don't grate.
+    pub ack_flip: bool,
     /// Newer release on GitHub: (tag, html url).
     pub update: Option<(String, String)>,
     pub update_rx: Option<std::sync::mpsc::Receiver<Option<(String, String)>>>,
@@ -302,6 +304,7 @@ impl App {
             mm_reported: false,
             mm_rating: None,
             mm_rating_rx: None,
+            ack_flip: false,
             update: None,
             update_rx: Some(crate::relay::check_update_async()),
             replay: None,
@@ -367,6 +370,33 @@ impl App {
         if let Some(a) = &self.audio {
             a.play(s);
         }
+    }
+
+    /// Selection acknowledgment: race-flavored blip for the active thing.
+    pub(crate) fn ack_select(&mut self) {
+        self.ack_flip = !self.ack_flip;
+        let Some(id) = self.active_entity() else { return };
+        let Some(e) = self.state.get(id) else { return };
+        if e.owner != self.human {
+            return;
+        }
+        let s = match e.kind {
+            EntityKind::Building => Sfx::SelBuilding,
+            EntityKind::Unit => {
+                let d = &self.state.data.units[e.def as usize];
+                if d.race == 1 {
+                    if self.ack_flip { Sfx::SelKyth1 } else { Sfx::SelKyth2 }
+                } else if d.harvester {
+                    Sfx::SelVcWorker
+                } else if self.ack_flip {
+                    Sfx::SelVc1
+                } else {
+                    Sfx::SelVc2
+                }
+            }
+            EntityKind::Resource => return,
+        };
+        self.sfx(s);
     }
 
     /// Reject a player action with a flashing warning + error sound.
@@ -1167,6 +1197,7 @@ impl App {
                             },
                         ));
                         self.ping(wx, wy, 1);
+                        self.sfx(Sfx::AckAttack);
                     }
                     self.mode = Mode::Normal;
                 }
@@ -1282,6 +1313,7 @@ impl App {
         if picked.is_empty() && !is_click {
             return;
         }
+        let had_pick = !picked.is_empty();
         if self.shift {
             for id in picked {
                 if !self.selection.contains(&id) {
@@ -1292,6 +1324,9 @@ impl App {
             self.selection = picked;
         }
         self.subgroup_offset = 0;
+        if had_pick {
+            self.ack_select();
+        }
     }
 
     fn right_click(&mut self) {
@@ -1363,6 +1398,7 @@ impl App {
                         queued,
                     }));
                     self.ping(wx, wy, 2);
+                    self.sfx(Sfx::AckGather);
                 }
                 if !rest.is_empty() {
                     self.pending.push((self.human, Command::Move {
@@ -1376,6 +1412,7 @@ impl App {
             if e.owner != self.human && e.owner != NEUTRAL {
                 self.pending.push((self.human, Command::AttackTarget { units, target: tid }));
                 self.ping(wx, wy, 1);
+                self.sfx(Sfx::AckAttack);
                 return;
             }
             // Right-click own unfinished building with a builder: resume it.
@@ -1397,13 +1434,15 @@ impl App {
                         }));
                     }
                     self.ping(wx, wy, 2);
+                    self.sfx(Sfx::AckBuild);
                     return;
                 }
             }
         }
         self.pending.push((self.human, Command::Move { units, target: fx(wx, wy), queued }));
         self.ping(wx, wy, 0);
-        self.sfx(Sfx::Ping);
+        self.ack_flip = !self.ack_flip;
+        self.sfx(if self.ack_flip { Sfx::AckMove1 } else { Sfx::AckMove2 });
     }
 
     pub(crate) fn ping(&mut self, wx: f32, wy: f32, kind: i32) {
@@ -1487,7 +1526,7 @@ impl App {
             site,
             queued,
         }));
-        self.sfx(Sfx::Click);
+        self.sfx(Sfx::AckBuild);
     }
 
     /// Train from the least-queued selected building of the active type —

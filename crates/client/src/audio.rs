@@ -24,9 +24,24 @@ pub enum Sfx {
     Storm,
     Alarm,
     Ping,
+    // Selection acknowledgments: "yes commander?" — radio blips for the
+    // Vanguard Combine, organic chirps for the Kyth. Two variations each
+    // so spam-clicking doesn't grate.
+    SelVc1,
+    SelVc2,
+    SelVcWorker,
+    SelKyth1,
+    SelKyth2,
+    SelBuilding,
+    // Command acknowledgments: "moving out" / "engaging" / "on it".
+    AckMove1,
+    AckMove2,
+    AckAttack,
+    AckGather,
+    AckBuild,
 }
 
-pub const ALL_SFX: [Sfx; 12] = [
+pub const ALL_SFX: [Sfx; 23] = [
     Sfx::Click,
     Sfx::Error,
     Sfx::Shot,
@@ -39,6 +54,17 @@ pub const ALL_SFX: [Sfx; 12] = [
     Sfx::Storm,
     Sfx::Alarm,
     Sfx::Ping,
+    Sfx::SelVc1,
+    Sfx::SelVc2,
+    Sfx::SelVcWorker,
+    Sfx::SelKyth1,
+    Sfx::SelKyth2,
+    Sfx::SelBuilding,
+    Sfx::AckMove1,
+    Sfx::AckMove2,
+    Sfx::AckAttack,
+    Sfx::AckGather,
+    Sfx::AckBuild,
 ];
 
 pub struct Audio {
@@ -154,6 +180,39 @@ fn synth_sfx(s: Sfx) -> Vec<f32> {
         Sfx::Alarm => render(0.5, |t, total, _| {
             let hz = if (t * 8.0) as i32 % 2 == 0 { 660.0 } else { 495.0 };
             square(t, hz) * 0.2 * env(t, 0.01, total)
+        }, &mut rng),
+        // VC selection: crisp two-tone radio blips with a click of static.
+        Sfx::SelVc1 => melody(&[(740.0, 0.05), (988.0, 0.07)], 0.16),
+        Sfx::SelVc2 => melody(&[(660.0, 0.05), (880.0, 0.05), (988.0, 0.05)], 0.15),
+        Sfx::SelVcWorker => melody(&[(523.0, 0.06), (659.0, 0.08)], 0.13),
+        // Kyth selection: warbling organic chirps.
+        Sfx::SelKyth1 => render(0.16, |t, total, _| {
+            let hz = 620.0 + (t * 34.0).sin() * 160.0 + t * 500.0;
+            (sine(t, hz) * 0.7 + sine(t, hz * 1.99) * 0.3) * 0.3 * env(t, 0.01, total)
+        }, &mut rng),
+        Sfx::SelKyth2 => render(0.18, |t, total, _| {
+            let hz = 840.0 - t * 900.0 + (t * 55.0).sin() * 90.0;
+            sine(t, hz) * 0.32 * env(t, 0.012, total)
+        }, &mut rng),
+        // Building select: low mechanical thunk + hum.
+        Sfx::SelBuilding => render(0.14, |t, total, _| {
+            (sine(t, 180.0) * 0.5 + square(t, 90.0) * 0.12 + sine(t, 361.0) * 0.2)
+                * 0.4
+                * env(t, 0.004, total)
+        }, &mut rng),
+        // Command acks.
+        Sfx::AckMove1 => melody(&[(587.0, 0.05), (784.0, 0.06)], 0.14),
+        Sfx::AckMove2 => melody(&[(659.0, 0.04), (740.0, 0.04), (880.0, 0.05)], 0.14),
+        Sfx::AckAttack => render(0.17, |t, total, _| {
+            let hz = if t < 0.06 { 392.0 } else { 587.0 };
+            (square(t, hz) * 0.5 + saw(t, hz * 0.5) * 0.3) * 0.26 * env(t, 0.004, total)
+        }, &mut rng),
+        Sfx::AckGather => melody(&[(784.0, 0.04), (659.0, 0.06)], 0.13),
+        Sfx::AckBuild => render(0.13, |t, total, _| {
+            // Quick ratchet: three ticks rising.
+            let k = (t * 24.0) as i32;
+            let hz = 500.0 + k as f32 * 160.0;
+            square(t, hz) * 0.22 * env(t, 0.003, total) * if t * 24.0 % 1.0 < 0.6 { 1.0 } else { 0.2 }
         }, &mut rng),
         Sfx::Ping => render(0.08, |t, total, _| {
             sine(t, 1200.0) * 0.18 * env(t, 0.002, total)
