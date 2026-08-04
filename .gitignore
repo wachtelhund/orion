@@ -1,3 +1,7 @@
 /target
 **/*.rs.bk
 .DS_Store
+
+# wrangler tooling cache + local secrets (relay/)
+.wrangler/
+.dev.vars
