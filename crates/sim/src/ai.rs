@@ -80,6 +80,8 @@ pub struct Bot {
     /// against (and between) bots vary run to run.
     pub style: u64,
     last_attack_tick: u32,
+    /// The one-time worker scout has been sent.
+    scouted: bool,
 }
 
 impl Bot {
@@ -88,11 +90,11 @@ impl Bot {
     }
 
     pub fn with(player: u8, difficulty: Difficulty) -> Bot {
-        Bot { player, difficulty, style: 0, last_attack_tick: 0 }
+        Bot { player, difficulty, style: 0, last_attack_tick: 0, scouted: false }
     }
 
     pub fn with_style(player: u8, difficulty: Difficulty, style: u64) -> Bot {
-        Bot { player, difficulty, style, last_attack_tick: 0 }
+        Bot { player, difficulty, style, last_attack_tick: 0, scouted: false }
     }
 
     pub fn think(&mut self, s: &State) -> Vec<(u8, Command)> {
@@ -107,6 +109,17 @@ impl Bot {
         prm.attack_supply = (prm.attack_supply + esc).min(36);
         if s.tick > 24 * 60 * 12 {
             prm.reattack_interval /= 2;
+        }
+        // Past 13 minutes: permanent aggression; past 16: total commitment.
+        // The map mines out around minute 15 — whatever army remains must
+        // decide the game instead of running out the clock.
+        if s.tick > 24 * 60 * 13 {
+            prm.attack_supply = prm.attack_supply.min(16);
+            prm.reattack_interval = 24 * 8;
+            prm.mineral_buffer = 0;
+        }
+        if s.tick > 24 * 60 * 16 {
+            prm.attack_supply = 4;
         }
         // Phase-shift think ticks by style so two bots' decision points
         // interleave differently per game — decorrelates mirror matches.
@@ -160,6 +173,8 @@ impl Bot {
         let mut gas_workers = 0usize;
         let mut army: Vec<EntityId> = Vec::new();
         let mut army_supply = 0u32;
+        let mut siegers: Vec<u32> = Vec::new();
+        let mut casters: Vec<u32> = Vec::new();
         let mut hq: Option<u32> = None;
         let mut barracks: Vec<u32> = Vec::new();
         let mut forge: Vec<u32> = Vec::new();
@@ -190,8 +205,15 @@ impl Bot {
                             _ => {}
                         }
                     } else {
+                        let d = &s.data.units[e.def as usize];
                         army.push(s.id_of(i as u32));
-                        army_supply += s.data.units[e.def as usize].supply;
+                        army_supply += d.supply;
+                        if d.weapon_siege.is_some() {
+                            siegers.push(i as u32);
+                        }
+                        if d.energy_max > 0 {
+                            casters.push(i as u32);
+                        }
                     }
                 }
                 EntityKind::Building => {
@@ -277,10 +299,38 @@ impl Bot {
             }
         }
 
-        // ---- army production: each production building trains the most
-        // expensive combat unit it can afford right now ----
+        // ---- casters: one at 16 army supply, a second at 28 ----
         let mut gas_left = gas;
         let mut min_left = minerals;
+        let caster_cap = if army_supply >= 28 {
+            2
+        } else {
+            (army_supply >= 16) as usize
+        };
+        if casters.len() < caster_cap {
+            'caster: for &b in barracks.iter().chain(forge.iter()) {
+                let e = &s.entities[b as usize];
+                if e.queue.len() >= 2 {
+                    continue;
+                }
+                for &u in &s.data.buildings[e.def as usize].trains {
+                    let d = &s.data.units[u as usize];
+                    if d.energy_max > 0
+                        && s.requirement_met(p, d.requires)
+                        && min_left >= d.cost_minerals
+                        && gas_left >= d.cost_gas
+                    {
+                        min_left -= d.cost_minerals;
+                        gas_left -= d.cost_gas;
+                        cmds.push(Command::Train { building: s.id_of(b), unit: u });
+                        break 'caster;
+                    }
+                }
+            }
+        }
+
+        // ---- army production: each production building trains the most
+        // expensive combat unit it can afford right now ----
         for &b in barracks.iter().chain(forge.iter()) {
             let e = &s.entities[b as usize];
             if e.queue.len() >= 2 {
@@ -333,6 +383,121 @@ impl Bot {
             self.last_attack_tick = s.tick;
         }
 
+        // ---- combat micro: siege positioning + storms; fog-honest (only
+        // reacts to enemies the player can actually see) ----
+        let visible_enemies: Vec<(FxVec2, bool)> = s
+            .entities
+            .iter()
+            .filter(|e| {
+                e.alive
+                    && e.owner != p
+                    && e.owner != crate::state::NEUTRAL
+                    && e.kind != EntityKind::Resource
+                    && s.fog[p as usize].visible(&s.map, TilePos::of(e.pos))
+            })
+            .map(|e| (e.pos, e.kind == EntityKind::Unit))
+            .collect();
+
+        // Siege micro: deploy inside working range, pack up when the field
+        // is empty. Hysteresis (+2 tiles on the way out) avoids flapping.
+        for &t in &siegers {
+            let e = &s.entities[t as usize];
+            if e.transform != 0 {
+                continue;
+            }
+            let w = s.data.units[e.def as usize].weapon_siege.as_ref().unwrap();
+            let max_sq = (w.range.0 as i64) * (w.range.0 as i64);
+            let min_sq = (w.min_range.0 as i64) * (w.min_range.0 as i64);
+            let out_r = w.range + Fx::from_int(2);
+            let out_sq = (out_r.0 as i64) * (out_r.0 as i64);
+            let in_band = visible_enemies.iter().any(|&(pos, _)| {
+                let d = dist_sq_raw(e.pos, pos);
+                d <= max_sq && d > min_sq
+            });
+            let any_near = visible_enemies
+                .iter()
+                .any(|&(pos, _)| dist_sq_raw(e.pos, pos) <= out_sq);
+            if !e.sieged && in_band {
+                cmds.push(Command::Siege { units: vec![s.id_of(t)] });
+            } else if e.sieged && !any_near {
+                cmds.push(Command::Siege { units: vec![s.id_of(t)] });
+            }
+        }
+
+        // Storm the biggest visible clump in cast range: at least 3 enemy
+        // units, minus penalty for own units in the blast, and never on top
+        // of an active storm (they no longer stack).
+        let storm_r_sq = (crate::STORM_RADIUS.0 as i64) * (crate::STORM_RADIUS.0 as i64);
+        let reach = crate::STORM_CAST_RANGE + Fx::from_int(3);
+        let reach_sq = (reach.0 as i64) * (reach.0 as i64);
+        for &c in &casters {
+            let e = &s.entities[c as usize];
+            if (e.energy as u16) < crate::STORM_COST {
+                continue;
+            }
+            if matches!(e.order, Order::Cast { .. }) {
+                continue;
+            }
+            let own_units: Vec<FxVec2> = s
+                .entities
+                .iter()
+                .filter(|o| o.alive && o.owner == p && o.kind == EntityKind::Unit)
+                .map(|o| o.pos)
+                .collect();
+            let mut best: Option<(i32, i64, FxVec2)> = None;
+            for &(pos, is_unit) in &visible_enemies {
+                if !is_unit || dist_sq_raw(e.pos, pos) > reach_sq {
+                    continue;
+                }
+                if s.storms.iter().any(|st| dist_sq_raw(st.pos, pos) <= storm_r_sq) {
+                    continue;
+                }
+                let enemies = visible_enemies
+                    .iter()
+                    .filter(|&&(q, u)| u && dist_sq_raw(pos, q) <= storm_r_sq)
+                    .count() as i32;
+                let friendlies = own_units
+                    .iter()
+                    .filter(|&&q| dist_sq_raw(pos, q) <= storm_r_sq)
+                    .count() as i32;
+                let score = enemies - 2 * friendlies;
+                if score >= 3 {
+                    let d = dist_sq_raw(e.pos, pos);
+                    if best.map_or(true, |(bs, bd, _)| (score, -(d as i64)) > (bs, -(bd as i64)))
+                    {
+                        best = Some((score, d, pos));
+                    }
+                }
+            }
+            if let Some((_, _, target)) = best {
+                cmds.push(Command::Cast { caster: s.id_of(c), target });
+            }
+        }
+
+        // ---- one-time worker scout (~80s, style-jittered): peek at the
+        // enemy main, come home ----
+        if !self.scouted
+            && s.tick >= 24 * 80 + (self.style % 13) as u32 * 24
+            && workers.len() >= 10
+        {
+            if let Some(&w) = mineral_workers.last() {
+                let enemy_start = s.map.starts[(1 - p as usize).min(s.map.starts.len() - 1)];
+                cmds.push(Command::Move {
+                    units: vec![s.id_of(w)],
+                    target: enemy_start.center(),
+                    queued: false,
+                });
+                if let Some(hq_idx) = hq {
+                    cmds.push(Command::Move {
+                        units: vec![s.id_of(w)],
+                        target: s.entities[hq_idx as usize].pos,
+                        queued: true,
+                    });
+                }
+                self.scouted = true;
+            }
+        }
+
         cmds.into_iter().map(|c| (p, c)).collect()
     }
 
@@ -345,14 +510,59 @@ impl Bot {
         let enemy = s.map.starts[(1 - self.player as usize).min(s.map.starts.len() - 1)];
         let sx: i32 = if enemy.x >= hq_tile.x { 1 } else { -1 };
         let sy: i32 = if enemy.y >= hq_tile.y { 1 } else { -1 };
+        // Mirroring a REGION: the flipped scan must also shift the origin
+        // by the footprint, or the two players' candidate sites are off by
+        // (fw-1, fh-1) and the openings diverge.
+        let (fw, fh) = s.data.buildings[def as usize].footprint;
+        let ox = if sx < 0 { -(fw - 1) } else { 0 };
+        let oy = if sy < 0 { -(fh - 1) } else { 0 };
+        // Livability margins: never build touching the HQ ring (deposit
+        // approaches stay open) and keep 2 tiles clear of live resources
+        // (mining lanes). The bot once walled its own Hive in and starved.
+        let hq_e = s
+            .entities
+            .iter()
+            .find(|e| {
+                e.alive
+                    && e.owner == self.player
+                    && e.kind == EntityKind::Building
+                    && s.data.buildings[e.def as usize].headquarters
+            });
+        let hq_zone = hq_e.map(|e| {
+            let (hw, hh) = s.data.buildings[e.def as usize].footprint;
+            (s.footprint_origin(e.def, e.pos), hw, hh)
+        });
+        let site_ok = |site: TilePos| -> bool {
+            if let Some((ho, hw, hh)) = hq_zone {
+                // Overlap test of the site footprint against HQ+1 ring.
+                if site.x < ho.x + hw + 1
+                    && site.x + fw > ho.x - 1
+                    && site.y < ho.y + hh + 1
+                    && site.y + fh > ho.y - 1
+                {
+                    return false;
+                }
+            }
+            for e in &s.entities {
+                if e.alive && e.kind == EntityKind::Resource && e.amount > 0 {
+                    let rt = TilePos::of(e.pos);
+                    let cx = rt.x.clamp(site.x, site.x + fw - 1);
+                    let cy = rt.y.clamp(site.y, site.y + fh - 1);
+                    if (cx - rt.x).abs() <= 2 && (cy - rt.y).abs() <= 2 {
+                        return false;
+                    }
+                }
+            }
+            true
+        };
         for r in 3i32..14 {
             for dy in -r..=r {
                 for dx in -r..=r {
                     if dx.abs() != r && dy.abs() != r {
                         continue;
                     }
-                    let site = TilePos::new(hq_tile.x + dx * sx, hq_tile.y + dy * sy);
-                    if s.valid_building_site(def, site, Some(builder)) {
+                    let site = TilePos::new(hq_tile.x + dx * sx + ox, hq_tile.y + dy * sy + oy);
+                    if site_ok(site) && s.valid_building_site(def, site, Some(builder)) {
                         cmds.push(Command::Build {
                             worker: s.id_of(builder),
                             building: def,

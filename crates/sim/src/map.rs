@@ -209,7 +209,9 @@ pub fn meridian() -> Map {
     }
 
     // Mineral lines: 8 patches per main, arced around the HQ site.
-    const PATCH: i32 = 1500;
+    // 1000/patch mines out a single-base economy by ~minute 15 — turtle
+    // standoffs then resolve on remaining army instead of the game clock.
+    const PATCH: i32 = 1000;
     let line_nw = [(6, 4), (5, 6), (4, 8), (4, 10), (4, 12), (4, 14), (5, 16), (6, 18)];
     for &(x, y) in &line_nw {
         map.minerals.push((TilePos::new(x, y), PATCH));

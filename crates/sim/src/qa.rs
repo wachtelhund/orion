@@ -190,15 +190,31 @@ impl Validator {
                         && s.data.units[e.def as usize].harvester
                 })
                 .count();
+            let depots: Vec<_> = s
+                .entities
+                .iter()
+                .filter(|e| {
+                    e.alive
+                        && e.owner == p as u8
+                        && e.kind == EntityKind::Building
+                        && e.construction.is_none()
+                        && s.data.buildings[e.def as usize].deposit
+                })
+                .map(|e| e.pos)
+                .collect();
+            let has_depot = !depots.is_empty();
+            // Only live patches NEAR an own depot count: a mined-out main
+            // with idle workers is the designed endgame, not a stall.
+            let reach = crate::fixed::Fx::from_int(20);
+            let reach_sq = (reach.0 as i64) * (reach.0 as i64);
             let patches = s.entities.iter().any(|e| {
-                e.alive && e.kind == EntityKind::Resource && e.def == RES_MINERALS && e.amount > 0
-            });
-            let has_depot = s.entities.iter().any(|e| {
                 e.alive
-                    && e.owner == p as u8
-                    && e.kind == EntityKind::Building
-                    && e.construction.is_none()
-                    && s.data.buildings[e.def as usize].deposit
+                    && e.kind == EntityKind::Resource
+                    && e.def == RES_MINERALS
+                    && e.amount > 0
+                    && depots
+                        .iter()
+                        .any(|&d| crate::fixed::dist_sq_raw(d, e.pos) <= reach_sq)
             });
             if workers >= 3 && patches && has_depot {
                 self.econ_flagged[p] = true;

@@ -2,7 +2,7 @@
 //! bit-identical at every tick. This is the property lockstep multiplayer
 //! stands on. If this test breaks, nothing else matters until it's fixed.
 
-use orion_sim::ai::Bot;
+use orion_sim::ai::{Bot, Difficulty};
 use orion_sim::map::meridian;
 use orion_sim::{Command, FxVec2, GameData, State};
 
@@ -99,13 +99,19 @@ fn bot_vs_bot_is_deterministic() {
 }
 
 /// Two symmetric bots must produce a complete game: economy, army, attack,
-/// and a decisive winner within 15 minutes. Doubles as a balance canary —
+/// and a decisive winner within 20 minutes (the map mines out ~15 and the
+/// bots go all-in at 16, so 20 is generous). Doubles as a balance canary —
 /// if a change turns bot-vs-bot into a stalemate, this fails.
 #[test]
 fn full_bot_game_reaches_a_winner() {
     let mut s = build_state(7);
-    let mut bots = [Bot::new(0), Bot::new(1)];
-    for tick in 0..24 * 60 * 15 {
+    // Distinct personalities: two identical styles on the now point-
+    // symmetric sim play a literal mirror and can never win.
+    let mut bots = [
+        Bot::with_style(0, Difficulty::Normal, 3),
+        Bot::with_style(1, Difficulty::Normal, 11),
+    ];
+    for tick in 0..24 * 60 * 20 {
         let _ = tick;
         let mut cmds = Vec::new();
         for bot in &mut bots {
@@ -123,7 +129,7 @@ fn full_bot_game_reaches_a_winner() {
             return;
         }
     }
-    panic!("no winner after 15 minutes of bot-vs-bot");
+    panic!("no winner after 20 minutes of bot-vs-bot");
 }
 
 /// Shift-queued builds must execute after the current gather trip — the
