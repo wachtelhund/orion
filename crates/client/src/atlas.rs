@@ -7,7 +7,7 @@
 
 use crate::font;
 
-pub const ATLAS: u32 = 4096;
+pub const ATLAS: u32 = 6144;
 
 /// Supersample factor for world sprites: canvas px per screen unit at
 /// zoom 1. At the default zoom (2 x DPI scale) a 4x sprite is texel-perfect
@@ -402,6 +402,8 @@ pub struct SpriteBook {
     /// [building_type][team]. 0-6 Vanguard, 7-13 Kyth (hive, spire, sapwell,
     /// warren, incubator, roost, cortex).
     pub buildings: Vec<Region>,
+    /// Bust portraits [unit_type][team] for the console portrait panel.
+    pub portraits: Vec<Region>,
     /// Building sprite heights in SCREEN units at zoom 1 (canvas px / scale).
     pub building_px_h: [f32; 14],
     // effects
@@ -437,6 +439,10 @@ impl SpriteBook {
 
     pub fn building(&self, b_type: usize, team: usize) -> Region {
         self.buildings[b_type * 2 + team]
+    }
+
+    pub fn portrait(&self, unit_type: usize, team: usize) -> Region {
+        self.portraits[unit_type * 2 + team]
     }
 
     pub fn glyph(&self, c: char) -> Option<Region> {
@@ -525,6 +531,14 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
                     units.push(p.place_s(&c, SS));
                 }
             }
+        }
+    }
+
+    // Bust portraits: [unit_type][team].
+    let mut portraits = Vec::new();
+    for unit_type in 0..16 {
+        for team in 0..2 {
+            portraits.push(p.place_s(&paint_portrait(unit_type, TEAMS[team]), 1.6));
         }
     }
 
@@ -749,6 +763,7 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
         rock_wall,
         units,
         buildings,
+        portraits,
         building_px_h,
         flash,
         spark,
@@ -2862,3 +2877,288 @@ fn star_flash() -> Canvas {
     c
 }
 
+
+// ------------------------------------------------------------- portraits ----
+//
+// Console bust portraits: head-and-shoulders closeups on a dark scanlined
+// backdrop with a team glow. 176x176, fit-to-box by the HUD.
+
+fn portrait_backdrop(c: &mut Canvas, team: [u8; 3]) {
+    for y in 0..176 {
+        for x in 0..176 {
+            let f = 0.5 + 0.5 * (y as f32 / 176.0);
+            let mut px = scale_rgb([18, 22, 32], f);
+            if y % 4 == 0 {
+                px = scale_rgb(px, 0.86);
+            }
+            let h = hash2(x, y, 71);
+            if h % 97 == 0 {
+                px = scale_rgb(px, 1.3);
+            }
+            c.set(x, y, rgba(px));
+        }
+    }
+    // Team halo behind the head.
+    c.glow(88.0, 74.0, 70.0, team, 0.25);
+    // Vignette corners.
+    for y in 0..176 {
+        for x in 0..176 {
+            let dx = (x as f32 - 88.0) / 88.0;
+            let dy = (y as f32 - 88.0) / 88.0;
+            let d = (dx * dx + dy * dy).sqrt();
+            if d > 0.85 {
+                let a = (((d - 0.85) / 0.35) * 160.0).min(160.0) as u8;
+                c.blend(x, y, [6, 8, 12, a]);
+            }
+        }
+    }
+}
+
+/// Armored VC shoulders across the frame bottom.
+fn vc_shoulders(c: &mut Canvas, team: [u8; 3]) {
+    plate(c, &[(8.0, 156.0), (54.0, 122.0), (122.0, 122.0), (168.0, 156.0), (168.0, 176.0), (8.0, 176.0)], GUNMETAL, 0.92);
+    plate(c, &[(4.0, 130.0), (52.0, 118.0), (58.0, 142.0), (10.0, 156.0)], STEEL_LIT, 0.9);
+    plate(c, &[(124.0, 118.0), (172.0, 130.0), (166.0, 156.0), (118.0, 142.0)], GUNMETAL, 0.82);
+    c.line(14.0, 138.0, 48.0, 128.0, 3.5, rgba(team));
+    c.line(128.0, 128.0, 162.0, 138.0, 3.5, rgba(team));
+    // Chest power light.
+    c.glow(88.0, 152.0, 10.0, team, 0.7);
+    c.rect(85, 146, 6, 12, rgba(scale_rgb(team, 1.25)));
+}
+
+/// VC helmet dome + jaw guard; returns visor band y.
+fn vc_helm(c: &mut Canvas, mat: [u8; 3]) -> f32 {
+    c.dome(88.0, 66.0, 40.0, 44.0, mat);
+    plate(c, &[(56.0, 92.0), (120.0, 92.0), (112.0, 118.0), (64.0, 118.0)], scale_rgb(mat, 0.85), 1.0);
+    c.poly(&[(56.0, 60.0), (88.0, 46.0), (120.0, 60.0), (114.0, 50.0), (88.0, 40.0), (62.0, 50.0)], rgba(scale_rgb(mat, 1.2)));
+    70.0
+}
+
+fn vc_visor(c: &mut Canvas, y: f32, color: [u8; 3], w: f32) {
+    c.poly(&[(88.0 - w, y - 5.0), (88.0 + w, y - 5.0), (88.0 + w - 4.0, y + 6.0), (88.0 - w + 4.0, y + 6.0)], rgba(color));
+    c.line(88.0 - w + 6.0, y - 2.0, 88.0 + w - 8.0, y - 2.0, 1.6, rgba(scale_rgb(color, 1.4)));
+    c.glow(88.0, y, w * 0.9, color, 0.5);
+}
+
+/// Kyth chitin head: plated wedge with scallop crown.
+fn kyth_head(c: &mut Canvas, wide: f32, tall: f32) {
+    c.dome(88.0, 76.0, wide, tall, CHITIN);
+    c.dome(88.0, 58.0, wide * 0.7, tall * 0.5, CHITIN_LIGHT);
+    scallop(c, 88.0, 62.0, wide * 0.62, wide * 0.8);
+    // Neck plates into the frame bottom.
+    c.dome(88.0, 150.0, wide * 1.2, 34.0, scale_rgb(CHITIN, 0.85));
+    scallop(c, 88.0, 140.0, wide * 0.9, wide);
+}
+
+fn kyth_eyes(c: &mut Canvas, n: i32, y: f32, spread: f32) {
+    for k in 0..n {
+        let x = 88.0 - spread * 0.5 + spread * k as f32 / (n - 1).max(1) as f32;
+        let yy = y + ((k * 7) % 3) as f32 * 2.0;
+        c.ellipse(x, yy, 3.5, 4.5, rgba(KYTH_GLOW));
+        c.set(x as i32, (yy - 1.0) as i32, rgba([230, 255, 200]));
+        c.glow(x, yy, 7.0, KYTH_GLOW, 0.5);
+    }
+}
+
+fn paint_portrait(unit_type: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(176, 176);
+    portrait_backdrop(&mut c, team);
+    match unit_type {
+        // Fabricator: hard-hat rig with goggles and a breather.
+        0 => {
+            vc_shoulders(&mut c, team);
+            let y = vc_helm(&mut c, [150, 124, 58]);
+            c.poly(&[(50.0, 42.0), (88.0, 28.0), (126.0, 42.0), (126.0, 52.0), (50.0, 52.0)], rgba([176, 146, 66]));
+            for gx in [-16.0f32, 16.0] {
+                c.ellipse(88.0 + gx, y, 11.0, 9.0, rgba([40, 44, 52]));
+                c.ellipse(88.0 + gx, y, 7.0, 6.0, rgba([120, 220, 240]));
+                c.set((86.0 + gx) as i32, (y - 2.0) as i32, rgba([220, 250, 255]));
+            }
+            c.rect(78, 96, 20, 12, rgba([70, 74, 84]));
+            for k in 0..3 {
+                c.rect(80 + k * 6, 98, 3, 8, rgba([44, 47, 55]));
+            }
+        }
+        // Trooper: classic visor slit.
+        1 => {
+            vc_shoulders(&mut c, team);
+            let y = vc_helm(&mut c, GUNMETAL);
+            vc_visor(&mut c, y, VISOR, 28.0);
+            c.rect(72, 100, 32, 6, rgba([50, 53, 62]));
+        }
+        // Vanguard: crest fin, burning orange visor.
+        2 => {
+            vc_shoulders(&mut c, team);
+            let y = vc_helm(&mut c, scale_rgb(GUNMETAL, 1.05));
+            c.poly(&[(84.0, 40.0), (92.0, 40.0), (96.0, 6.0), (80.0, 6.0)], rgba(team));
+            c.glow(88.0, 10.0, 10.0, team, 0.5);
+            vc_visor(&mut c, y, [255, 150, 70], 24.0);
+        }
+        // Breaker: commander with headset and raised goggles.
+        3 => {
+            vc_shoulders(&mut c, team);
+            let y = vc_helm(&mut c, [88, 92, 86]);
+            // Slim goggle band parked on the brow.
+            c.rect(64, 46, 48, 5, rgba([40, 42, 40]));
+            c.rect(70, 47, 10, 3, rgba([130, 140, 150]));
+            c.rect(96, 47, 10, 3, rgba([130, 140, 150]));
+            vc_visor(&mut c, y + 4.0, [150, 200, 230], 24.0);
+            c.dome(126.0, 78.0, 8.0, 10.0, [60, 64, 72]);
+            c.line(126.0, 88.0, 112.0, 102.0, 3.0, rgba([60, 64, 72]));
+        }
+        // Skywing: full canopy visor reflecting sky.
+        4 => {
+            vc_shoulders(&mut c, team);
+            let _ = vc_helm(&mut c, [96, 100, 110]);
+            c.dome(88.0, 68.0, 30.0, 32.0, [70, 160, 200]);
+            c.ellipse(78.0, 56.0, 12.0, 8.0, rgba([180, 235, 255]));
+            c.line(60.0, 80.0, 116.0, 80.0, 2.0, rgba([40, 90, 120]));
+            c.rect(70, 100, 36, 8, rgba([56, 60, 70]));
+        }
+        // Stormcaller: shadowed hood, glowing eyes, orb glint.
+        5 => {
+            let robe = [46, 48, 68];
+            plate(&mut c, &[(20.0, 176.0), (44.0, 116.0), (132.0, 116.0), (156.0, 176.0)], robe, 1.0);
+            // Peaked hood with a hanging cowl edge.
+            c.poly(&[(60.0, 118.0), (74.0, 44.0), (88.0, 26.0), (102.0, 44.0), (116.0, 118.0), (102.0, 126.0), (74.0, 126.0)], rgba(scale_rgb(robe, 1.25)));
+            c.line(74.0, 44.0, 62.0, 116.0, 2.5, rgba(scale_rgb(robe, 1.5)));
+            // Face void with burning eyes.
+            c.poly(&[(70.0, 112.0), (80.0, 56.0), (96.0, 56.0), (106.0, 112.0), (94.0, 120.0), (82.0, 120.0)], rgba([10, 10, 18]));
+            c.ellipse(81.0, 86.0, 2.5, 3.0, rgba([170, 245, 255]));
+            c.ellipse(95.0, 86.0, 2.5, 3.0, rgba([170, 245, 255]));
+            c.glow(88.0, 86.0, 18.0, VISOR, 0.75);
+            // Storm orb held at the shoulder.
+            c.glow(138.0, 138.0, 20.0, [64, 210, 230], 0.8);
+            c.ellipse(138.0, 138.0, 9.0, 9.0, rgba([64, 210, 230]));
+            c.ellipse(135.0, 135.0, 3.5, 3.5, rgba([230, 255, 255]));
+        }
+        // Weaver (12) handled below with Kyth.
+        // Bulwark: tech-priest helm with emitter antennae.
+        13 | 14 => {
+            vc_shoulders(&mut c, team);
+            let y = vc_helm(&mut c, [92, 98, 108]);
+            for ax in [-26.0f32, 26.0] {
+                c.line(88.0 + ax, 52.0, 88.0 + ax * 1.3, 20.0, 2.5, rgba(STEEL_LIT));
+                c.set((88.0 + ax * 1.3) as i32, 19, rgba(scale_rgb(team, 1.3)));
+                c.glow(88.0 + ax * 1.3, 18.0, 6.0, team, 0.7);
+            }
+            vc_visor(&mut c, y, scale_rgb(team, 1.1), 20.0);
+        }
+        // Kyth drone: friendly round eye cluster.
+        7 => {
+            kyth_head(&mut c, 42.0, 40.0);
+            kyth_eyes(&mut c, 4, 74.0, 40.0);
+            c.line(66.0, 100.0, 78.0, 112.0, 3.0, LEG);
+            c.line(110.0, 100.0, 98.0, 112.0, 3.0, LEG);
+        }
+        // Skitter: narrow head, big mandible blades.
+        8 => {
+            kyth_head(&mut c, 34.0, 42.0);
+            kyth_eyes(&mut c, 2, 70.0, 26.0);
+            for side in [-1.0f32, 1.0] {
+                let x0 = 88.0 + side * 26.0;
+                c.poly(&[(x0, 92.0), (x0 + side * 34.0, 120.0), (x0 + side * 18.0, 128.0), (x0 - side * 4.0, 102.0)], rgba(CHITIN_LIGHT));
+                c.line(x0 + side * 6.0, 98.0, x0 + side * 30.0, 120.0, 1.8, rgba(team));
+            }
+        }
+        // Spitter: tube snout with acid drip.
+        9 => {
+            kyth_head(&mut c, 40.0, 36.0);
+            kyth_eyes(&mut c, 2, 62.0, 34.0);
+            c.line(88.0, 84.0, 88.0, 116.0, 14.0, rgba(CHITIN_LIGHT));
+            c.dome(88.0, 120.0, 11.0, 8.0, [46, 36, 54]);
+            c.glow(88.0, 122.0, 12.0, KYTH_GLOW, 0.8);
+            c.ellipse(88.0, 122.0, 5.0, 4.0, rgba(scale_rgb(KYTH_GLOW, 1.2)));
+            c.set(88, 132, rgba(KYTH_GLOW));
+        }
+        // Ravager: crowned plates, tusked jaw.
+        10 => {
+            kyth_head(&mut c, 46.0, 42.0);
+            for k in 0..3 {
+                let x = 64.0 + k as f32 * 24.0;
+                c.poly(&[(x - 5.0, 42.0), (x, 16.0 + (k % 2) as f32 * 8.0), (x + 5.0, 42.0)], rgba(team));
+                c.glow(x, 20.0, 6.0, team, 0.4);
+            }
+            kyth_eyes(&mut c, 4, 72.0, 44.0);
+            for side in [-1.0f32, 1.0] {
+                c.poly(&[(88.0 + side * 30.0, 104.0), (88.0 + side * 44.0, 126.0), (88.0 + side * 22.0, 112.0)], rgba(CHITIN_LIGHT));
+            }
+        }
+        // Wisp: translucent bell, inner glow.
+        11 => {
+            c.dome(88.0, 78.0, 46.0, 42.0, MEMBRANE);
+            c.ellipse(88.0, 108.0, 50.0, 14.0, [142, 88, 70, 130]);
+            c.glow(88.0, 82.0, 38.0, KYTH_GLOW, 0.75);
+            c.ellipse(84.0, 82.0, 12.0, 13.0, rgba(scale_rgb(KYTH_GLOW, 1.15)));
+            c.ellipse(81.0, 78.0, 5.0, 5.5, rgba([235, 255, 210]));
+            c.dome(80.0, 52.0, 20.0, 12.0, CHITIN_LIGHT);
+            for k in 0..4 {
+                let x = 62.0 + k as f32 * 17.0;
+                c.line(x, 116.0, x - 6.0, 152.0, 2.5, rgba(scale_rgb(MEMBRANE, 0.75)));
+            }
+        }
+        // Weaver: crown slit blazing.
+        12 => {
+            kyth_head(&mut c, 40.0, 44.0);
+            c.rect(84, 34, 8, 26, rgba(scale_rgb(KYTH_GLOW, 1.15)));
+            c.glow(88.0, 44.0, 22.0, KYTH_GLOW, 0.7);
+            kyth_eyes(&mut c, 2, 80.0, 28.0);
+        }
+        // Burrower: spade head, soil scatter.
+        15 => {
+            kyth_head(&mut c, 44.0, 34.0);
+            c.poly(&[(50.0, 84.0), (88.0, 66.0), (126.0, 84.0), (110.0, 96.0), (66.0, 96.0)], rgba(CHITIN_LIGHT));
+            kyth_eyes(&mut c, 2, 76.0, 30.0);
+            for side in [-1.0f32, 1.0] {
+                c.poly(&[(88.0 + side * 34.0, 100.0), (88.0 + side * 52.0, 128.0), (88.0 + side * 28.0, 112.0)], rgba(CHITIN_LIGHT));
+                c.line(88.0 + side * 38.0, 104.0, 88.0 + side * 48.0, 124.0, 1.8, rgba(team));
+            }
+            for k in 0..6 {
+                let h = hash2(k, 3, 271);
+                let x = 40.0 + (h % 96) as f32;
+                let y = 150.0 + ((h >> 8) % 20) as f32;
+                c.dome(x, y, 4.0, 2.5, [58, 46, 36]);
+            }
+        }
+        // Skywing already 4; trooper default for anything unmapped.
+        _ => {
+            vc_shoulders(&mut c, team);
+            let y = vc_helm(&mut c, GUNMETAL);
+            vc_visor(&mut c, y, VISOR, 28.0);
+        }
+    }
+    c
+}
+
+#[cfg(test)]
+mod portrait_tests {
+    use super::*;
+
+    /// Dump all portraits as one PPM strip for eyeballing (run with
+    /// --ignored; writes to ORION_PORTRAIT_STRIP).
+    #[test]
+    #[ignore]
+    fn dump_portrait_strip() {
+        let Ok(path) = std::env::var("ORION_PORTRAIT_STRIP") else { return };
+        let (w, h) = (176 * 16, 176 * 2);
+        let mut px = vec![[10u8, 10, 14, 255]; w * h];
+        for ut in 0..16 {
+            for team in 0..2 {
+                let c = paint_portrait(ut, TEAMS[team]);
+                for y in 0..c.h as usize {
+                    for x in 0..c.w as usize {
+                        let p = c.px[y * c.w as usize + x];
+                        if p[3] > 0 {
+                            px[(team * 176 + y) * w + ut * 176 + x] = p;
+                        }
+                    }
+                }
+            }
+        }
+        let mut out = format!("P6\n{w} {h}\n255\n").into_bytes();
+        for p in &px {
+            out.extend_from_slice(&p[..3]);
+        }
+        std::fs::write(path, out).unwrap();
+    }
+}

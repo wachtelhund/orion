@@ -692,9 +692,10 @@ impl App {
         let team = (e.owner as usize).min(1);
         match e.kind {
             EntityKind::Unit => {
-                let r = book.unit(self.unit_type[e.def as usize], team, 2, 0);
-                let s = (pw - 24.0 * ui) / r.h as f32;
-                self.gfx.sprite(out, r, x0 + pw * 0.5, cy + 12.0 * ui + pw * 0.55, r.w as f32 * s, r.h as f32 * s, WHITE);
+                let ut = self.unit_type[e.def as usize];
+                let r = book.portrait(if e.sieged && ut == 13 { 14 } else { ut }, team);
+                let s = (pw - 8.0 * ui) / r.h as f32;
+                self.gfx.sprite(out, r, x0 + pw * 0.5, cy + 12.0 * ui + pw * 0.52, r.w as f32 * s, r.h as f32 * s, WHITE);
             }
             EntityKind::Building => {
                 let r = book.building(self.building_type[e.def as usize], team);
