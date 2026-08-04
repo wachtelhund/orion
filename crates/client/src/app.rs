@@ -1772,7 +1772,7 @@ impl App {
                 EntityKind::Building => {
                     let btype = self.building_type[e.def as usize];
                     let (fw, fh) = self.state.data.buildings[e.def as usize].footprint;
-                    let h = self.gfx.book.building_px_h[btype] as f32;
+                    let h = self.gfx.book.building_px_h[btype];
                     (fw as f32 * 18.0 * z, h * 0.8 * z, fh as f32 * 9.0 * z, 2)
                 }
             };
@@ -3048,19 +3048,19 @@ impl App {
                 EntityKind::Resource => {
                     if e.def == RES_GEYSER {
                         let r = book.geyser;
-                        self.gfx.sprite(out, r, sx, sy - 6.0 * zoom, r.w as f32 * zoom, r.h as f32 * zoom, tint);
+                        self.gfx.sprite(out, r, sx, sy - 6.0 * zoom, r.w as f32 / r.scale * zoom, r.h as f32 / r.scale * zoom, tint);
                     } else if e.def == orion_sim::state::RES_TREE {
                         let t = TilePos::of(e.pos);
                         let v = (crate::atlas::hash2(t.x, t.y, 77) % 2) as usize;
                         let r = book.trees[v];
-                        self.gfx.sprite(out, r, sx, sy - 9.0 * zoom, r.w as f32 * zoom, r.h as f32 * zoom, tint);
+                        self.gfx.sprite(out, r, sx, sy - 9.0 * zoom, r.w as f32 / r.scale * zoom, r.h as f32 / r.scale * zoom, tint);
                         if e.hp < orion_sim::state::TREE_HP {
                             let frac = e.hp as f32 / orion_sim::state::TREE_HP as f32;
                             self.bar(out, sx, sy - 24.0 * zoom, 16.0, frac, hp_color(frac));
                         }
                     } else if e.def == orion_sim::state::RES_ROCK {
                         let r = book.rock_wall;
-                        self.gfx.sprite(out, r, sx, sy - 5.0 * zoom, r.w as f32 * zoom, r.h as f32 * zoom, tint);
+                        self.gfx.sprite(out, r, sx, sy - 5.0 * zoom, r.w as f32 / r.scale * zoom, r.h as f32 / r.scale * zoom, tint);
                         if e.hp < orion_sim::state::ROCK_HP {
                             let frac = e.hp as f32 / orion_sim::state::ROCK_HP as f32;
                             self.bar(out, sx, sy - 16.0 * zoom, 18.0, frac, hp_color(frac));
@@ -3074,7 +3074,7 @@ impl App {
                             2
                         };
                         let r = book.minerals[variant];
-                        self.gfx.sprite(out, r, sx, sy - 5.0 * zoom, r.w as f32 * zoom, r.h as f32 * zoom, tint);
+                        self.gfx.sprite(out, r, sx, sy - 5.0 * zoom, r.w as f32 / r.scale * zoom, r.h as f32 / r.scale * zoom, tint);
                     }
                 }
                 EntityKind::Building => {
@@ -3091,10 +3091,10 @@ impl App {
                     self.gfx.sprite(
                         out,
                         r,
-                        sx + (r.w as f32 * 0.5 - ax) * zoom,
-                        sy + (r.h as f32 * 0.5 - ay) * zoom,
-                        r.w as f32 * zoom,
-                        r.h as f32 * zoom,
+                        sx + (r.w as f32 / r.scale * 0.5 - ax) * zoom,
+                        sy + (r.h as f32 / r.scale * 0.5 - ay) * zoom,
+                        r.w as f32 / r.scale * zoom,
+                        r.h as f32 / r.scale * zoom,
                         [tint[0], tint[1], tint[2], alpha],
                     );
                     let d = &self.state.data.buildings[e.def as usize];
@@ -3111,7 +3111,7 @@ impl App {
                     }
                     let hp_frac = e.hp as f32 / d.hp as f32;
                     if selected || hp_frac < 1.0 {
-                        let h_px = book.building_px_h[btype] as f32;
+                        let h_px = book.building_px_h[btype];
                         self.bar(out, sx, sy - (h_px * 0.75) * zoom, 46.0, hp_frac, hp_color(hp_frac));
                     }
                 }
@@ -3160,9 +3160,9 @@ impl App {
                         out,
                         r,
                         sx + rx_off,
-                        sy - (r.h as f32 * 0.5 - 4.0) * zoom - hover + ry_off,
-                        r.w as f32 * zoom,
-                        r.h as f32 * zoom,
+                        sy - (r.h as f32 / r.scale * 0.5 - 4.0) * zoom - hover + ry_off,
+                        r.w as f32 / r.scale * zoom,
+                        r.h as f32 / r.scale * zoom,
                         [tint[0] * flash, tint[1] * flash, tint[2] * flash, tint[3]],
                     );
                     if e.amount > 0 {
@@ -3339,10 +3339,10 @@ impl App {
             self.gfx.sprite(
                 out,
                 r,
-                cx + (r.w as f32 * 0.5 - ax) * zoom,
-                cy + (r.h as f32 * 0.5 - ay) * zoom,
-                r.w as f32 * zoom,
-                r.h as f32 * zoom,
+                cx + (r.w as f32 / r.scale * 0.5 - ax) * zoom,
+                cy + (r.h as f32 / r.scale * 0.5 - ay) * zoom,
+                r.w as f32 / r.scale * zoom,
+                r.h as f32 / r.scale * zoom,
                 [0.7, 0.85, 1.0, 0.38],
             );
         }
@@ -3414,7 +3414,7 @@ impl App {
         let label = |out: &mut Vec<Inst>, j: usize, n: u32, cap: u32, c3: [f32; 3]| {
             let e = &ents[j];
             let btype = self.building_type[e.def as usize];
-            let top = self.gfx.book.building_px_h[btype] as f32;
+            let top = self.gfx.book.building_px_h[btype];
             let (sx, sy) = self.world_to_screen_elev(e.pos.x.to_f32(), e.pos.y.to_f32());
             let text = format!("{n}/{cap}");
             let w = self.gfx.text_width(ts, &text);
@@ -3552,10 +3552,10 @@ impl App {
         self.gfx.sprite(
             out,
             r,
-            cx + (r.w as f32 * 0.5 - ax) * zoom,
-            cy + (r.h as f32 * 0.5 - ay) * zoom,
-            r.w as f32 * zoom,
-            r.h as f32 * zoom,
+            cx + (r.w as f32 / r.scale * 0.5 - ax) * zoom,
+            cy + (r.h as f32 / r.scale * 0.5 - ay) * zoom,
+            r.w as f32 / r.scale * zoom,
+            r.h as f32 / r.scale * zoom,
             [1.0, 1.0, 1.0, 0.5],
         );
     }

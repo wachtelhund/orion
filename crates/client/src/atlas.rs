@@ -7,7 +7,12 @@
 
 use crate::font;
 
-pub const ATLAS: u32 = 2048;
+pub const ATLAS: u32 = 4096;
+
+/// Supersample factor for world sprites: canvas px per screen unit at
+/// zoom 1. At the default zoom (2 x DPI scale) a 4x sprite is texel-perfect
+/// on retina displays instead of showing 4x4 screen px per canvas px.
+pub const SS: f32 = 4.0;
 
 pub type Color = [u8; 4];
 
@@ -125,6 +130,12 @@ impl Canvas {
 
     /// Darken opaque pixels that touch transparency — SC-style sprite outline.
     pub fn outline(&mut self, dark: Color) {
+        self.outline_t(dark, 1);
+    }
+
+    /// Outline with thickness `t` canvas px (supersampled sprites need ~2 so
+    /// the silhouette still reads at screen scale).
+    pub fn outline_t(&mut self, dark: Color, t: i32) {
         let orig = self.px.clone();
         for y in 0..self.h {
             for x in 0..self.w {
@@ -133,12 +144,16 @@ impl Canvas {
                     continue;
                 }
                 let mut edge = false;
-                for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-                    let (nx, ny) = (x + dx, y + dy);
-                    if nx < 0 || ny < 0 || nx >= self.w || ny >= self.h {
-                        edge = true;
-                    } else if orig[(ny * self.w + nx) as usize][3] < 40 {
-                        edge = true;
+                'scan: for dy in -t..=t {
+                    for dx in -t..=t {
+                        let (nx, ny) = (x + dx, y + dy);
+                        if nx < 0 || ny < 0 || nx >= self.w || ny >= self.h {
+                            edge = true;
+                            break 'scan;
+                        } else if orig[(ny * self.w + nx) as usize][3] < 40 {
+                            edge = true;
+                            break 'scan;
+                        }
                     }
                 }
                 if edge {
@@ -147,6 +162,125 @@ impl Canvas {
             }
         }
     }
+
+    /// Top-left rim light: brighten body pixels that sit just inside the
+    /// outline on the lit side. Call AFTER outline_t with the same color.
+    pub fn rim(&mut self, outline: Color, f: f32) {
+        let orig = self.px.clone();
+        let is_edge = |p: Color| p == outline || p[3] < 40;
+        for y in 0..self.h {
+            for x in 0..self.w {
+                let p = orig[(y * self.w + x) as usize];
+                if p[3] < 40 || p == outline {
+                    continue;
+                }
+                let up = if y > 0 { orig[((y - 1) * self.w + x) as usize] } else { outline };
+                let left = if x > 0 { orig[(y * self.w + x - 1) as usize] } else { outline };
+                if is_edge(up) || is_edge(left) {
+                    self.set(x, y, scale([p[0], p[1], p[2]], f));
+                }
+            }
+        }
+    }
+
+    /// Soft radial glow: quadratic falloff alpha blend. The emissive
+    /// workhorse — windows, engines, plasma, bio-lights.
+    pub fn glow(&mut self, cx: f32, cy: f32, r: f32, c: [u8; 3], strength: f32) {
+        for y in (cy - r) as i32..=(cy + r) as i32 {
+            for x in (cx - r) as i32..=(cx + r) as i32 {
+                let dx = x as f32 + 0.5 - cx;
+                let dy = y as f32 + 0.5 - cy;
+                let d = (dx * dx + dy * dy).sqrt() / r;
+                if d < 1.0 {
+                    let a = ((1.0 - d) * (1.0 - d) * strength * 255.0).min(255.0) as u8;
+                    if a > 3 {
+                        self.blend(x, y, [c[0], c[1], c[2], a]);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Filled polygon (even-odd scanline). Angular armor beats ellipses.
+    pub fn poly(&mut self, pts: &[(f32, f32)], c: Color) {
+        let y0 = pts.iter().map(|p| p.1).fold(f32::MAX, f32::min) as i32;
+        let y1 = pts.iter().map(|p| p.1).fold(f32::MIN, f32::max) as i32 + 1;
+        for y in y0..=y1 {
+            let sy = y as f32 + 0.5;
+            let mut xs: Vec<f32> = Vec::new();
+            for i in 0..pts.len() {
+                let (x0, py0) = pts[i];
+                let (x1, py1) = pts[(i + 1) % pts.len()];
+                if (py0 <= sy) != (py1 <= sy) {
+                    xs.push(x0 + (sy - py0) / (py1 - py0) * (x1 - x0));
+                }
+            }
+            xs.sort_by(|a, b| a.total_cmp(b));
+            for pair in xs.chunks(2) {
+                if let [a, b] = pair {
+                    for x in *a as i32..=(*b - 0.01) as i32 {
+                        self.blend(x, y, c);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Ellipse shaded as a lit dome: fake sphere normal, light from the
+    /// upper-left, quantized to 5 tones with ordered dithering.
+    pub fn dome(&mut self, cx: f32, cy: f32, rx: f32, ry: f32, base: [u8; 3]) {
+        for y in (cy - ry - 1.0) as i32..=(cy + ry + 1.0) as i32 {
+            for x in (cx - rx - 1.0) as i32..=(cx + rx + 1.0) as i32 {
+                let dx = (x as f32 + 0.5 - cx) / rx;
+                let dy = (y as f32 + 0.5 - cy) / ry;
+                let d = dx * dx + dy * dy;
+                if d > 1.0 {
+                    continue;
+                }
+                let nz = (1.0 - d).sqrt();
+                let lit = (-dx * 0.40 - dy * 0.55 + nz * 0.75).clamp(0.0, 1.3) / 1.3;
+                self.blend(x, y, scale(base, tone(lit, x, y)));
+            }
+        }
+    }
+
+    /// Downward fading streak — rust runs, grime, soot.
+    pub fn streak(&mut self, x: i32, y: i32, len: i32, c: [u8; 3], a0: f32) {
+        for k in 0..len {
+            let a = (a0 * (1.0 - k as f32 / len as f32) * 255.0) as u8;
+            self.blend(x, y + k, [c[0], c[1], c[2], a]);
+        }
+    }
+}
+
+/// Ordered-dither tone quantizer: continuous light 0..1 to one of five
+/// material tones with a 2x2 Bayer boundary dither. Shared by every painter
+/// so all materials posterize the same way.
+pub fn tone(lit: f32, x: i32, y: i32) -> f32 {
+    const LEVELS: [f32; 5] = [0.50, 0.72, 0.94, 1.16, 1.38];
+    let t = lit.clamp(0.0, 1.0) * (LEVELS.len() - 1) as f32;
+    let i = t as usize;
+    let frac = t - i as f32;
+    let bayer = [[0.25f32, 0.75], [1.0, 0.5]][(y & 1) as usize][(x & 1) as usize];
+    let up = frac > bayer;
+    LEVELS[(i + up as usize).min(LEVELS.len() - 1)]
+}
+
+/// Smooth bilinear value noise on a `cell`-px lattice, 0..1. Macro-scale
+/// ground variation without per-pixel salt-and-pepper.
+pub fn vnoise(x: f32, y: f32, cell: f32, salt: u32) -> f32 {
+    let gx = (x / cell).floor();
+    let gy = (y / cell).floor();
+    let fx = x / cell - gx;
+    let fy = y / cell - gy;
+    let sx = fx * fx * (3.0 - 2.0 * fx);
+    let sy = fy * fy * (3.0 - 2.0 * fy);
+    let corner = |ix: f32, iy: f32| (hash2(ix as i32, iy as i32, salt) % 1000) as f32 / 1000.0;
+    let a = corner(gx, gy);
+    let b = corner(gx + 1.0, gy);
+    let c = corner(gx, gy + 1.0);
+    let d = corner(gx + 1.0, gy + 1.0);
+    a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy
 }
 
 pub fn scale(c: [u8; 3], f: f32) -> Color {
@@ -171,7 +305,7 @@ pub fn hash2(x: i32, y: i32, salt: u32) -> u32 {
 
 // ---------------------------------------------------------- atlas layout ----
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct Region {
     pub u0: f32,
     pub v0: f32,
@@ -179,6 +313,15 @@ pub struct Region {
     pub v1: f32,
     pub w: u32,
     pub h: u32,
+    /// Canvas px per screen unit at zoom 1. Draw code divides pixel sizes
+    /// by this, so sprites painted at different densities coexist.
+    pub scale: f32,
+}
+
+impl Default for Region {
+    fn default() -> Region {
+        Region { u0: 0.0, v0: 0.0, u1: 0.0, v1: 0.0, w: 0, h: 0, scale: 1.0 }
+    }
 }
 
 /// Shelf packer writing canvases into the atlas pixel buffer.
@@ -195,6 +338,11 @@ impl Packer {
     }
 
     fn place(&mut self, c: &Canvas) -> Region {
+        self.place_s(c, 1.0)
+    }
+
+    /// Place a canvas painted at `scale` canvas px per screen unit.
+    fn place_s(&mut self, c: &Canvas, scale: f32) -> Region {
         let (w, h) = (c.w as u32, c.h as u32);
         if self.cx + w + 2 > ATLAS {
             self.cx = 0;
@@ -220,6 +368,7 @@ impl Packer {
             v1: (oy as f32 + h as f32 - 0.01) / a,
             w,
             h,
+            scale,
         }
     }
 }
@@ -251,7 +400,8 @@ pub struct SpriteBook {
     /// [building_type][team]. 0-6 Vanguard, 7-13 Kyth (hive, spire, sapwell,
     /// warren, incubator, roost, cortex).
     pub buildings: Vec<Region>,
-    pub building_px_h: [u32; 14],
+    /// Building sprite heights in SCREEN units at zoom 1 (canvas px / scale).
+    pub building_px_h: [f32; 14],
     // effects
     pub flash: Region,
     pub spark: Region,
@@ -366,7 +516,7 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
 
     // Buildings: [type][team].
     let mut buildings = Vec::new();
-    let mut building_px_h = [0u32; 14];
+    let mut building_px_h = [0f32; 14];
     for b_type in 0..14 {
         for team in 0..2 {
             let c = match b_type {
@@ -385,7 +535,7 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
                 12 => paint_roost(TEAMS[team]),
                 _ => paint_cortex(TEAMS[team]),
             };
-            building_px_h[b_type] = c.h as u32;
+            building_px_h[b_type] = c.h as f32;
             buildings.push(p.place(&c));
         }
     }

@@ -807,7 +807,7 @@ impl App {
                 let r = book.unit(self.unit_type[unit as usize], team, 2, 0);
                 self.gfx.quad(out, bx, by, bw, bh, [0.06, 0.06, 0.09, 1.0]);
                 self.gfx.quad(out, bx, by, bw, 1.5 * ui, [0.3, 0.33, 0.4, 1.0]);
-                self.gfx.sprite(out, r, bx + bw * 0.5, by + bh * 0.45, r.w as f32 * 0.9 * ui, r.h as f32 * 0.9 * ui, WHITE);
+                self.gfx.sprite(out, r, bx + bw * 0.5, by + bh * 0.45, r.w as f32 / r.scale * 0.9 * ui, r.h as f32 / r.scale * 0.9 * ui, WHITE);
                 if k == 0 {
                     let total = self.state.data.units[unit as usize].build_ticks;
                     let frac = qb.progress as f32 / total.max(1) as f32;
@@ -833,7 +833,7 @@ impl App {
             match u.kind {
                 EntityKind::Unit => {
                     let r = book.unit(self.unit_type[u.def as usize], (u.owner as usize).min(1), 2, 0);
-                    self.gfx.sprite(out, r, bx + 17.0 * ui, by + 22.0 * ui, r.w as f32 * ui, r.h as f32 * ui, WHITE);
+                    self.gfx.sprite(out, r, bx + 17.0 * ui, by + 22.0 * ui, r.w as f32 / r.scale * ui, r.h as f32 / r.scale * ui, WHITE);
                     let frac = u.hp as f32 / self.state.data.units[u.def as usize].hp as f32;
                     self.gfx.quad(out, bx, by + 46.0 * ui, 34.0 * ui * frac, 3.0 * ui, hp_color(frac));
                 }
@@ -1185,13 +1185,13 @@ impl App {
         let mut x = w - 16.0 * ui - self.gfx.text_width(ts, &sup_s);
         self.gfx.text(out, x, 10.0 * ui, ts, sup_col, &sup_s);
         let pr = book.building(1, self.human as usize);
-        self.gfx.sprite(out, pr, x - 12.0 * ui, icon_y, pr.w as f32 * 0.3 * ui, pr.h as f32 * 0.3 * ui, WHITE);
+        self.gfx.sprite(out, pr, x - 12.0 * ui, icon_y, pr.w as f32 / pr.scale * 0.3 * ui, pr.h as f32 / pr.scale * 0.3 * ui, WHITE);
 
         let gas_s = format!("{gas}");
         x -= 70.0 * ui + self.gfx.text_width(ts, &gas_s);
         self.gfx.text(out, x, 10.0 * ui, ts, [GAS_COLOR[0], GAS_COLOR[1], GAS_COLOR[2], 1.0], &gas_s);
         let gr = book.geyser;
-        self.gfx.sprite(out, gr, x - 14.0 * ui, icon_y, gr.w as f32 * 0.28 * ui, gr.h as f32 * 0.28 * ui, WHITE);
+        self.gfx.sprite(out, gr, x - 14.0 * ui, icon_y, gr.w as f32 / gr.scale * 0.28 * ui, gr.h as f32 / gr.scale * 0.28 * ui, WHITE);
 
         let min_s = format!("{minerals}");
         x -= 70.0 * ui + self.gfx.text_width(ts, &min_s);
