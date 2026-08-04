@@ -42,12 +42,18 @@ pub enum Sfx {
     AckAttack,
     AckGather,
     AckBuild,
+    /// Weapon-flavor fire sounds: acid thwip, electric crack, melee
+    /// whoosh, rail twang.
+    Spit,
+    Zap,
+    Slash,
+    Rail,
     /// Match-start countdown tick and the GO chord.
     CountTick,
     CountGo,
 }
 
-pub const ALL_SFX: [Sfx; 27] = [
+pub const ALL_SFX: [Sfx; 31] = [
     Sfx::Click,
     Sfx::Error,
     Sfx::Shot,
@@ -73,6 +79,10 @@ pub const ALL_SFX: [Sfx; 27] = [
     Sfx::AckAttack,
     Sfx::AckGather,
     Sfx::AckBuild,
+    Sfx::Spit,
+    Sfx::Zap,
+    Sfx::Slash,
+    Sfx::Rail,
     Sfx::CountTick,
     Sfx::CountGo,
 ];
@@ -245,6 +255,31 @@ fn synth_sfx(s: Sfx) -> Vec<f32> {
                 * 0.2
                 * env(t, 0.003, total)
                 * if (t * 24.0).fract() < 0.6 { 1.0 } else { 0.2 }
+        }),
+        // Acid spit: wet formant thwip with a splat tail.
+        Sfx::Spit => layered(0.16, |t, total, r, lp| {
+            let body = sine(t, 300.0 - t * 900.0) * 0.5 * (1.0 - t * 5.0).max(0.0);
+            let wet = lp.run(r, 0.3) * 0.4 * (1.0 - t * 4.0).max(0.0);
+            (body + wet) * 0.4 * env(t, 0.004, total)
+        }),
+        // Electric crack.
+        Sfx::Zap => layered(0.12, |t, total, r, lp| {
+            let crack = r * (1.0 - t * 22.0).max(0.0);
+            let sizzle = lp.run(if r.abs() > 0.5 { r } else { 0.0 }, 0.7) * 0.7 * (1.0 - t * 8.0).max(0.0);
+            let tone = sine(t, 2400.0 - t * 6000.0) * 0.2 * (1.0 - t * 10.0).max(0.0);
+            (crack + sizzle + tone) * 0.34 * env(t, 0.001, total)
+        }),
+        // Melee whoosh: filtered noise sweeping shut.
+        Sfx::Slash => layered(0.14, |t, total, r, lp| {
+            let cut = 0.5 - t * 3.0;
+            lp.run(r, cut.max(0.05)) * 0.55 * env(t, 0.015, total)
+        }),
+        // Rail twang: deep FM boom with a metallic overtone.
+        Sfx::Rail => layered(0.4, |t, total, r, lp| {
+            let boom = sine(t, 95.0 - t * 60.0 + sine(t, 30.0) * 20.0) * 0.6 * (1.0 - t * 2.2).max(0.0);
+            let metal = sine(t, 640.0) * 0.25 * (1.0 - t * 5.0).max(0.0);
+            let tail = lp.run(r, 0.12) * 0.3 * (1.0 - t * 2.5).max(0.0);
+            (boom + metal + tail) * 0.5 * env(t, 0.002, total)
         }),
         Sfx::CountTick => render(0.12, |t, total, _| {
             (sine(t, 880.0) * 0.6 + sine(t, 1760.0) * 0.2) * 0.4 * env(t, 0.004, total)

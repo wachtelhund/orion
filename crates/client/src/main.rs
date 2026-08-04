@@ -43,6 +43,7 @@ struct Shell {
     replay_shot: Option<(String, String, u32)>,
     map_arg: Option<String>,
     races_arg: Option<(u8, u8)>,
+    stage: bool,
 }
 
 impl ApplicationHandler for Shell {
@@ -90,6 +91,9 @@ impl ApplicationHandler for Shell {
         } else if self.races_arg.is_some() {
             let map = app.game_map.clone();
             app.state = app::new_game_with(r0, r1, &map);
+        }
+        if self.stage {
+            app.stage_showcase();
         }
         if let Some(path) = &self.replay_open {
             app.start_replay(std::path::Path::new(path));
@@ -223,6 +227,7 @@ fn main() {
         .position(|a| a == "--map")
         .and_then(|i| args.get(i + 1))
         .cloned();
+    let stage = args.iter().any(|a| a == "--stage");
     // --races A,B — bot race indices for --shot/--record captures.
     let races_arg = args
         .iter()
@@ -274,6 +279,7 @@ fn main() {
         replay_shot,
         map_arg,
         races_arg,
+        stage,
         ..Default::default()
     };
     event_loop.run_app(&mut shell).expect("run app");

@@ -51,6 +51,22 @@ pub enum EffKind {
     Ring,
     Corpse,
     Rubble,
+    /// Traveling projectile ax,ay -> bx,by with a lobbed arc. style: 0
+    /// acid glob, 1 rail slug, 2 cannon shell.
+    Glob,
+    /// Melee slash fan at the target. style: 0 blade (team), 1 chitin
+    /// claw, 2 heavy claw, 3 mech claw.
+    Slash,
+    /// Jagged electric arc ax,ay -> bx,by (Ferron arclight).
+    Arc,
+    /// Stateless particle burst. style: 0 blood, 1 goo, 2 mech debris.
+    Burst,
+    /// Ground decal. style: 0 blood stain, 1 goo puddle, 2 scorch.
+    Stain,
+    /// Rising smoke puff (also used by ambient emitters).
+    Smoke,
+    /// Rising teal geyser vapor.
+    Vapor,
     /// Command acknowledgement ping. bx: 0=move, 1=attack, 2=gather/rally.
     Ping,
     /// Under-attack alert shown on the minimap.
@@ -66,6 +82,9 @@ pub struct Effect {
     pub by: f32,
     pub age: f32,
     pub ttl: f32,
+    /// Kind-specific flavor: weapon style for combat effects, material
+    /// for stains, seed salt for particle bursts.
+    pub style: u8,
 }
 
 /// Building sprite anchor: canvas point that sits on the building's world
@@ -105,6 +124,8 @@ pub struct App {
     pub smoke_deadline: Option<Instant>,
     pub shot: Option<(u32, String)>,
     pub shot_bot0: Option<Bot>,
+    /// Staged-showcase capture: scripted orders only, no bot drivers.
+    pub stage_mode: bool,
     pub shot_focus: Option<(f32, f32)>,
     pub shot_zoom: Option<f32>,
     pub script: Option<String>,
@@ -312,6 +333,7 @@ impl App {
             last: Instant::now(),
             smoke_deadline: smoke.then(|| Instant::now() + std::time::Duration::from_secs(3)),
             shot_bot0: shot.is_some().then(|| Bot::new(0)),
+            stage_mode: false,
             shot,
             shot_focus: None,
             shot_zoom: None,
@@ -418,6 +440,27 @@ impl App {
     }
 
     /// Selection acknowledgment: race-flavored blip for the active thing.
+    /// Weapon presentation class by attacker sprite type: how its fire
+    /// looks and sounds. 0 rifle, 1 energy blade, 2 cannon, 3 rapid bolts,
+    /// 4 acid glob, 5 chitin claw, 6 heavy claw, 7 electric arc, 8 rail
+    /// slug, 9 bite, 10 utility tool.
+    fn fire_style(&self, unit_type: usize) -> u8 {
+        match unit_type {
+            1 => 0,
+            2 => 1,
+            3 | 6 => 2,
+            4 | 11 | 20 => 3,
+            9 => 4,
+            8 => 5,
+            10 => 6,
+            17 => 7,
+            19 => 8,
+            15 => 9,
+            18 => 6,
+            _ => 10,
+        }
+    }
+
     pub(crate) fn ack_select(&mut self) {
         self.ack_flip = !self.ack_flip;
         let Some(id) = self.active_entity() else { return };
@@ -1578,7 +1621,7 @@ impl App {
             bx: kind as f32,
             by: 0.0,
             age: 0.0,
-            ttl: 0.5,
+            ttl: 0.5, style: 0,
         });
     }
 
@@ -1942,7 +1985,7 @@ impl App {
                                 bx: 0.0,
                                 by: 0.0,
                                 age: 0.0,
-                                ttl: 2.0,
+                                ttl: 2.0, style: 0,
                             });
                             let alarm_ok = self
                                 .last_alarm_sfx
@@ -1969,40 +2012,78 @@ impl App {
                     if let Some(r) = self.recoil.get_mut(from as usize) {
                         *r = 0.14;
                     }
+                    let ut = if f.sieged && self.unit_type[f.def as usize] == 3 {
+                        6
+                    } else {
+                        self.unit_type[f.def as usize]
+                    };
+                    let style = self.fire_style(ut);
                     if combat_sounds < 3 {
                         combat_sounds += 1;
-                        let sieged = self.state.entities[from as usize].sieged;
-                        self.sfx(if sieged { Sfx::Cannon } else { Sfx::Shot });
-                    }
-                    self.effects.push(Effect {
-                        kind: EffKind::Flash,
-                        ax: mx,
-                        ay: my,
-                        bx: 0.0,
-                        by: 0.0,
-                        age: 0.0,
-                        ttl: 0.09,
-                    });
-                    if d > 1.2 {
-                        self.effects.push(Effect {
-                            kind: EffKind::Tracer,
-                            ax: mx,
-                            ay: my,
-                            bx: tx_,
-                            by: ty_,
-                            age: 0.0,
-                            ttl: 0.05,
+                        self.sfx(match style {
+                            2 => Sfx::Cannon,
+                            8 => Sfx::Rail,
+                            4 => Sfx::Spit,
+                            7 => Sfx::Zap,
+                            1 | 5 | 6 | 9 => Sfx::Slash,
+                            _ => Sfx::Shot,
                         });
                     }
-                    self.effects.push(Effect {
-                        kind: EffKind::Spark,
-                        ax: tx_,
-                        ay: ty_,
-                        bx: 0.0,
-                        by: 0.0,
-                        age: 0.0,
-                        ttl: 0.16,
-                    });
+                    let push = |fx: &mut Vec<Effect>, kind, ax, ay, bx, by, ttl, st| {
+                        fx.push(Effect { kind, ax, ay, bx, by, age: 0.0, ttl, style: st });
+                    };
+                    match style {
+                        // Energy blade / claws / bite: slash fan at the victim,
+                        // oriented away from the attacker.
+                        1 => push(&mut self.effects, EffKind::Slash, tx_, ty_, fx_, fy_, 0.16, 0),
+                        5 | 9 => push(&mut self.effects, EffKind::Slash, tx_, ty_, fx_, fy_, 0.15, 1),
+                        6 => {
+                            push(&mut self.effects, EffKind::Slash, tx_, ty_, fx_, fy_, 0.18, 2);
+                            push(&mut self.effects, EffKind::Ring, tx_, ty_, 0.7, 0.0, 0.22, 0);
+                        }
+                        // Acid glob: lobbed projectile, goo spark on land.
+                        4 => {
+                            push(&mut self.effects, EffKind::Glob, mx, my, tx_, ty_, 0.16, 0);
+                            push(&mut self.effects, EffKind::Burst, tx_, ty_, 5.0, 0.0, 0.28, 1);
+                        }
+                        // Cannon: heavy muzzle, fast shell, impact ring.
+                        2 => {
+                            push(&mut self.effects, EffKind::Flash, mx, my, 0.0, 0.0, 0.12, 1);
+                            push(&mut self.effects, EffKind::Glob, mx, my, tx_, ty_, 0.09, 2);
+                            push(&mut self.effects, EffKind::Ring, tx_, ty_, 1.0, 0.0, 0.3, 0);
+                            push(&mut self.effects, EffKind::Spark, tx_, ty_, 0.0, 0.0, 0.2, 0);
+                        }
+                        // Electric arc: jagged bolt, no tracer.
+                        7 => {
+                            push(&mut self.effects, EffKind::Arc, mx, my, tx_, ty_, 0.1, 0);
+                            push(&mut self.effects, EffKind::Spark, tx_, ty_, 0.0, 0.0, 0.14, 2);
+                        }
+                        // Rail slug: violet streak + hard impact.
+                        8 => {
+                            push(&mut self.effects, EffKind::Flash, mx, my, 0.0, 0.0, 0.1, 2);
+                            push(&mut self.effects, EffKind::Glob, mx, my, tx_, ty_, 0.06, 1);
+                            push(&mut self.effects, EffKind::Ring, tx_, ty_, 0.9, 0.0, 0.26, 0);
+                        }
+                        // Rapid bolts: thin twin cyan tracers.
+                        3 => {
+                            push(&mut self.effects, EffKind::Flash, mx, my, 0.0, 0.0, 0.06, 0);
+                            if d > 1.0 {
+                                push(&mut self.effects, EffKind::Tracer, mx, my, tx_, ty_, 0.045, 1);
+                                push(&mut self.effects, EffKind::Tracer, mx, my + 0.12, tx_, ty_ + 0.1, 0.05, 1);
+                            }
+                            push(&mut self.effects, EffKind::Spark, tx_, ty_, 0.0, 0.0, 0.12, 0);
+                        }
+                        // Utility tools: brief chip spark only.
+                        10 => push(&mut self.effects, EffKind::Spark, tx_, ty_, 0.0, 0.0, 0.1, 0),
+                        // Rifle default: muzzle, tracer, impact.
+                        _ => {
+                            push(&mut self.effects, EffKind::Flash, mx, my, 0.0, 0.0, 0.09, 0);
+                            if d > 1.2 {
+                                push(&mut self.effects, EffKind::Tracer, mx, my, tx_, ty_, 0.05, 0);
+                            }
+                            push(&mut self.effects, EffKind::Spark, tx_, ty_, 0.0, 0.0, 0.16, 0);
+                        }
+                    }
                 }
                 SimEvent::Ready { pos: _, owner } => {
                     if owner == self.human {
@@ -2029,7 +2110,7 @@ impl App {
                         bx: 2.0,
                         by: 0.0,
                         age: 0.0,
-                        ttl: 0.4,
+                        ttl: 0.4, style: 0,
                     });
                 }
                 SimEvent::Death { pos, kind, .. } => {
@@ -2056,6 +2137,7 @@ impl App {
                         by: 0.0,
                         age: 0.0,
                         ttl: 0.35,
+                        style: 0,
                     });
                     self.effects.push(Effect {
                         kind: if kind == EntityKind::Building {
@@ -2069,6 +2151,7 @@ impl App {
                         by: 0.0,
                         age: 0.0,
                         ttl: if kind == EntityKind::Building { 30.0 } else { 8.0 },
+                        style: 0,
                     });
                 }
             }
@@ -2215,7 +2298,9 @@ impl App {
                 if let Some(b0) = self.shot_bot0.as_mut() {
                     cmds.extend(b0.think(&self.state));
                 }
-                cmds.extend(self.bot.think(&self.state));
+                if !self.stage_mode {
+                    cmds.extend(self.bot.think(&self.state));
+                }
                 self.step_sim(cmds);
                 for e in &mut self.effects {
                     e.age += TICK_DT as f32;
@@ -2232,7 +2317,9 @@ impl App {
                 if let Some(b0) = self.shot_bot0.as_mut() {
                     cmds.extend(b0.think(&self.state));
                 }
-                cmds.extend(self.bot.think(&self.state));
+                if !self.stage_mode {
+                    cmds.extend(self.bot.think(&self.state));
+                }
                 self.step_sim(cmds);
                 for e in &mut self.effects {
                     e.age += TICK_DT as f32 * (every as f32).recip().max(0.04);
@@ -2359,7 +2446,9 @@ impl App {
                 if let Some(b0) = self.shot_bot0.as_mut() {
                     cmds.extend(b0.think(&self.state));
                 }
-                cmds.extend(self.bot.think(&self.state));
+                if !self.stage_mode {
+                    cmds.extend(self.bot.think(&self.state));
+                }
                 self.step_sim(cmds);
                 for e in &mut self.effects {
                     e.age += TICK_DT as f32;
@@ -2602,7 +2691,9 @@ impl App {
                 self.acc += dt * self.settings.game_speed as f64;
                 while self.acc >= TICK_DT {
                     let mut cmds = std::mem::take(&mut self.pending);
+                    if !self.stage_mode {
                     cmds.extend(self.bot.think(&self.state));
+                }
                     self.step_sim(cmds);
                     self.acc -= TICK_DT;
                 }
@@ -2654,7 +2745,9 @@ impl App {
             }
             let mut cmds = std::mem::take(&mut self.pending);
             self.script_commands(&mut cmds);
-            cmds.extend(self.bot.think(&self.state));
+            if !self.stage_mode {
+                    cmds.extend(self.bot.think(&self.state));
+                }
             self.step_sim(cmds);
             for e in &mut self.effects {
                 e.age += TICK_DT as f32;
@@ -2937,6 +3030,75 @@ impl App {
             (e.alive && e.owner == self.human && e.kind == EntityKind::Building && e.def == def)
                 .then(|| self.state.id_of(i))
         })
+    }
+
+    /// Dev staging (--stage): a three-way arranged battle near map center
+    /// so every weapon style can be captured on demand. Single-player
+    /// only — this mutates state outside the command stream by design.
+    pub fn stage_showcase(&mut self) {
+        use orion_sim::fixed::FxVec2;
+        // The staged brawl runs on scripted orders alone — no bot drivers.
+        self.shot_bot0 = None;
+        self.stage_mode = true;
+        let ids: std::collections::HashMap<String, u16> = self
+            .state
+            .data
+            .units
+            .iter()
+            .enumerate()
+            .map(|(k, u)| (u.tag.clone(), k as u16))
+            .collect();
+        let ud = |tag: &str| -> u16 { ids[tag] };
+        // Clear the bot armies: kill everything mobile, keep buildings.
+        for i in 0..self.state.entities.len() {
+            let e = &self.state.entities[i];
+            if e.alive && e.kind == EntityKind::Unit {
+                self.state.kill(i as u32);
+            }
+        }
+        let c = (40, 40);
+        // West: Vanguard Combine.
+        let mut west = Vec::new();
+        for k in 0..4 {
+            west.push(self.state.spawn_unit(0, ud("trooper"), FxVec2::from_int(c.0 - 7, c.1 - 3 + k * 2)));
+        }
+        for k in 0..2 {
+            west.push(self.state.spawn_unit(0, ud("vanguard"), FxVec2::from_int(c.0 - 5, c.1 - 1 + k * 2)));
+        }
+        let tank = self.state.spawn_unit(0, ud("breaker"), FxVec2::from_int(c.0 - 10, c.1));
+        self.state.entities[tank.idx as usize].sieged = true;
+        west.push(self.state.spawn_unit(0, ud("skywing"), FxVec2::from_int(c.0 - 8, c.1 + 4)));
+        let caster = self.state.spawn_unit(0, ud("stormcaller"), FxVec2::from_int(c.0 - 9, c.1 - 5));
+        self.state.entities[caster.idx as usize].energy = 200;
+        // East: Kyth Assembly.
+        let mut east = Vec::new();
+        for k in 0..5 {
+            east.push(self.state.spawn_unit(1, ud("skitter"), FxVec2::from_int(c.0 + 7, c.1 - 4 + k * 2)));
+        }
+        for k in 0..2 {
+            east.push(self.state.spawn_unit(1, ud("spitter"), FxVec2::from_int(c.0 + 9, c.1 - 1 + k * 2)));
+        }
+        east.push(self.state.spawn_unit(1, ud("ravager"), FxVec2::from_int(c.0 + 10, c.1 + 2)));
+        east.push(self.state.spawn_unit(1, ud("wisp"), FxVec2::from_int(c.0 + 8, c.1 - 6)));
+        // North: Ferron Compact (fights whoever it meets first).
+        let mut north = Vec::new();
+        for k in 0..3 {
+            north.push(self.state.spawn_unit(0, ud("arclight"), FxVec2::from_int(c.0 - 2 + k * 2, c.1 - 9)));
+        }
+        north.push(self.state.spawn_unit(0, ud("mauler"), FxVec2::from_int(c.0, c.1 - 7)));
+        north.push(self.state.spawn_unit(0, ud("lodestone"), FxVec2::from_int(c.0 + 2, c.1 - 11)));
+        // Everyone brawls at the center. Step the orders in directly —
+        // the --shot fast-forward path never drains `pending`.
+        let target = FxVec2::from_int(c.0, c.1);
+        let cmds = vec![
+            (0, Command::AttackMove { units: west, target, queued: false }),
+            (1, Command::AttackMove { units: east, target, queued: false }),
+            (0, Command::AttackMove { units: north, target, queued: false }),
+            (0, Command::Cast { caster, target: FxVec2::from_int(c.0 + 6, c.1) }),
+        ];
+        self.state.step(&cmds);
+        // Park the capture camera on the brawl.
+        self.shot_focus = Some((c.0 as f32, c.1 as f32));
     }
 
     fn nearest_mineral_to_start(&self) -> Option<EntityId> {
@@ -3390,20 +3552,136 @@ impl App {
             match e.kind {
                 EffKind::Flash => {
                     let (sx, sy) = self.world_to_screen_elev(e.ax, e.ay);
-                    let s = (11.0 + f * 4.0) * zoom;
+                    let (mul, gc) = match e.style {
+                        1 => (1.7, [1.0, 0.7, 0.35]),
+                        2 => (1.3, [0.75, 0.6, 1.0]),
+                        _ => (1.0, [1.0, 0.8, 0.45]),
+                    };
+                    let s = (11.0 + f * 4.0) * mul * zoom;
                     self.gfx.sprite(out, book.flash, sx, sy - 7.0 * zoom, s, s, [1.0, 1.0, 1.0, 1.0 - f]);
-                    self.gfx.sprite(glow, book.glow_soft, sx, sy - 7.0 * zoom, s * 2.6, s * 2.0, [1.0, 0.8, 0.45, (1.0 - f) * 0.7]);
+                    self.gfx.sprite(glow, book.glow_soft, sx, sy - 7.0 * zoom, s * 2.6, s * 2.0, [gc[0], gc[1], gc[2], (1.0 - f) * 0.7]);
                 }
                 EffKind::Tracer => {
                     let (x0, y0) = self.world_to_screen_elev(e.ax, e.ay);
                     let (x1, y1) = self.world_to_screen_elev(e.bx, e.by);
-                    self.gfx.beam(out, x0, y0 - 7.0 * zoom, x1, y1 - 6.0 * zoom, 1.5 * zoom, [1.0, 0.95, 0.6, (1.0 - f) * 0.9]);
-                    self.gfx.beam(glow, x0, y0 - 7.0 * zoom, x1, y1 - 6.0 * zoom, 4.5 * zoom, [1.0, 0.8, 0.4, (1.0 - f) * 0.35]);
+                    let c = match e.style {
+                        1 => [0.55, 0.95, 1.0],
+                        2 => [0.75, 0.62, 1.0],
+                        3 => [0.6, 1.0, 0.45],
+                        _ => [1.0, 0.95, 0.6],
+                    };
+                    let th = if e.style == 1 { 1.1 } else { 1.5 };
+                    self.gfx.beam(out, x0, y0 - 7.0 * zoom, x1, y1 - 6.0 * zoom, th * zoom, [c[0], c[1], c[2], (1.0 - f) * 0.9]);
+                    self.gfx.beam(glow, x0, y0 - 7.0 * zoom, x1, y1 - 6.0 * zoom, th * 3.0 * zoom, [c[0], c[1], c[2], (1.0 - f) * 0.35]);
+                }
+                EffKind::Glob => {
+                    // Lobbed/flat projectile along its flight arc.
+                    let (arc, c, sz) = match e.style {
+                        1 => (0.05, [0.78, 0.62, 1.0], 4.5), // rail slug
+                        2 => (0.28, [1.0, 0.82, 0.5], 5.0),  // cannon shell
+                        _ => (0.6, [0.55, 0.95, 0.3], 6.0),  // acid glob
+                    };
+                    let wx = e.ax + (e.bx - e.ax) * f;
+                    let wy = e.ay + (e.by - e.ay) * f;
+                    let (sx, sy) = self.world_to_screen_elev(wx, wy);
+                    let lift = (std::f32::consts::PI * f).sin() * arc * 32.0 * zoom + 7.0 * zoom;
+                    self.gfx.sprite(out, book.spark, sx, sy - lift, sz * zoom, sz * zoom, [c[0], c[1], c[2], 1.0]);
+                    self.gfx.sprite(glow, book.glow_soft, sx, sy - lift, sz * 3.2 * zoom, sz * 2.4 * zoom, [c[0], c[1], c[2], 0.5]);
+                    if e.style == 1 {
+                        // Rail: streak back toward the muzzle.
+                        let (px, py) = self.world_to_screen_elev(e.ax + (e.bx - e.ax) * (f - 0.35).max(0.0), e.ay + (e.by - e.ay) * (f - 0.35).max(0.0));
+                        self.gfx.beam(glow, px, py - 7.0 * zoom, sx, sy - lift, 3.0 * zoom, [c[0], c[1], c[2], 0.45]);
+                    }
+                }
+                EffKind::Slash => {
+                    // Melee fan sweeping across the victim.
+                    let (sx, sy) = self.world_to_screen_elev(e.ax, e.ay);
+                    let (ox, oy) = self.world_to_screen_elev(e.bx, e.by);
+                    let base = (sy - oy).atan2(sx - ox);
+                    let c = match e.style {
+                        1 => [0.6, 1.0, 0.45],
+                        2 => [0.75, 1.0, 0.4],
+                        3 => [0.8, 0.7, 1.0],
+                        _ => [0.75, 0.88, 1.0],
+                    };
+                    let sweep = -0.8 + f * 1.6;
+                    for k in 0..3 {
+                        let a = base + sweep + (k as f32 - 1.0) * 0.38;
+                        let len = (11.0 - k as f32 * 2.0) * (if e.style == 2 { 1.5 } else { 1.0 }) * zoom;
+                        let x0 = sx + a.cos() * 4.0 * zoom;
+                        let y0 = sy - 7.0 * zoom + a.sin() * 2.0 * zoom;
+                        self.gfx.beam(out, x0, y0, x0 + a.cos() * len, y0 + a.sin() * len * 0.5, 1.8 * zoom, [c[0], c[1], c[2], (1.0 - f) * 0.9]);
+                    }
+                    self.gfx.sprite(glow, book.glow_soft, sx, sy - 6.0 * zoom, 22.0 * zoom, 14.0 * zoom, [c[0], c[1], c[2], (1.0 - f) * 0.4]);
+                }
+                EffKind::Arc => {
+                    // Jagged lightning between muzzle prongs and the victim.
+                    let (x0, y0) = self.world_to_screen_elev(e.ax, e.ay);
+                    let (x1, y1) = self.world_to_screen_elev(e.bx, e.by);
+                    let segs = 5;
+                    let mut px = x0;
+                    let mut py = y0 - 7.0 * zoom;
+                    for k in 1..=segs {
+                        let t = k as f32 / segs as f32;
+                        let h = crate::atlas::hash2(k, (self.state.tick as i32) ^ (e.ax * 17.0) as i32, 431);
+                        let jag = if k == segs { 0.0 } else { ((h % 15) as f32 - 7.0) * zoom };
+                        let nx = x0 + (x1 - x0) * t - (y1 - y0) / 60.0 * jag * 0.2;
+                        let ny = y0 - 7.0 * zoom + (y1 - y0 + 1.0 * zoom) * t + jag * 0.5;
+                        self.gfx.beam(out, px, py, nx, ny, 1.3 * zoom, [0.92, 0.88, 1.0, (1.0 - f) * 0.95]);
+                        self.gfx.beam(glow, px, py, nx, ny, 4.0 * zoom, [0.7, 0.55, 1.0, (1.0 - f) * 0.5]);
+                        px = nx;
+                        py = ny;
+                    }
+                }
+                EffKind::Burst => {
+                    // Stateless particle burst: droplets fly ballistically.
+                    let (sx, sy) = self.world_to_screen_elev(e.ax, e.ay);
+                    let seed = (e.ax * 31.0 + e.ay * 17.0) as i32;
+                    let (n, c, g, sz) = match e.style {
+                        1 => (6, [0.5, 0.9, 0.3], 26.0, 4.0),   // goo
+                        2 => (9, [0.42, 0.4, 0.38], 40.0, 3.2), // debris
+                        _ => (7, [0.78, 0.12, 0.1], 34.0, 2.6), // blood
+                    };
+                    for k in 0..n {
+                        let h = crate::atlas::hash2(k, seed, 97 + e.style as u32);
+                        let a = (h % 628) as f32 / 100.0;
+                        let sp = (8.0 + ((h >> 8) % 14) as f32) * zoom;
+                        let px = sx + a.cos() * sp * f;
+                        let py = sy - 6.0 * zoom + a.sin() * sp * f * 0.5 + g * f * f * zoom * 0.5;
+                        let fade = (1.0 - f) * 0.95;
+                        if e.style == 2 {
+                            self.gfx.sprite(out, book.white, px, py, sz * zoom * (1.0 - f * 0.4), sz * 0.7 * zoom, [c[0], c[1], c[2], fade]);
+                        } else {
+                            self.gfx.sprite(out, book.spark, px, py, sz * zoom * (1.0 - f * 0.5), sz * zoom * (1.0 - f * 0.5), [c[0], c[1], c[2], fade]);
+                        }
+                    }
+                    if e.style == 1 {
+                        self.gfx.sprite(glow, book.glow_soft, sx, sy - 4.0 * zoom, 18.0 * zoom, 12.0 * zoom, [0.5, 0.9, 0.3, (1.0 - f) * 0.3]);
+                    }
+                }
+                EffKind::Smoke => {
+                    let (sx, sy) = self.world_to_screen_elev(e.ax, e.ay);
+                    let rise = (e.bx + 14.0) * f * zoom;
+                    let sz = (6.0 + f * 14.0) * zoom;
+                    let a = (1.0 - f) * 0.3 * (f * 8.0).min(1.0);
+                    self.gfx.sprite(out, book.glow_soft, sx + (f * 9.0).sin() * 2.0 * zoom, sy - e.by * zoom - rise, sz, sz * 0.8, [0.32, 0.32, 0.34, a]);
+                }
+                EffKind::Vapor => {
+                    let (sx, sy) = self.world_to_screen_elev(e.ax, e.ay);
+                    let rise = 20.0 * f * zoom;
+                    let sz = (5.0 + f * 10.0) * zoom;
+                    let a = (1.0 - f) * 0.25 * (f * 6.0).min(1.0);
+                    self.gfx.sprite(glow, book.glow_soft, sx + (f * 7.0).sin() * 2.5 * zoom, sy - 8.0 * zoom - rise, sz, sz * 0.8, [0.35, 0.9, 0.8, a]);
                 }
                 EffKind::Spark => {
                     let (sx, sy) = self.world_to_screen_elev(e.ax, e.ay);
+                    let st: [f32; 3] = match e.style {
+                        1 => [0.6, 1.0, 0.45],
+                        2 => [0.75, 0.62, 1.0],
+                        _ => [1.0, 1.0, 1.0],
+                    };
                     let s = (5.0 + f * 6.0) * zoom;
-                    self.gfx.sprite(out, book.spark, sx, sy - 6.0 * zoom, s, s, [1.0, 1.0, 1.0, 1.0 - f]);
+                    self.gfx.sprite(out, book.spark, sx, sy - 6.0 * zoom, s, s, [st[0], st[1], st[2], 1.0 - f]);
                 }
                 EffKind::Ring => {
                     let (sx, sy) = self.world_to_screen_elev(e.ax, e.ay);
