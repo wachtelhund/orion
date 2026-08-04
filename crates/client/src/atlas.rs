@@ -510,8 +510,7 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
                         11 => paint_wisp(facing, frame, TEAMS[team]),
                         _ => paint_weaver(facing, frame, TEAMS[team]),
                     };
-                    let usc = if unit_type <= 6 { SS } else { 1.0 };
-                    units.push(p.place_s(&c, usc));
+                    units.push(p.place_s(&c, SS));
                 }
             }
         }
@@ -1690,171 +1689,281 @@ fn paint_stormcaller(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
 
 // ----------------------------------------------------- Kyth Assembly ----
 
-const CHITIN: [u8; 3] = [96, 78, 104];
-const CHITIN_LIGHT: [u8; 3] = [128, 106, 138];
-const MEMBRANE: [u8; 3] = [168, 120, 92];
-const KYTH_GLOW: [u8; 3] = [180, 255, 140];
+const CHITIN: [u8; 3] = [58, 46, 70];
+const CHITIN_LIGHT: [u8; 3] = [110, 90, 128];
+const MEMBRANE: [u8; 3] = [142, 88, 70];
+const KYTH_GLOW: [u8; 3] = [158, 255, 96];
+const LEG: Color = [38, 30, 44, 255];
 
-/// Drone: round hover-bug worker. 24x22.
+/// Jointed insect leg: coxa -> knee -> sharp tip.
+fn kleg(c: &mut Canvas, x0: f32, y0: f32, kx: f32, ky: f32, tx: f32, ty: f32, t: f32) {
+    c.line(x0, y0, kx, ky, t, LEG);
+    c.line(kx, ky, tx, ty, t * 0.7, LEG);
+    c.set(kx as i32, ky as i32, rgba(CHITIN_LIGHT));
+}
+
+/// Scalloped plate edge: bright crescent along a carapace segment.
+fn scallop(c: &mut Canvas, cx: f32, cy: f32, r: f32, w: f32) {
+    for k in 0..(w as i32) {
+        let a = std::f32::consts::PI * (0.15 + 0.7 * k as f32 / w);
+        let x = cx + a.cos() * r;
+        let y = cy + a.sin() * r * 0.6;
+        c.set(x as i32, y as i32, rgba(CHITIN_LIGHT));
+        c.set(x as i32, y as i32 + 1, rgba(scale_rgb(CHITIN_LIGHT, 0.7)));
+    }
+}
+
+/// Drone: segmented hover-bug worker. 96x88.
 fn paint_kdrone(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(24, 22);
+    let mut c = Canvas::new(96, 88);
     let (dx, dy) = facing_vec(f);
-    let cx = 12.0;
-    let cy = 12.0;
-    let bob = if frame == 0 { 0.0 } else { -0.8 };
-    // Legs.
-    for side in [-1.0f32, 1.0] {
-        let lo = if frame == 0 { 1.0 } else { 0.0 };
-        c.line(cx, cy + bob + 2.0, cx + side * 6.0, cy + 7.0 + lo * side, 1.2, rgba([58, 48, 62]));
-    }
-    // Segmented body.
-    c.ellipse_shaded(cx - dx * 2.0, cy + bob, 5.0, 4.0, CHITIN);
-    c.ellipse_shaded(cx + dx * 3.0, cy + bob + dy * 1.5, 3.6, 3.0, CHITIN_LIGHT);
-    // Team marking + eye.
-    c.ellipse(cx - dx * 3.0, cy + bob - 1.0, 1.8, 1.4, rgba(team));
-    if dy > -0.5 {
-        c.ellipse(cx + dx * 4.5, cy + bob + dy * 1.8, 1.2, 1.0, rgba(KYTH_GLOW));
-    }
-    c.outline(OUTLINE);
-    c
-}
-
-/// Skitter: small fast 4-legged blade-bug. 22x20.
-fn paint_skitter(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(22, 20);
-    let (dx, dy) = facing_vec(f);
-    let cx = 11.0;
-    let cy = 11.0;
-    let step = if frame == 0 { 1.5 } else { -1.5 };
+    let cx = 48.0;
+    let cy = 46.0;
+    let bob = if frame == 0 { 0.0 } else { -3.0 };
+    // Dangling jointed legs.
     for (k, side) in [-1.0f32, 1.0].iter().enumerate() {
-        let sw = if k == 0 { step } else { -step };
-        c.line(cx - 2.0, cy + 1.0, cx - 5.0 + sw, cy + 6.0, 1.1, rgba([58, 48, 62]));
-        c.line(cx + 2.0, cy + 1.0, cx + 5.0 - sw, cy + 6.0, 1.1, rgba([58, 48, 62]));
-        let _ = side;
+        let lo = if (frame + k) % 2 == 0 { 3.0 } else { 0.0 };
+        kleg(&mut c, cx - side * 6.0, cy + bob + 10.0, cx - side * 18.0, cy + 18.0 + lo, cx - side * 22.0, cy + 30.0 - lo, 3.0);
+        kleg(&mut c, cx + side * 2.0, cy + bob + 12.0, cx + side * 10.0, cy + 22.0 - lo, cx + side * 12.0, cy + 32.0 + lo, 2.6);
     }
-    // Low sleek body.
-    c.ellipse_shaded(cx - dx * 1.5, cy, 4.5, 2.8, CHITIN);
-    // Blade mandibles toward facing.
-    c.line(cx + dx * 3.0, cy + dy * 1.5, cx + dx * 8.0, cy + dy * 4.0 - 1.0, 1.4, rgba(team));
-    c.line(cx + dx * 3.0, cy + dy * 1.5 + 1.5, cx + dx * 8.0, cy + dy * 4.0 + 1.5, 1.4, rgba(team));
+    // Abdomen: two chitin segments with scalloped plate edges.
+    c.dome(cx - dx * 10.0, cy + bob + 2.0, 20.0, 15.0, CHITIN);
+    scallop(&mut c, cx - dx * 10.0, cy + bob + 2.0, 17.0, 22.0);
+    c.dome(cx + dx * 8.0, cy + bob - 2.0 + dy * 5.0, 14.0, 11.0, scale_rgb(CHITIN, 1.18));
+    // Dorsal glow slit.
+    c.line(cx - dx * 18.0 - 4.0, cy + bob - 6.0, cx - dx * 2.0 + 4.0, cy + bob - 8.0, 2.0, rgba(KYTH_GLOW));
+    c.glow(cx - dx * 8.0, cy + bob - 7.0, 8.0, KYTH_GLOW, 0.5);
+    // Team plate on the back segment.
+    c.poly(&[(cx - dx * 14.0 - 5.0, cy + bob - 2.0), (cx - dx * 14.0 + 3.0, cy + bob - 5.0), (cx - dx * 14.0 + 6.0, cy + bob + 3.0), (cx - dx * 14.0 - 2.0, cy + bob + 5.0)], rgba(team));
+    // Head: mandibles + paired glowing eyes toward facing.
     if dy > -0.5 {
-        c.ellipse(cx + dx * 2.5, cy + dy * 1.2 - 0.5, 1.0, 0.8, rgba(KYTH_GLOW));
+        let hx = cx + dx * 18.0;
+        let hy = cy + bob + dy * 7.0;
+        c.line(hx, hy + 2.0, hx + dx * 8.0, hy + dy * 4.0 + 4.0, 2.2, LEG);
+        c.line(hx + 2.0, hy + 2.0, hx + dx * 8.0 + 2.0, hy + dy * 4.0 - 2.0, 2.2, LEG);
+        c.set((hx + dx * 2.0 - 2.0) as i32, (hy - 2.0) as i32, rgba(KYTH_GLOW));
+        c.set((hx + dx * 2.0 + 2.0) as i32, (hy - 2.0) as i32, rgba(KYTH_GLOW));
+        c.glow(hx + dx * 2.0, hy - 2.0, 6.0, KYTH_GLOW, 0.6);
     }
-    c.outline(OUTLINE);
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.3);
     c
 }
 
-/// Spitter: slug with an acid tube. 26x24.
-fn paint_spitter(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(26, 24);
+/// Skitter: fast blade-bug. 88x80.
+fn paint_skitter(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(88, 80);
     let (dx, dy) = facing_vec(f);
-    let cx = 13.0;
-    let cy = 14.0;
-    let squish = if frame == 0 { 0.0 } else { 0.6 };
-    // Slug body.
-    c.ellipse_shaded(cx - dx * 2.0, cy + squish, 6.5, 4.5 - squish, MEMBRANE);
-    c.ellipse_shaded(cx - dx * 4.0, cy - 1.0, 3.5, 2.8, CHITIN);
-    // Team ridge.
-    c.line(cx - dx * 6.0, cy - 3.0, cx + dx * 1.0, cy - 4.0, 1.4, rgba(team));
-    // Acid tube toward facing, tilted up.
-    c.line(cx + dx * 2.0, cy - 1.0, cx + dx * 8.0, cy - 4.0 + dy * 3.0, 2.2, rgba(CHITIN_LIGHT));
-    c.ellipse(cx + dx * 8.5, cy - 4.5 + dy * 3.2, 1.6, 1.3, rgba(KYTH_GLOW));
-    c.outline(OUTLINE);
-    c
-}
-
-/// Ravager: towering splash beetle. 34x32.
-fn paint_ravager(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(34, 32);
-    let (dx, dy) = facing_vec(f);
-    let cx = 17.0;
-    let cy = 18.0;
-    let lift = if frame == 0 { 0.0 } else { 1.0 };
-    // Six thick legs.
-    for k in 0..3 {
-        let off = -5.0 + k as f32 * 5.0;
-        c.line(cx + off, cy + 2.0, cx + off - 3.0, cy + 10.0 - lift, 1.8, rgba([58, 48, 62]));
-        c.line(cx + off, cy + 2.0, cx + off + 3.0, cy + 10.0 + lift - 1.0, 1.8, rgba([58, 48, 62]));
-    }
-    // Massive carapace with plates.
-    c.ellipse_shaded(cx - dx * 2.0, cy - 2.0, 10.0, 7.5, CHITIN);
-    c.ellipse_shaded(cx - dx * 4.0, cy - 5.0, 6.0, 4.0, CHITIN_LIGHT);
-    c.line(cx - 8.0, cy - 2.0, cx + 8.0, cy - 2.0, 1.2, rgba(scale_rgb(CHITIN, 0.7)));
-    // Team spines.
-    for k in 0..3 {
-        let sx = cx - 5.0 + k as f32 * 5.0;
-        c.line(sx, cy - 7.0, sx + 1.0, cy - 11.0, 1.4, rgba(team));
-    }
-    // Crusher claws toward facing.
+    let cx = 44.0;
+    let cy = 42.0;
+    let step = if frame == 0 { 5.0 } else { -5.0 };
+    // Four spread legs, alternating stride.
+    kleg(&mut c, cx - 6.0, cy + 4.0, cx - 18.0 + step, cy + 10.0, cx - 24.0 + step, cy + 24.0, 2.6);
+    kleg(&mut c, cx + 6.0, cy + 4.0, cx + 18.0 - step, cy + 10.0, cx + 24.0 - step, cy + 24.0, 2.6);
+    kleg(&mut c, cx - 4.0, cy + 6.0, cx - 10.0 - step, cy + 14.0, cx - 12.0 - step, cy + 26.0, 2.2);
+    kleg(&mut c, cx + 4.0, cy + 6.0, cx + 10.0 + step, cy + 14.0, cx + 12.0 + step, cy + 26.0, 2.2);
+    // Low angular dart body.
+    c.poly(&[
+        (cx - dx * 20.0 - dy * 8.0, cy - dy * 10.0 + dx * 5.0),
+        (cx + dx * 14.0, cy + dy * 8.0 - 8.0),
+        (cx + dx * 20.0, cy + dy * 10.0),
+        (cx + dx * 14.0, cy + dy * 8.0 + 6.0),
+        (cx - dx * 20.0 + dy * 8.0, cy - dy * 10.0 - dx * 5.0),
+    ], rgba(CHITIN));
+    c.dome(cx - dx * 4.0, cy - 2.0, 11.0, 7.0, scale_rgb(CHITIN, 1.15));
+    scallop(&mut c, cx - dx * 4.0, cy - 2.0, 9.0, 14.0);
+    // Twin scythe mandibles: hard tapered blades.
     for side in [-1.0f32, 1.0] {
-        let px = cx + dx * 6.0 - dy * side * 5.0;
-        let py = cy + dy * 5.0 + dx * side * 3.0;
-        c.line(px, py, px + dx * 6.5, py + dy * 4.5, 2.6, rgba(CHITIN_LIGHT));
-        c.line(px + dx * 5.0, py + dy * 3.5, px + dx * 7.0, py + dy * 5.0, 1.6, rgba(team));
+        let bx = cx + dx * 16.0 - dy * side * 7.0;
+        let by = cy + dy * 9.0 + dx * side * 4.0;
+        c.poly(&[
+            (bx, by - 2.0),
+            (bx + dx * 18.0 + dy * side * 3.0, by + dy * 9.0 - 1.0),
+            (bx + dx * 10.0, by + dy * 5.0 + 3.0),
+        ], rgba(CHITIN_LIGHT));
+        c.line(bx, by - 1.0, bx + dx * 16.0 + dy * side * 3.0, by + dy * 8.0 - 1.0, 1.4, rgba(team));
     }
-    if dy > -0.4 {
-        c.ellipse(cx + dx * 4.0, cy - 1.0 + dy * 2.0, 1.6, 1.2, rgba(KYTH_GLOW));
+    if dy > -0.5 {
+        c.set((cx + dx * 10.0 - 2.0) as i32, (cy + dy * 5.0 - 3.0) as i32, rgba(KYTH_GLOW));
+        c.set((cx + dx * 10.0 + 2.0) as i32, (cy + dy * 5.0 - 3.0) as i32, rgba(KYTH_GLOW));
+        c.glow(cx + dx * 10.0, cy + dy * 5.0 - 3.0, 5.0, KYTH_GLOW, 0.7);
     }
-    c.outline(OUTLINE);
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.3);
     c
 }
 
-/// Wisp: floating jelly flyer. 26x26.
-fn paint_wisp(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(26, 26);
+/// Spitter: slug artillery with an acid cannon. 104x96.
+fn paint_spitter(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(104, 96);
     let (dx, dy) = facing_vec(f);
-    let cx = 13.0;
-    let cy = 11.0;
-    let pulse = if frame == 0 { 0.0 } else { 1.0 };
-    // Bell.
-    c.ellipse_shaded(cx, cy, 6.0 + pulse * 0.8, 5.0 - pulse * 0.5, MEMBRANE);
-    c.ellipse(cx - 1.5, cy - 1.5, 2.5, 2.0, rgba(scale_rgb(MEMBRANE, 1.25)));
-    c.ellipse(cx + dx * 2.0, cy + dy * 1.5, 2.0, 1.6, rgba(team));
-    // Tentacles trailing away from facing.
-    for k in 0..4 {
-        let off = -4.5 + k as f32 * 3.0;
-        let sway = if (k + frame) % 2 == 0 { 1.5 } else { -1.0 };
-        c.line(
-            cx + off,
-            cy + 4.0,
-            cx + off - dx * 4.0 + sway,
-            cy + 10.0 - dy * 2.0,
-            1.1,
-            rgba(scale_rgb(MEMBRANE, 0.8)),
-        );
-    }
-    c.ellipse(cx + dx * 3.5, cy + dy * 2.0 - 1.0, 1.2, 1.0, rgba(KYTH_GLOW));
-    c.outline(OUTLINE);
-    c
-}
-
-/// Weaver: psionic tentacle node. 26x30.
-fn paint_weaver(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(26, 30);
-    let (dx, dy) = facing_vec(f);
-    let cx = 13.0;
-    let cy = 17.0;
-    // Root tentacles.
-    for k in 0..4 {
-        let off = -5.0 + k as f32 * 3.3;
-        c.line(cx + off, cy + 4.0, cx + off * 1.5, cy + 10.0, 1.3, rgba([58, 48, 62]));
-    }
-    // Bulb body.
-    c.ellipse_shaded(cx, cy, 5.5, 6.0, CHITIN);
-    c.ellipse_shaded(cx, cy - 6.0, 4.0, 3.5, CHITIN_LIGHT);
-    c.line(cx - 3.0, cy + 2.0, cx + 3.0, cy + 3.0, 1.4, rgba(team));
-    // Floating rift shards orbiting toward facing.
-    let a0 = if frame == 0 { 0.0f32 } else { 0.8 };
+    let cx = 52.0;
+    let cy = 54.0;
+    let squish = if frame == 0 { 0.0 } else { 2.0 };
+    // Slug body: three descending segments, scalloped.
+    c.dome(cx - dx * 16.0, cy + squish, 16.0, 12.0 - squish * 0.5, MEMBRANE);
+    c.dome(cx - dx * 4.0, cy - 2.0 + squish * 0.5, 18.0, 13.0, CHITIN);
+    scallop(&mut c, cx - dx * 4.0, cy - 2.0, 15.0, 20.0);
+    c.dome(cx + dx * 10.0, cy - 5.0, 12.0, 9.0, scale_rgb(CHITIN, 1.15));
+    // Team ridge spines along the back.
     for k in 0..3 {
-        let a = a0 + k as f32 * 2.1;
-        let px = cx + dx * 6.0 + a.cos() * 3.5;
-        let py = cy - 8.0 + dy * 3.0 + a.sin() * 2.0;
-        c.line(px, py - 1.5, px, py + 1.5, 1.2, rgba(KYTH_GLOW));
+        let sx = cx - 12.0 + k as f32 * 10.0;
+        c.poly(&[(sx - 2.0, cy - 12.0), (sx + 1.0, cy - 22.0 - k as f32), (sx + 4.0, cy - 12.0)], rgba(team));
+    }
+    // Acid cannon: chitin tube angled up toward facing, glowing chamber.
+    let tx = cx + dx * 26.0;
+    let ty = cy - 16.0 + dy * 10.0;
+    c.line(cx + dx * 8.0, cy - 4.0, tx, ty, 8.0, rgba(CHITIN_LIGHT));
+    c.line(cx + dx * 12.0, cy - 6.0, tx, ty, 4.0, rgba(scale_rgb(CHITIN_LIGHT, 0.7)));
+    // Muzzle maw + acid glow (charges with frame).
+    let chg = if frame == 0 { 0.55 } else { 0.95 };
+    c.dome(tx + dx * 3.0, ty + dy * 1.5, 5.0, 4.5, [46, 36, 54]);
+    c.glow(tx + dx * 3.0, ty + dy * 1.5, 9.0, KYTH_GLOW, chg);
+    c.ellipse(tx + dx * 3.0, ty + dy * 1.5, 2.5, 2.0, rgba(scale_rgb(KYTH_GLOW, 1.2)));
+    // Acid drip.
+    c.set((tx + dx * 4.0) as i32, (ty + dy * 2.0 + 5.0) as i32, rgba(KYTH_GLOW));
+    // Glow chamber on the body.
+    c.glow(cx - dx * 2.0, cy + 2.0, 7.0, KYTH_GLOW, 0.4);
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.28);
+    c
+}
+
+/// Ravager: towering siege beetle. 136x128.
+fn paint_ravager(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(136, 128);
+    let (dx, dy) = facing_vec(f);
+    let cx = 68.0;
+    let cy = 72.0;
+    let lift = if frame == 0 { 0.0 } else { 3.0 };
+    // Six thick jointed legs.
+    for k in 0..3 {
+        let off = -20.0 + k as f32 * 20.0;
+        let l = if k % 2 == 0 { lift } else { -lift };
+        kleg(&mut c, cx + off, cy + 8.0, cx + off - 14.0, cy + 22.0 - l, cx + off - 18.0, cy + 40.0 + l, 4.0);
+        kleg(&mut c, cx + off, cy + 8.0, cx + off + 14.0, cy + 24.0 + l, cx + off + 18.0, cy + 42.0 - l, 4.0);
+    }
+    // Massive tiered carapace with scalloped plate rows.
+    c.dome(cx - dx * 8.0, cy - 8.0, 40.0, 30.0, CHITIN);
+    scallop(&mut c, cx - dx * 8.0, cy - 4.0, 34.0, 40.0);
+    c.dome(cx - dx * 16.0, cy - 20.0, 26.0, 17.0, scale_rgb(CHITIN, 1.15));
+    scallop(&mut c, cx - dx * 16.0, cy - 16.0, 22.0, 28.0);
+    c.dome(cx - dx * 20.0, cy - 30.0, 15.0, 9.0, CHITIN_LIGHT);
+    // Team spine row on the crest.
+    for k in 0..4 {
+        let sx = cx - 22.0 + k as f32 * 12.0;
+        c.poly(&[(sx - 3.0, cy - 34.0), (sx, cy - 48.0 - (k % 2) as f32 * 4.0), (sx + 3.0, cy - 34.0)], rgba(team));
+        c.glow(sx, cy - 46.0, 4.0, team, 0.4);
+    }
+    // Crusher claws: huge scythe polys toward facing.
+    for side in [-1.0f32, 1.0] {
+        let px = cx + dx * 24.0 - dy * side * 20.0;
+        let py = cy + dy * 18.0 + dx * side * 12.0;
+        c.poly(&[
+            (px - 4.0, py - 6.0),
+            (px + dx * 24.0 + 2.0, py + dy * 14.0 - 4.0),
+            (px + dx * 28.0, py + dy * 17.0 + 4.0),
+            (px + dx * 12.0, py + dy * 9.0 + 8.0),
+        ], rgba(CHITIN_LIGHT));
+        c.line(px + dx * 6.0, py + dy * 3.0, px + dx * 26.0, py + dy * 15.0, 2.0, rgba(team));
+        // Serration teeth on the inner edge.
+        for t in 0..3 {
+            let f2 = 0.35 + t as f32 * 0.22;
+            c.poly(&[
+                (px + dx * 28.0 * f2 - 2.0, py + dy * 17.0 * f2 + 6.0),
+                (px + dx * 28.0 * f2 + 2.0, py + dy * 17.0 * f2 + 6.0),
+                (px + dx * 28.0 * f2, py + dy * 17.0 * f2 + 11.0),
+            ], rgba(CHITIN_LIGHT));
+        }
+    }
+    // Glowing eye cluster + underglow.
+    if dy > -0.4 {
+        let ex = cx + dx * 16.0;
+        let ey = cy - 4.0 + dy * 8.0;
+        for (ox, oy) in [(-3.0f32, -1.0f32), (0.0, -3.0), (3.0, -1.0), (0.0, 1.0)] {
+            c.set((ex + ox) as i32, (ey + oy) as i32, rgba(KYTH_GLOW));
+        }
+        c.glow(ex, ey, 8.0, KYTH_GLOW, 0.7);
+    }
+    c.glow(cx, cy + 12.0, 14.0, KYTH_GLOW, 0.25);
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.3);
+    c
+}
+
+/// Wisp: floating jelly flyer. 104x104.
+fn paint_wisp(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(104, 104);
+    let (dx, dy) = facing_vec(f);
+    let cx = 52.0;
+    let cy = 42.0;
+    let pulse = if frame == 0 { 0.0 } else { 3.0 };
+    // Bell: membrane with a translucent skirt rim.
+    c.dome(cx, cy, 24.0 + pulse, 19.0 - pulse * 0.5, MEMBRANE);
+    c.ellipse(cx, cy + 12.0 - pulse * 0.5, 26.0 + pulse, 7.0, [142, 88, 70, 120]);
+    // Chitin cap plates on the crown.
+    c.dome(cx - 6.0, cy - 12.0, 12.0, 7.0, CHITIN_LIGHT);
+    scallop(&mut c, cx - 6.0, cy - 10.0, 10.0, 12.0);
+    // Inner glow core showing through the membrane.
+    c.glow(cx, cy + 2.0, 16.0, KYTH_GLOW, 0.5);
+    c.ellipse(cx - dx * 2.0, cy + 2.0, 5.0, 5.5, rgba(scale_rgb(KYTH_GLOW, 1.1)));
+    // Team organ sac toward facing.
+    c.dome(cx + dx * 10.0, cy + dy * 6.0 + 2.0, 6.0, 5.0, team);
+    c.glow(cx + dx * 10.0, cy + dy * 6.0 + 2.0, 8.0, team, 0.5);
+    // Trailing tentacles: two-segment sway.
+    for k in 0..5 {
+        let off = -18.0 + k as f32 * 9.0;
+        let sway = if (k + frame) % 2 == 0 { 5.0 } else { -4.0 };
+        let x0 = cx + off;
+        let y0 = cy + 15.0;
+        let x1 = x0 - dx * 8.0 + sway * 0.5;
+        let y1 = y0 + 16.0 - dy * 4.0;
+        c.line(x0, y0, x1, y1, 2.4, rgba(scale_rgb(MEMBRANE, 0.8)));
+        c.line(x1, y1, x1 + sway, y1 + 18.0, 1.8, rgba(scale_rgb(MEMBRANE, 0.62)));
+        c.set((x1 + sway) as i32, (y1 + 18.0) as i32, rgba(KYTH_GLOW));
+    }
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.25);
+    c
+}
+
+/// Weaver: psionic rift node. 104x120.
+fn paint_weaver(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(104, 120);
+    let (dx, dy) = facing_vec(f);
+    let cx = 52.0;
+    let cy = 66.0;
+    // Root tentacles gripping the ground.
+    for k in 0..5 {
+        let off = -20.0 + k as f32 * 10.0;
+        c.line(cx + off, cy + 16.0, cx + off * 1.5, cy + 34.0, 3.0, LEG);
+        c.line(cx + off * 1.5, cy + 34.0, cx + off * 1.7, cy + 42.0, 2.0, LEG);
+    }
+    // Bulb body: chitin with a lighter crown, scalloped.
+    c.dome(cx, cy, 22.0, 24.0, CHITIN);
+    scallop(&mut c, cx, cy + 6.0, 19.0, 26.0);
+    c.dome(cx, cy - 22.0, 16.0, 13.0, CHITIN_LIGHT);
+    scallop(&mut c, cx, cy - 20.0, 13.0, 16.0);
+    // Team band.
+    c.line(cx - 14.0, cy + 8.0, cx + 14.0, cy + 11.0, 3.5, rgba(team));
+    // Psionic core: bright slit in the crown.
+    c.glow(cx, cy - 24.0, 14.0, KYTH_GLOW, 0.6);
+    c.rect((cx - 2.0) as i32, (cy - 32.0) as i32, 4, 14, rgba(scale_rgb(KYTH_GLOW, 1.15)));
+    // Orbiting rift shards toward facing.
+    let a0 = if frame == 0 { 0.0f32 } else { 0.8 };
+    for k in 0..4 {
+        let a = a0 + k as f32 * 1.6;
+        let px = cx + dx * 22.0 + a.cos() * 13.0;
+        let py = cy - 30.0 + dy * 10.0 + a.sin() * 7.0;
+        c.poly(&[(px - 1.5, py + 4.0), (px, py - 5.0), (px + 1.5, py + 4.0)], rgba(KYTH_GLOW));
+        c.glow(px, py, 5.0, KYTH_GLOW, 0.5);
     }
     if dy > -0.4 {
-        c.ellipse(cx + dx * 1.5, cy - 6.0, 1.6, 1.1, rgba(KYTH_GLOW));
+        c.set((cx + dx * 6.0 - 2.0) as i32, (cy - 22.0) as i32, rgba([220, 255, 180]));
+        c.set((cx + dx * 6.0 + 2.0) as i32, (cy - 22.0) as i32, rgba([220, 255, 180]));
     }
-    c.outline(OUTLINE);
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.3);
     c
 }
 
