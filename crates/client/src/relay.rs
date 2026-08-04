@@ -38,9 +38,13 @@ fn ws_net(url: &str) -> io::Result<Net> {
     match socket.get_mut() {
         MaybeTlsStream::Plain(s) => {
             let _ = s.set_read_timeout(Some(Duration::from_millis(30)));
+            // Lockstep sends 24 tiny frames/s — Nagle would batch them into
+            // 40ms clumps and feel like lag. Flush immediately.
+            let _ = s.set_nodelay(true);
         }
         MaybeTlsStream::Rustls(s) => {
             let _ = s.get_mut().set_read_timeout(Some(Duration::from_millis(30)));
+            let _ = s.get_mut().set_nodelay(true);
         }
         _ => {}
     }

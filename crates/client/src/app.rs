@@ -650,7 +650,7 @@ impl App {
         self.game_map = started.map.clone();
         self.state = new_game_mp(started.seed, started.races[0], started.races[1], &started.map);
         self.human = started.local_player;
-        self.mp = Some(Lockstep::new(started.net, started.local_player));
+        self.mp = Some(Lockstep::new(started.net, started.local_player, started.input_delay));
         self.mp_waiting = None;
         self.mp_error = None;
         self.pending.clear();

@@ -4,7 +4,7 @@
 //!
 //! The protocol is the sim's determinism made network-shaped: peers exchange
 //! ONLY commands (a few bytes a tick) plus periodic checksums. Each side
-//! schedules its local commands `INPUT_DELAY` ticks in the future and may
+//! schedules its local commands a negotiated `delay` ticks ahead and may
 //! only step tick T once it holds BOTH players' command lists for T.
 //! Desyncs are detected by comparing checksums, not prevented — if this
 //! fires, there is a determinism bug to hunt.
@@ -20,7 +20,11 @@ use crate::state::Command;
 use crate::State;
 
 /// Commands issued now execute this many ticks later (~167ms at 24Hz).
-pub const INPUT_DELAY: u32 = 4;
+/// Input-delay bounds: the host measures handshake RTT and picks a delay
+/// that keeps the lockstep pipeline deeper than the network is slow, so a
+/// relay hop doesn't stall every tick. 4 = LAN feel; 12 = 500ms pipelines.
+pub const INPUT_DELAY_MIN: u32 = 4;
+pub const INPUT_DELAY_MAX: u32 = 12;
 pub const DEFAULT_PORT: u16 = 27515;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -30,6 +34,11 @@ pub enum Msg {
     /// Handshake rejection (version mismatch etc.) — human-readable.
     Reject { reason: String },
     Cmds { tick: u32, cmds: Vec<Command>, checksum: Option<(u32, u64)> },
+    /// Handshake RTT probe: host times Ping->Pong to size the input delay.
+    Ping { k: u32 },
+    Pong { k: u32 },
+    /// Host's chosen input delay (ticks), sized to the measured RTT.
+    Go { delay: u32 },
 }
 
 /// Two builds may only play together when their sim versions match —
@@ -112,6 +121,8 @@ pub struct Started {
     pub races: [u8; 2],
     /// Map name (host's choice), resolved via `map::by_name`.
     pub map: String,
+    /// Negotiated input delay in ticks.
+    pub input_delay: u32,
 }
 
 /// Host-side handshake over any transport. The host picks the map.
@@ -137,12 +148,32 @@ pub fn host_handshake(
         }
     };
     net.send(&Msg::Start { seed, host_race: my_race, join_race, map: map.to_string() });
+    // RTT probe: one round trip through whatever transport (and relay hop)
+    // this session uses, so the input delay matches reality.
+    let t0 = std::time::Instant::now();
+    net.send(&Msg::Ping { k: 1 });
+    let rtt = loop {
+        match net.rx.recv() {
+            Ok(Msg::Pong { .. }) => break t0.elapsed(),
+            Ok(_) => continue,
+            Err(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "peer left during handshake",
+                ))
+            }
+        }
+    };
+    let rtt_ticks = (rtt.as_secs_f32() * crate::TICKS_PER_SEC as f32).ceil() as u32;
+    let input_delay = (rtt_ticks + 2).clamp(INPUT_DELAY_MIN, INPUT_DELAY_MAX);
+    net.send(&Msg::Go { delay: input_delay });
     Ok(Started {
         net,
         seed,
         local_player: 0,
         races: [my_race, join_race],
         map: map.to_string(),
+        input_delay,
     })
 }
 
@@ -150,13 +181,31 @@ pub fn host_handshake(
 pub fn join_handshake(mut net: Net, my_race: u8) -> std::io::Result<Started> {
     net.send(&Msg::Hello { race: my_race, version: PROTOCOL_VERSION.to_string() });
     match net.rx.recv() {
-        Ok(Msg::Start { seed, host_race, join_race, map }) => Ok(Started {
-            net,
-            seed,
-            local_player: 1,
-            races: [host_race, join_race],
-            map,
-        }),
+        Ok(Msg::Start { seed, host_race, join_race, map }) => {
+            // Answer the host's RTT probe, then wait for its delay pick.
+            let mut input_delay = INPUT_DELAY_MIN;
+            loop {
+                match net.rx.recv() {
+                    Ok(Msg::Ping { k }) => {
+                        net.send(&Msg::Pong { k });
+                    }
+                    Ok(Msg::Go { delay }) => {
+                        input_delay = delay.clamp(INPUT_DELAY_MIN, INPUT_DELAY_MAX);
+                        break;
+                    }
+                    Ok(_) => continue,
+                    Err(_) => break,
+                }
+            }
+            Ok(Started {
+                net,
+                seed,
+                local_player: 1,
+                races: [host_race, join_race],
+                map,
+                input_delay,
+            })
+        }
         Ok(Msg::Reject { reason }) => {
             Err(std::io::Error::new(std::io::ErrorKind::InvalidData, reason))
         }
@@ -210,6 +259,8 @@ pub fn join_async(addr: String, my_race: u8) -> Receiver<std::io::Result<Started
 pub struct Lockstep {
     pub net: Net,
     pub local_player: u8,
+    /// Negotiated pipeline depth in ticks.
+    pub delay: u32,
     local: BTreeMap<u32, Vec<Command>>,
     remote: BTreeMap<u32, Vec<Command>>,
     my_checksums: BTreeMap<u32, u64>,
@@ -220,10 +271,11 @@ pub struct Lockstep {
 }
 
 impl Lockstep {
-    pub fn new(net: Net, local_player: u8) -> Lockstep {
+    pub fn new(net: Net, local_player: u8, delay: u32) -> Lockstep {
         Lockstep {
             net,
             local_player,
+            delay,
             local: BTreeMap::new(),
             remote: BTreeMap::new(),
             my_checksums: BTreeMap::new(),
@@ -260,17 +312,17 @@ impl Lockstep {
 
     /// Attempt to advance one tick. `pending` holds the local player's
     /// commands gathered since the last call; they are scheduled
-    /// INPUT_DELAY ticks ahead. Returns false when waiting on the peer.
+    /// `delay` ticks ahead. Returns false when waiting on the peer.
     pub fn try_step(&mut self, state: &mut State, pending: &mut Vec<Command>) -> bool {
         self.pump();
         if self.disconnected || self.desync {
             return false;
         }
         let t = state.tick;
-        // Send local schedules up to t+DELAY; new input rides the last one.
-        while self.sent_until <= t + INPUT_DELAY {
+        // Send local schedules up to t+delay; new input rides the last one.
+        while self.sent_until <= t + self.delay {
             let tick = self.sent_until;
-            let cmds = if tick == t + INPUT_DELAY {
+            let cmds = if tick == t + self.delay {
                 std::mem::take(pending)
             } else {
                 Vec::new()
@@ -278,6 +330,19 @@ impl Lockstep {
             self.local.insert(tick, cmds.clone());
             let checksum = self.pending_checksum.take();
             if !self.net.send(&Msg::Cmds { tick, cmds, checksum }) {
+                self.disconnected = true;
+                return false;
+            }
+            self.sent_until += 1;
+        }
+        // Stalled with fresh input: flush it on an extra frame ahead of the
+        // pipeline instead of sitting on it — orders keep flowing even while
+        // the sim waits on the peer. Bounded so a long stall can't run away.
+        if !pending.is_empty() && self.sent_until <= t + self.delay + 8 {
+            let tick = self.sent_until;
+            let cmds = std::mem::take(pending);
+            self.local.insert(tick, cmds.clone());
+            if !self.net.send(&Msg::Cmds { tick, cmds, checksum: None }) {
                 self.disconnected = true;
                 return false;
             }
@@ -337,8 +402,8 @@ mod tests {
         };
         let mut sh = mk(&host);
         let mut sj = mk(&join);
-        let mut lh = Lockstep::new(host.net, 0);
-        let mut lj = Lockstep::new(join.net, 1);
+        let mut lh = Lockstep::new(host.net, 0, host.input_delay);
+        let mut lj = Lockstep::new(join.net, 1, join.input_delay);
 
         let mut pending_h: Vec<Command> = Vec::new();
         let mut pending_j: Vec<Command> = Vec::new();
