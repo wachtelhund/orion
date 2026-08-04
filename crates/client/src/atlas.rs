@@ -396,6 +396,9 @@ pub struct SpriteBook {
     pub burrow_mound: Region,
     /// Soft radial gradient for the additive glow pass.
     pub glow_soft: Region,
+    /// Translucent iso hemisphere shell for shield fields (white; tinted
+    /// and alpha-scaled at draw time).
+    pub shield_dome: Region,
     pub rock_wall: Region,
     /// [unit_type][team][facing][frame]. 0-6: Vanguard Combine (worker,
     /// trooper, vanguard, breaker, skywing, stormcaller, breaker-sieged).
@@ -598,6 +601,60 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
                         c.set(x, y, [255, 255, 255, a]);
                     }
                 }
+            }
+        }
+        p.place(&c)
+    };
+    let shield_dome = {
+        let (w, h) = (512, 352);
+        let mut c = Canvas::new(w, h);
+        let (cx, base, dome_h, skirt) = (256.0, 200.0, 184.0, 120.0);
+        let rx = 250.0;
+        for y in 0..h {
+            for x in 0..w {
+                let nx = (x as f32 + 0.5 - cx) / rx;
+                let fy = y as f32 + 0.5;
+                let (r, upper) = if fy <= base {
+                    (((nx * nx) + ((base - fy) / dome_h).powi(2)).sqrt(), true)
+                } else {
+                    (((nx * nx) + ((fy - base) / skirt).powi(2)).sqrt(), false)
+                };
+                if r > 1.0 {
+                    continue;
+                }
+                // Fresnel shell: bright silhouette, near-clear center.
+                let fresnel = r.powi(3);
+                let mut a = if upper { 16.0 + 120.0 * fresnel } else { 8.0 + 70.0 * fresnel };
+                // Hard rim line.
+                if r > 0.972 {
+                    a = if upper { 215.0 } else { 150.0 };
+                }
+                // Faint latitude bands sell the curvature.
+                if upper {
+                    let band = ((base - fy) / dome_h * 5.0).fract();
+                    if band < 0.12 {
+                        a += 14.0;
+                    }
+                    // Specular blob upper-left.
+                    let sd = ((nx + 0.42).powi(2) + (((base - fy) / dome_h) - 0.6).powi(2)).sqrt();
+                    if sd < 0.26 {
+                        a += (1.0 - sd / 0.26) * 70.0;
+                    }
+                }
+                c.set(x, y, [255, 255, 255, a.min(235.0) as u8]);
+            }
+        }
+        // Ground-contact ring: bright base ellipse edge.
+        for x in 0..w {
+            let nx = (x as f32 + 0.5 - cx) / rx;
+            if nx.abs() > 1.0 {
+                continue;
+            }
+            let dy = skirt * (1.0 - nx * nx).sqrt();
+            for sgn in [-1.0f32, 1.0] {
+                let yy = (base + dy * sgn) as i32;
+                c.blend(x, yy, [255, 255, 255, 90]);
+                c.blend(x, yy + 1, [255, 255, 255, 45]);
             }
         }
         p.place(&c)
@@ -848,6 +905,7 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
         trees,
         burrow_mound,
         glow_soft,
+        shield_dome,
         rock_wall,
         units,
         buildings,

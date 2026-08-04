@@ -449,12 +449,31 @@ impl App {
                 y1 = y1.max(b.y + b.h);
             }
             let pad = 26.0 * ui;
-            let head = 64.0 * ui; // room for copy above the stack
+            // Headroom above the stack only where copy actually lives there
+            // (a fixed 64ui left a dead zone on plain button pages).
+            let mut head = match self.page {
+                MenuPage::Multiplayer | MenuPage::Replays => 64.0 * ui,
+                MenuPage::UpdatePrompt => 40.0 * ui,
+                _ => 16.0 * ui,
+            };
             if matches!(self.page, MenuPage::Settings { .. }) && self.settings_tab == 1 {
                 // The keybind label columns are text, not buttons — the
                 // panel must cover them too.
                 x0 = x0.min(cx - 345.0 * ui);
                 x1 = x1.max(cx + 345.0 * ui);
+            }
+            // Pages with intro copy: the panel must be wide enough for the
+            // longest line (it used to cut straight through the text).
+            if self.page == MenuPage::Multiplayer {
+                let ts = self.ts(1.5);
+                let copy_w = self
+                    .multiplayer_copy()
+                    .iter()
+                    .map(|l| self.gfx.text_width(ts, l))
+                    .fold(0.0f32, f32::max);
+                x0 = x0.min(cx - copy_w * 0.5 - 14.0 * ui);
+                x1 = x1.max(cx + copy_w * 0.5 + 14.0 * ui);
+                head = head.max(h * 0.24 - (y0 - pad) + 60.0 * ui);
             }
             let (px, py) = (x0 - pad, y0 - pad - head);
             let (pw, ph) = (x1 - x0 + pad * 2.0, y1 - y0 + pad * 2.0 + head);
@@ -518,25 +537,7 @@ impl App {
         }
         if self.page == MenuPage::Multiplayer {
             let ts = self.ts(1.5);
-            let mut lines: Vec<String> = Vec::new();
-            if self.mp_waiting.is_some() {
-                if self.mp_private {
-                    if let Some(code) = &self.mp_lobby_code {
-                        lines.push(format!("PRIVATE LOBBY CODE:  {code}"));
-                        lines.push("SHARE IT - ONLY PEOPLE WITH THE CODE CAN JOIN.".into());
-                    }
-                } else {
-                    lines.push("LOBBY OPEN - WAITING FOR AN OPPONENT...".into());
-                    lines.push("YOUR GAME IS LISTED FOR EVERYONE TO JOIN.".into());
-                }
-            } else {
-                lines.push("CREATE A LOBBY, OR CLICK ONE BELOW TO JOIN.".into());
-                lines.push("PRIVATE LOBBIES ARE JOINED BY THEIR CODE.".into());
-            }
-            if let Some(err) = &self.mp_error {
-                lines.push(String::new());
-                lines.push(err.to_uppercase());
-            }
+            let lines = self.multiplayer_copy();
             for (k, l) in lines.iter().enumerate() {
                 let lw = self.gfx.text_width(ts, l);
                 let color = if l.starts_with("CONNECTION") { [1.0, 0.5, 0.4, 1.0] } else { dim };
@@ -611,6 +612,31 @@ impl App {
             let tc = if hover { gold } else { white };
             self.gfx.text(out, b.x + b.w * 0.5 - lw * 0.5, ly, ts, tc, &b.label);
         }
+    }
+
+    /// The multiplayer page's intro/status lines — used for both drawing
+    /// and sizing the dialog panel around them.
+    fn multiplayer_copy(&self) -> Vec<String> {
+        let mut lines: Vec<String> = Vec::new();
+        if self.mp_waiting.is_some() {
+            if self.mp_private {
+                if let Some(code) = &self.mp_lobby_code {
+                    lines.push(format!("PRIVATE LOBBY CODE:  {code}"));
+                    lines.push("SHARE IT - ONLY PEOPLE WITH THE CODE CAN JOIN.".into());
+                }
+            } else {
+                lines.push("LOBBY OPEN - WAITING FOR AN OPPONENT...".into());
+                lines.push("YOUR GAME IS LISTED FOR EVERYONE TO JOIN.".into());
+            }
+        } else {
+            lines.push("CREATE A LOBBY, OR CLICK ONE BELOW TO JOIN.".into());
+            lines.push("PRIVATE LOBBIES ARE JOINED BY THEIR CODE.".into());
+        }
+        if let Some(err) = &self.mp_error {
+            lines.push(String::new());
+            lines.push(err.to_uppercase());
+        }
+        lines
     }
 
     /// Gold frame reachable from menu drawing (hud.rs has the twin used by

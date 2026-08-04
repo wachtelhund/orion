@@ -2234,6 +2234,10 @@ impl App {
         if let Some((page, path)) = self.menu_shot.clone() {
             match page.as_str() {
                 "settings" => self.page = MenuPage::Settings { from_game: false },
+                "keys" => {
+                    self.settings_tab = 1;
+                    self.page = MenuPage::Settings { from_game: false };
+                }
                 "difficulty" => self.page = MenuPage::Difficulty,
                 "mp" => self.page = MenuPage::Multiplayer,
                 "ladder" => {
@@ -3139,6 +3143,8 @@ impl App {
         }
         let tank = self.state.spawn_unit(0, ud("breaker"), FxVec2::from_int(c.0 - 10, c.1));
         self.state.entities[tank.idx as usize].sieged = true;
+        let dome = self.state.spawn_unit(0, ud("bulwark"), FxVec2::from_int(c.0 - 6, c.1 + 3));
+        self.state.entities[dome.idx as usize].sieged = true;
         west.push(self.state.spawn_unit(0, ud("skywing"), FxVec2::from_int(c.0 - 8, c.1 + 4)));
         let caster = self.state.spawn_unit(0, ud("stormcaller"), FxVec2::from_int(c.0 - 9, c.1 - 5));
         self.state.entities[caster.idx as usize].energy = 200;
@@ -3577,12 +3583,16 @@ impl App {
                     );
                     if e.sieged {
                         if let Some((r_aura, _)) = d.shield_aura {
-                            // Translucent field dome + rim over the aura radius.
-                            let rad = r_aura.to_f32() * iso::TILE_HALF_W * 2.0 * zoom;
+                            // 3D translucent dome over the aura radius: the
+                            // base ellipse sits on the ground at the unit.
+                            let r = book.shield_dome;
+                            let w = r_aura.to_f32() * iso::TILE_HALF_W * 2.0 * 2.0 * zoom;
+                            let hgt = w * (r.h as f32 / r.w as f32);
+                            let cy2 = sy - (200.0 / 352.0 - 0.5) * hgt;
                             let tc = TEAM_COLORS[(e.owner as usize).min(1)];
-                            let pulse = 0.10 + 0.04 * (self.state.tick as f32 * 0.2).sin();
-                            self.gfx.sprite(out, book.circle, sx, sy, rad, rad * 0.5, [tc[0], tc[1], tc[2], pulse]);
-                            self.gfx.sprite(out, book.ring, sx, sy, rad, rad * 0.5, [tc[0], tc[1], tc[2], 0.4]);
+                            let pulse = 0.75 + 0.1 * (self.state.tick as f32 * 0.2).sin();
+                            self.gfx.sprite(out, r, sx, cy2, w, hgt, [tc[0], tc[1], tc[2], pulse]);
+                            self.gfx.sprite(glow, r, sx, cy2, w, hgt, [tc[0], tc[1], tc[2], 0.22]);
                         }
                     }
                     if e.amount > 0 {

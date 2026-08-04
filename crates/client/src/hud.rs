@@ -288,7 +288,7 @@ impl App {
         }
         let ui = self.ui();
         let (_, _, size) = self.minimap_rect();
-        let x0 = size + 12.0 * ui + 26.0 * ui + 12.0 * ui; // past block + shoulder
+        let x0 = size + 12.0 * ui + 18.0 * ui; // past the block step
         let tx = x0 + 104.0 * ui + 16.0 * ui;
         let sx = tx + 240.0 * ui;
         let sy = self.cam.screen_h - self.console_h() + 14.0 * ui;
@@ -401,17 +401,9 @@ impl App {
         let rb_x = w - 4.0 * (64.0 * ui) - 22.0 * ui;
         self.chrome_panel(out, 0.0, cy - rise, lw, ch + rise, false);
         self.chrome_panel(out, rb_x, cy - rise, w - rb_x, ch + rise, false);
-        // Angled shoulders bridging block tops down to the deck edge.
-        self.gfx.sprite_rot(
-            out,
-            book.shoulder,
-            lw + sh * 0.5,
-            cy - rise + sh * 0.5,
-            sh,
-            sh,
-            std::f32::consts::FRAC_PI_2,
-            WHITE,
-        );
+        // Left block meets the deck with a crisp vertical step (a diagonal
+        // shoulder here collided with the info text on some DPI scales);
+        // the right block keeps its angled shoulder — no text lives there.
         self.gfx.sprite(
             out,
             book.shoulder,
@@ -421,10 +413,11 @@ impl App {
             sh,
             WHITE,
         );
-        // Gold piping along every top edge.
+        // Gold piping along every top edge + the step riser.
         let t = 4.0 * ui;
         self.plate(out, book.gold_h, 0.0, cy - rise, lw, t);
-        self.plate(out, book.gold_h, lw + sh, cy + 2.0 * ui, rb_x - sh - (lw + sh), t);
+        self.plate(out, book.gold_v, lw - t, cy - rise, t, rise + 2.0 * ui + t);
+        self.plate(out, book.gold_h, lw, cy + 2.0 * ui, rb_x - sh - lw, t);
         self.plate(out, book.gold_h, rb_x, cy - rise, w - rb_x, t);
         // Bottom seam + rivets.
         self.plate(out, book.gold_h, 0.0, h - 3.0 * ui, w, 3.0 * ui);
@@ -435,9 +428,8 @@ impl App {
         }
         self.rivet(out, lw - 8.0 * ui, cy - rise + 9.0 * ui);
         self.rivet(out, rb_x + 8.0 * ui, cy - rise + 9.0 * ui);
-        // Vertical seams where the raised blocks meet the deck.
+        // Vertical seam where the right raised block meets the deck.
         let seam_y = cy + sh - rise + 2.0 * ui;
-        self.plate(out, book.gold_v, lw + sh - 3.0 * ui, seam_y, 3.0 * ui, h - seam_y - 3.0 * ui);
         self.plate(out, book.gold_v, rb_x - sh, seam_y, 3.0 * ui, h - seam_y - 3.0 * ui);
 
         self.draw_minimap(out);
