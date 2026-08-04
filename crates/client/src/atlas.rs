@@ -510,7 +510,8 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
                         11 => paint_wisp(facing, frame, TEAMS[team]),
                         _ => paint_weaver(facing, frame, TEAMS[team]),
                     };
-                    units.push(p.place(&c));
+                    let usc = if unit_type <= 6 { SS } else { 1.0 };
+                    units.push(p.place_s(&c, usc));
                 }
             }
         }
@@ -1250,123 +1251,199 @@ fn facing_vec(f: usize) -> (f32, f32) {
     (a.cos(), a.sin())
 }
 
-const GUNMETAL: [u8; 3] = [104, 110, 122];
-const GUNMETAL_DARK: [u8; 3] = [66, 70, 80];
+const GUNMETAL: [u8; 3] = [64, 70, 80];
+const GUNMETAL_DARK: [u8; 3] = [42, 46, 54];
+const STEEL_LIT: [u8; 3] = [126, 134, 148];
+const AMBER: [u8; 3] = [255, 186, 84];
 const VISOR: [u8; 3] = [120, 235, 255];
-const OUTLINE: Color = [16, 17, 22, 255];
+const OUTLINE: Color = [10, 11, 15, 255];
 
-/// Trooper: marine-ish infantry. 26x28.
+/// Angular armor plate: quad with a lit top-left edge and shadowed bottom.
+fn plate(c: &mut Canvas, pts: &[(f32, f32)], base: [u8; 3], f: f32) {
+    c.poly(pts, rgba(scale_rgb(base, f)));
+    // Lit edge along the first segment.
+    c.line(pts[0].0, pts[0].1, pts[1].0, pts[1].1, 1.6, rgba(scale_rgb(base, f * 1.45)));
+    let n = pts.len();
+    c.line(pts[n - 2].0, pts[n - 2].1, pts[n - 1].0, pts[n - 1].1, 1.4, rgba(scale_rgb(base, f * 0.6)));
+}
+
+/// Trooper: hard-shell infantry. 104x112.
 fn paint_trooper(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(26, 28);
+    let mut c = Canvas::new(104, 112);
     let (dx, dy) = facing_vec(f);
-    let cx = 13.0;
-    let cy = 15.0;
+    let cx = 52.0;
+    let cy = 60.0;
     let gun_behind = dy < -0.3;
 
     let gun = |c: &mut Canvas| {
-        let gx0 = cx + dx * 3.0;
-        let gy0 = cy - 1.0 + dy * 1.5;
-        c.line(gx0, gy0, gx0 + dx * 9.0, gy0 + dy * 5.0, 2.0, rgba(GUNMETAL_DARK));
-        c.line(gx0 + dx * 7.0, gy0 + dy * 3.6, gx0 + dx * 9.5, gy0 + dy * 5.2, 1.5, rgba([140, 145, 155]));
+        let gx0 = cx + dx * 12.0;
+        let gy0 = cy - 4.0 + dy * 6.0;
+        let gx1 = gx0 + dx * 38.0;
+        let gy1 = gy0 + dy * 20.0;
+        // Receiver + barrel, chunky, with a muzzle block and a glow cell.
+        c.line(gx0, gy0, gx1, gy1, 7.0, rgba(GUNMETAL_DARK));
+        c.line(gx0 + dx * 6.0, gy0 + dy * 3.0, gx1, gy1, 3.5, rgba([30, 33, 40]));
+        c.line(gx1 - dx * 5.0, gy1 - dy * 2.5, gx1, gy1, 5.5, rgba(STEEL_LIT));
+        // Underslung grip.
+        c.line(gx0 + dx * 12.0, gy0 + dy * 6.0 + 3.0, gx0 + dx * 12.0, gy0 + dy * 6.0 + 9.0, 3.0, rgba(GUNMETAL_DARK));
+        // Power cell glow.
+        c.glow(gx0 + dx * 18.0, gy0 + dy * 9.0 - 1.0, 4.5, team, 0.9);
+        c.set((gx0 + dx * 18.0) as i32, (gy0 + dy * 9.0 - 1.0) as i32, rgba(scale_rgb(team, 1.5)));
     };
     if gun_behind {
         gun(&mut c);
     }
 
-    // Legs (walk cycle: alternate 1px lift).
-    let lift = if frame == 0 { 0 } else { 1 };
-    c.rect(9, 20 + lift, 3, 6 - lift, rgba(GUNMETAL_DARK));
-    c.rect(14, 21 - lift, 3, 6 + lift - 1, rgba(GUNMETAL_DARK));
-    // Feet.
-    c.rect(8, 25, 4, 2, rgba([50, 52, 60]));
-    c.rect(14, 25, 4, 2, rgba([50, 52, 60]));
+    // Legs: angular greaves with knee plates; walk cycle alternates lift.
+    let lift = if frame == 0 { 0.0 } else { 4.0 };
+    plate(&mut c, &[(34.0, 80.0 + lift), (46.0, 80.0 + lift), (44.0, 102.0 - lift * 0.5), (36.0, 102.0 - lift * 0.5)], GUNMETAL_DARK, 1.0);
+    plate(&mut c, &[(56.0, 84.0 - lift), (68.0, 84.0 - lift), (70.0, 102.0 + lift * 0.3), (58.0, 102.0 + lift * 0.3)], GUNMETAL_DARK, 0.9);
+    // Knee plates.
+    c.poly(&[(35.0, 82.0 + lift), (45.0, 82.0 + lift), (40.0, 89.0 + lift)], rgba(GUNMETAL));
+    c.poly(&[(57.0, 86.0 - lift), (67.0, 86.0 - lift), (62.0, 93.0 - lift)], rgba(GUNMETAL));
+    // Boots.
+    c.rect(32, 100, 16, 8, rgba([32, 35, 42]));
+    c.rect(56, 102, 16, 7, rgba([28, 30, 36]));
 
-    // Torso armor.
-    c.ellipse_shaded(cx, cy, 5.0, 6.0, GUNMETAL);
-    // Team chest plate, pushed toward the facing.
-    c.ellipse(cx + dx * 2.0, cy + dy * 1.5, 2.6, 2.4, rgba(team));
-    // Shoulder pauldrons.
-    c.ellipse_shaded(cx - 6.0, cy - 2.0, 2.6, 2.4, scale_rgb(GUNMETAL, 1.05));
-    c.ellipse_shaded(cx + 6.0, cy - 2.0, 2.6, 2.4, scale_rgb(GUNMETAL, 0.9));
-    c.ellipse(cx - 6.0, cy - 3.0, 1.4, 0.9, rgba(team));
-    c.ellipse(cx + 6.0, cy - 3.0, 1.4, 0.9, rgba(team));
+    // Torso: faceted carapace — broad shoulders, tapered waist.
+    plate(&mut c, &[(30.0, 48.0), (74.0, 48.0), (68.0, 76.0), (38.0, 76.0)], GUNMETAL, 1.0);
+    // Chest angle facet toward facing.
+    c.poly(&[(34.0 + dx * 4.0, 50.0), (52.0 + dx * 8.0, 46.0 + dy * 3.0), (52.0 + dx * 8.0, 66.0), (38.0 + dx * 4.0, 70.0)], rgba(scale_rgb(GUNMETAL, 1.16)));
+    // Waist band.
+    c.rect(38, 72, 30, 5, rgba(GUNMETAL_DARK));
+    // Team power core + conduit.
+    let corex = cx + dx * 7.0;
+    let corey = cy - 2.0 + dy * 4.0;
+    c.glow(corex, corey, 8.0, team, 0.85);
+    c.poly(&[(corex - 3.0, corey - 4.0), (corex + 3.0, corey - 4.0), (corex + 2.0, corey + 4.0), (corex - 2.0, corey + 4.0)], rgba(scale_rgb(team, 1.35)));
+    c.line(corex, corey - 4.0, cx - 6.0, 40.0, 1.6, rgba(scale_rgb(team, 0.8)));
 
-    // Helmet + visor.
-    c.ellipse_shaded(cx, cy - 7.5, 3.4, 3.2, scale_rgb(GUNMETAL, 1.1));
+    // Pauldrons: heavy angular slabs with a team chevron.
+    plate(&mut c, &[(16.0, 42.0), (36.0, 38.0), (38.0, 52.0), (20.0, 56.0)], STEEL_LIT, 0.94);
+    plate(&mut c, &[(68.0, 38.0), (88.0, 42.0), (84.0, 56.0), (66.0, 52.0)], GUNMETAL, 0.9);
+    c.line(20.0, 46.0, 32.0, 43.0, 2.4, rgba(team));
+    c.line(72.0, 43.0, 84.0, 46.0, 2.4, rgba(team));
+
+    // Helmet: angular dome with a glowing visor slit (or backpack when
+    // facing away).
+    plate(&mut c, &[(42.0, 22.0), (62.0, 22.0), (64.0, 36.0), (40.0, 36.0)], scale_rgb(GUNMETAL, 1.12), 1.0);
+    c.poly(&[(42.0, 22.0), (52.0, 17.0), (62.0, 22.0)], rgba(STEEL_LIT));
     if dy > -0.5 {
-        c.ellipse(cx + dx * 1.8, cy - 7.2 + dy * 0.8, 1.8, 1.0, rgba(VISOR));
+        let vx = cx + dx * 6.0;
+        let vy = 29.0 + dy * 3.0;
+        c.line(vx - 6.0, vy, vx + 6.0, vy, 2.6, rgba(VISOR));
+        c.glow(vx, vy, 7.0, VISOR, 0.7);
     } else {
-        // Backpack when facing away.
-        c.rect(11, 6, 4, 3, rgba(GUNMETAL_DARK));
+        c.rect(44, 24, 16, 12, rgba(GUNMETAL_DARK));
+        c.rect(46, 26, 5, 8, rgba([56, 62, 72]));
+        c.rect(53, 26, 5, 8, rgba([56, 62, 72]));
+        c.glow(50.0, 38.0, 4.0, AMBER, 0.5);
     }
 
     if !gun_behind {
         gun(&mut c);
     }
-    c.outline(OUTLINE);
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.3);
     c
 }
 
-/// Fabricator: worker drone with cab + arms. 24x24.
+/// Fabricator: tracked engineering rig. 96x96.
 fn paint_worker(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(24, 24);
+    let mut c = Canvas::new(96, 96);
     let (dx, dy) = facing_vec(f);
-    let cx = 12.0;
-    let cy = 13.0;
-    let bob = if frame == 0 { 0.0 } else { -0.7 };
+    let cx = 48.0;
+    let cy = 52.0;
+    let bob = if frame == 0 { 0.0 } else { -2.0 };
 
-    // Tracks/base.
-    c.rect(7, 18, 10, 4, rgba([58, 60, 66]));
-    c.rect(6, 19, 12, 2, rgba([44, 46, 52]));
-
-    // Body pod.
-    c.ellipse_shaded(cx, cy + bob, 6.0, 5.0, [176, 160, 84]); // industrial yellow
-    c.ellipse(cx - dx * 2.0, cy + bob - dy * 1.5, 2.2, 1.8, rgba(team));
-    // Cab window toward facing.
-    if dy > -0.5 {
-        c.ellipse(cx + dx * 2.6, cy + bob + dy * 1.8 - 1.0, 2.2, 1.6, rgba([150, 230, 250]));
+    // Tracked chassis: two angular track pods with moving tread notches.
+    plate(&mut c, &[(20.0, 70.0), (76.0, 70.0), (80.0, 84.0), (16.0, 84.0)], [38, 41, 48], 1.0);
+    for k in 0..7 {
+        let notch = 20 + k * 8 + (frame as i32) * 4;
+        if notch < 76 {
+            c.rect(notch, 74, 2, 8, rgba([70, 76, 88]));
+        }
     }
-    // Arms toward facing.
-    let ax = cx + dx * 5.0;
-    let ay = cy + bob + dy * 3.0;
-    c.line(cx + dx * 2.0, cy + bob + 1.0, ax + dx * 2.5, ay, 1.8, rgba(GUNMETAL_DARK));
-    c.ellipse(ax + dx * 3.0, ay + dy * 1.0, 1.5, 1.3, rgba([120, 124, 132]));
-    // Beacon.
-    c.set(11, (cy + bob - 6.0) as i32, [255, 200, 80, 255]);
+    c.rect(14, 82, 68, 4, rgba([26, 28, 34]));
 
-    c.outline(OUTLINE);
+    // Cab: mustard industrial box with grime and a hazard band.
+    let mustard = [164, 136, 62];
+    plate(&mut c, &[(26.0, 40.0 + bob), (70.0, 40.0 + bob), (74.0, 68.0), (22.0, 68.0)], mustard, 1.0);
+    c.poly(&[(26.0, 40.0 + bob), (34.0, 32.0 + bob), (64.0, 32.0 + bob), (70.0, 40.0 + bob)], rgba(scale_rgb(mustard, 1.2)));
+    // Hazard chevrons on the skirt.
+    for k in 0..6 {
+        let x = 26 + k * 8;
+        let col = if k % 2 == 0 { [30, 30, 34] } else { [190, 158, 60] };
+        c.poly(&[(x as f32, 64.0), (x as f32 + 4.0, 64.0), (x as f32 + 8.0, 68.0), (x as f32 + 4.0, 68.0)], rgba(col));
+    }
+    // Grime streaks.
+    for k in 0..4 {
+        let h = hash2(k, 5, 313);
+        c.streak(30 + (h % 36) as i32, 46, 8 + (h % 8) as i32, [60, 50, 30], 0.35);
+    }
+    // Glazed cab window toward facing.
+    if dy > -0.5 {
+        let wx = cx + dx * 12.0;
+        let wy = 42.0 + bob + dy * 5.0;
+        c.poly(&[(wx - 8.0, wy - 4.0), (wx + 8.0, wy - 4.0), (wx + 6.0, wy + 5.0), (wx - 6.0, wy + 5.0)], rgba([110, 210, 235]));
+        c.line(wx - 7.0, wy - 3.0, wx + 7.0, wy - 3.0, 1.2, rgba([200, 245, 255]));
+    } else {
+        // Engine grill + exhaust when facing away.
+        c.rect(38, (44.0 + bob) as i32, 20, 10, rgba(GUNMETAL_DARK));
+        c.glow(58.0, 40.0 + bob, 4.0, AMBER, 0.5);
+    }
+    // Team panel on the roof.
+    c.rect(30, (34.0 + bob) as i32, 10, 5, rgba(team));
+    // Manipulator arm toward facing with hydraulic elbow + claw.
+    let ax = cx + dx * 26.0;
+    let ay = cy + bob + dy * 14.0;
+    c.line(cx + dx * 10.0, cy + bob - 2.0, cx + dx * 20.0, cy + bob - 8.0, 4.5, rgba(GUNMETAL_DARK));
+    c.line(cx + dx * 20.0, cy + bob - 8.0, ax, ay, 3.5, rgba(GUNMETAL));
+    c.line(ax, ay, ax + dx * 5.0, ay + dy * 3.0 - 3.0, 2.5, rgba(STEEL_LIT));
+    c.line(ax, ay, ax + dx * 5.0, ay + dy * 3.0 + 3.0, 2.5, rgba(STEEL_LIT));
+    // Beacon (blinks with frame).
+    if frame == 1 {
+        c.glow(cx - 14.0, 30.0 + bob, 5.0, AMBER, 0.9);
+    }
+    c.set((cx - 14.0) as i32, (30.0 + bob) as i32, rgba(AMBER));
+
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.25);
     c
 }
 
-/// Vanguard: heavy melee shock trooper. 32x32. Broad armored silhouette,
-/// energy blades on both forearms, small crested helm.
+/// Vanguard: heavy shock trooper, twin energy blades. 128x128.
 fn paint_vanguard(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(32, 32);
+    let mut c = Canvas::new(128, 128);
     let (dx, dy) = facing_vec(f);
-    let cx = 16.0;
-    let cy = 17.0;
-    let armor = scale_rgb(GUNMETAL, 0.92);
+    let cx = 64.0;
+    let cy = 68.0;
 
-    let lift = if frame == 0 { 0 } else { 1 };
-    // Wide-stance legs with armored greaves.
-    c.rect(10, 23 + lift, 4, 6 - lift, rgba(GUNMETAL_DARK));
-    c.rect(18, 24 - lift, 4, 6 + lift - 1, rgba(GUNMETAL_DARK));
-    c.rect(9, 27, 6, 3, rgba([52, 54, 62]));
-    c.rect(17, 28, 6, 3, rgba([52, 54, 62]));
+    let lift = if frame == 0 { 0.0 } else { 4.0 };
+    // Wide-stance legs: massive greaves.
+    plate(&mut c, &[(38.0, 92.0 + lift), (54.0, 92.0 + lift), (52.0, 118.0 - lift * 0.5), (40.0, 118.0 - lift * 0.5)], GUNMETAL_DARK, 1.0);
+    plate(&mut c, &[(74.0, 96.0 - lift), (90.0, 96.0 - lift), (92.0, 120.0 + lift * 0.3), (78.0, 120.0 + lift * 0.3)], GUNMETAL_DARK, 0.9);
+    c.poly(&[(39.0, 94.0 + lift), (53.0, 94.0 + lift), (46.0, 104.0 + lift)], rgba(GUNMETAL));
+    c.poly(&[(75.0, 98.0 - lift), (89.0, 98.0 - lift), (82.0, 108.0 - lift)], rgba(GUNMETAL));
+    c.rect(36, 114, 20, 10, rgba([30, 32, 38]));
+    c.rect(76, 118, 20, 9, rgba([28, 30, 36]));
 
-    // Energy blades on both forearms (drawn behind when facing away).
+    // Energy blades on both forearms.
     let blades = |c: &mut Canvas| {
         for side in [-1.0f32, 1.0] {
-            // Perpendicular offset places one arm each side of the torso.
-            let ox = -dy * side * 7.0;
-            let oy = dx * side * 4.5;
-            let px = cx + dx * 3.0 + ox;
-            let py = cy + dy * 2.0 + oy;
-            // Forearm block.
-            c.ellipse_shaded(px, py, 2.4, 2.2, scale_rgb(GUNMETAL, 1.05));
-            // Blade: thick team-colored edge with white-hot core.
-            c.line(px + dx * 1.5, py + dy * 1.0, px + dx * 9.0, py + dy * 5.5, 2.6, rgba(team));
-            c.line(px + dx * 2.5, py + dy * 1.6, px + dx * 8.5, py + dy * 5.2, 1.1, rgba([255, 255, 255]));
+            let ox = -dy * side * 28.0;
+            let oy = dx * side * 18.0;
+            let px = cx + dx * 12.0 + ox;
+            let py = cy + dy * 8.0 + oy;
+            // Forearm housing.
+            plate(c, &[(px - 6.0, py - 5.0), (px + 6.0, py - 5.0), (px + 5.0, py + 5.0), (px - 5.0, py + 5.0)], scale_rgb(GUNMETAL, 1.1), 1.0);
+            // Blade: team edge, white-hot core, halo.
+            let bx = px + dx * 34.0;
+            let by = py + dy * 20.0;
+            c.line(px + dx * 6.0, py + dy * 4.0, bx, by, 8.0, [team[0], team[1], team[2], 110]);
+            c.line(px + dx * 6.0, py + dy * 4.0, bx, by, 4.5, rgba(team));
+            c.line(px + dx * 9.0, py + dy * 6.0, bx - dx * 1.5, by - dy * 1.0, 2.0, rgba([255, 255, 255]));
+            c.glow(bx, by, 7.0, team, 0.8);
         }
     };
     let behind = dy < -0.3;
@@ -1374,153 +1451,240 @@ fn paint_vanguard(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
         blades(&mut c);
     }
 
-    // Torso: broad armored dome with a belt line.
-    c.ellipse_shaded(cx, cy, 7.5, 6.5, armor);
-    c.rect((cx - 6.0) as i32, (cy + 2.0) as i32, 12, 2, rgba(scale_rgb(armor, 0.72)));
-    // Team chest emblem, modest.
-    c.ellipse(cx + dx * 2.2, cy - 1.0 + dy * 1.5, 2.4, 2.0, rgba(team));
+    // Torso: broad faceted carapace with a vertical power core.
+    plate(&mut c, &[(32.0, 46.0), (96.0, 46.0), (88.0, 88.0), (40.0, 88.0)], GUNMETAL, 0.96);
+    c.poly(&[(38.0 + dx * 5.0, 50.0), (64.0 + dx * 10.0, 44.0 + dy * 4.0), (64.0 + dx * 10.0, 74.0), (44.0 + dx * 5.0, 82.0)], rgba(scale_rgb(GUNMETAL, 1.18)));
+    c.rect(42, 84, 44, 6, rgba(GUNMETAL_DARK));
+    // Core slit.
+    let corex = cx + dx * 9.0;
+    c.glow(corex, 64.0, 11.0, team, 0.8);
+    c.rect((corex - 2.5) as i32, 54, 5, 20, rgba(scale_rgb(team, 1.3)));
 
-    // Massive pauldrons with rim light + team stripe.
-    c.ellipse_shaded(cx - 8.5, cy - 4.0, 4.0, 3.4, scale_rgb(GUNMETAL, 1.12));
-    c.ellipse_shaded(cx + 8.5, cy - 4.0, 4.0, 3.4, scale_rgb(GUNMETAL, 0.88));
-    c.rect((cx - 11.0) as i32, (cy - 5.5) as i32, 5, 2, rgba(team));
-    c.rect((cx + 6.0) as i32, (cy - 5.5) as i32, 5, 2, rgba(team));
+    // Massive pauldrons.
+    plate(&mut c, &[(8.0, 36.0), (40.0, 30.0), (44.0, 52.0), (14.0, 58.0)], STEEL_LIT, 0.95);
+    plate(&mut c, &[(88.0, 30.0), (120.0, 36.0), (114.0, 58.0), (84.0, 52.0)], GUNMETAL, 0.88);
+    c.line(14.0, 42.0, 36.0, 37.0, 3.5, rgba(team));
+    c.line(92.0, 37.0, 114.0, 42.0, 3.5, rgba(team));
+    // Pauldron kill-spikes.
+    c.poly(&[(10.0, 38.0), (16.0, 26.0), (20.0, 37.0)], rgba(STEEL_LIT));
+    c.poly(&[(108.0, 37.0), (112.0, 26.0), (118.0, 38.0)], rgba(GUNMETAL));
 
-    // Compact helm with crest fin.
-    c.ellipse_shaded(cx, cy - 9.0, 3.0, 2.8, GUNMETAL);
-    c.rect((cx - 1.0) as i32, (cy - 14.0) as i32, 2, 5, rgba(team));
+    // Helm with crest fin.
+    plate(&mut c, &[(52.0, 26.0), (76.0, 26.0), (78.0, 42.0), (50.0, 42.0)], scale_rgb(GUNMETAL, 1.14), 1.0);
+    c.poly(&[(62.0, 8.0), (66.0, 8.0), (68.0, 28.0), (60.0, 28.0)], rgba(team));
+    c.glow(64.0, 10.0, 5.0, team, 0.6);
     if dy > -0.5 {
-        c.ellipse(cx + dx * 1.6, cy - 8.8 + dy * 0.6, 1.7, 0.9, rgba([255, 170, 90]));
+        let vx = cx + dx * 7.0;
+        let vy = 34.0 + dy * 3.0;
+        c.line(vx - 7.0, vy, vx + 7.0, vy, 3.0, rgba([255, 150, 70]));
+        c.glow(vx, vy, 8.0, [255, 150, 70], 0.7);
     } else {
-        // Thruster pack when facing away.
-        c.rect((cx - 2.0) as i32, (cy - 6.0) as i32, 4, 4, rgba(GUNMETAL_DARK));
+        c.rect(56, 30, 16, 12, rgba(GUNMETAL_DARK));
+        c.glow(64.0, 44.0, 6.0, AMBER, 0.5);
     }
 
     if !behind {
         blades(&mut c);
     }
-    c.outline(OUTLINE);
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.3);
     c
 }
 
-/// Breaker: siege tank, mobile mode. Turret tracks facing. 34x30.
+/// Breaker: siege tank, mobile mode. 136x120.
 fn paint_breaker(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(34, 30);
+    let mut c = Canvas::new(136, 120);
     let (dx, dy) = facing_vec(f);
-    let cx = 17.0;
-    let cy = 17.0;
-    // Treads: two dark tracks with moving notches.
+    let cx = 68.0;
+    let cy = 68.0;
+    // Twin treads with drive wheels and moving links.
     for side in [-1.0f32, 1.0] {
-        let ty = cy + 5.0 + side * 2.5;
-        c.rect(5, ty as i32, 24, 4, rgba([52, 54, 60]));
-        for k in 0..6 {
-            let notch = 6 + k * 4 + (frame as i32);
-            c.rect(notch, ty as i32 + 1, 1, 2, rgba([80, 84, 92]));
+        let ty = cy + 20.0 + side * 10.0;
+        plate(&mut c, &[(20.0, ty - 8.0), (116.0, ty - 8.0), (120.0, ty + 8.0), (16.0, ty + 8.0)], [36, 39, 46], 1.0);
+        for k in 0..9 {
+            let notch = 22 + k * 11 + (frame as i32) * 5;
+            if notch < 114 {
+                c.rect(notch, ty as i32 - 4, 3, 10, rgba([66, 72, 84]));
+            }
+        }
+        for k in 0..4 {
+            c.dome(34.0 + k as f32 * 22.0, ty + 1.0, 6.0, 5.0, [52, 56, 66]);
         }
     }
-    // Hull.
-    c.ellipse_shaded(cx, cy + 1.0, 10.0, 5.0, scale_rgb(GUNMETAL, 0.95));
-    c.rect((cx - 7.0) as i32, (cy + 3.0) as i32, 14, 2, rgba(team));
-    // Turret + barrel toward facing.
-    c.ellipse_shaded(cx, cy - 3.0, 5.0, 3.5, scale_rgb(GUNMETAL, 1.1));
-    c.line(cx + dx * 3.0, cy - 3.5 + dy * 1.5, cx + dx * 13.0, cy - 3.5 + dy * 6.5, 2.4, rgba(GUNMETAL_DARK));
-    c.line(cx + dx * 11.0, cy - 3.5 + dy * 5.5, cx + dx * 13.5, cy - 3.5 + dy * 6.7, 1.4, rgba([150, 155, 165]));
-    c.ellipse(cx - dx * 1.0, cy - 4.5, 1.6, 1.1, rgba(team));
-    c.outline(OUTLINE);
+    // Hull: sloped glacis + upper deck with panel seams.
+    plate(&mut c, &[(24.0, 62.0), (112.0, 62.0), (104.0, 84.0), (32.0, 84.0)], GUNMETAL_DARK, 1.0);
+    plate(&mut c, &[(30.0, 46.0), (106.0, 46.0), (112.0, 62.0), (24.0, 62.0)], GUNMETAL, 1.05);
+    c.line(48.0, 48.0, 44.0, 62.0, 1.4, rgba(GUNMETAL_DARK));
+    c.line(88.0, 48.0, 92.0, 62.0, 1.4, rgba(GUNMETAL_DARK));
+    // Team stripe along the hull side.
+    c.rect(30, 64, 76, 4, rgba(team));
+    // Engine vents at the rear with amber heat glow.
+    c.rect(30, 52, 12, 8, rgba([30, 33, 40]));
+    c.glow(36.0, 56.0, 6.0, AMBER, 0.5);
+    // Turret: angular, rotates with facing; long barrel + muzzle brake.
+    let tx = cx + dx * 4.0;
+    let ty = cy - 22.0 + dy * 3.0;
+    plate(&mut c, &[(tx - 20.0, ty - 4.0), (tx + 14.0, ty - 8.0), (tx + 20.0, ty + 8.0), (tx - 16.0, ty + 12.0)], scale_rgb(GUNMETAL, 1.12), 1.0);
+    c.glow(tx - dx * 6.0, ty + 2.0, 5.0, team, 0.8);
+    c.rect((tx - dx * 6.0 - 2.0) as i32, (ty) as i32, 4, 4, rgba(scale_rgb(team, 1.3)));
+    let bx = tx + dx * 52.0;
+    let by = ty + dy * 26.0;
+    c.line(tx + dx * 12.0, ty + dy * 6.0, bx, by, 6.0, rgba(GUNMETAL_DARK));
+    c.line(tx + dx * 16.0, ty + dy * 8.0, bx - dx * 3.0, by - dy * 1.5, 3.0, rgba([32, 35, 42]));
+    c.line(bx - dx * 6.0, by - dy * 3.0, bx, by, 8.0, rgba(STEEL_LIT));
+    // Antenna.
+    c.line(tx - 14.0, ty - 6.0, tx - 18.0, ty - 22.0, 1.3, rgba([90, 96, 108]));
+    c.set((tx - 18.0) as i32, (ty - 23.0) as i32, rgba([255, 90, 80]));
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.28);
     c
 }
 
-/// Breaker deployed: stabilizer legs, elevated long barrel. 38x34.
-fn paint_breaker_sieged(f: usize, _frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(38, 34);
+/// Breaker deployed: stabilizers out, elevated long-barrel. 152x136.
+fn paint_breaker_sieged(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(152, 136);
     let (dx, dy) = facing_vec(f);
-    let cx = 19.0;
-    let cy = 19.0;
-    // Stabilizer legs splayed to four corners.
-    for (lx, ly) in [(-11.0f32, 6.0f32), (11.0, 6.0), (-8.0, 10.0), (8.0, 10.0)] {
-        c.line(cx, cy + 2.0, cx + lx, cy + ly, 2.0, rgba(GUNMETAL_DARK));
-        c.rect((cx + lx - 2.0) as i32, (cy + ly) as i32, 4, 2, rgba([50, 52, 60]));
+    let cx = 76.0;
+    let cy = 78.0;
+    // Splayed stabilizer legs with piston shine + feet.
+    for (lx, ly) in [(-46.0f32, 26.0f32), (46.0, 26.0), (-34.0, 42.0), (34.0, 42.0)] {
+        c.line(cx, cy + 6.0, cx + lx, cy + ly, 7.0, rgba(GUNMETAL_DARK));
+        c.line(cx + lx * 0.4, cy + 6.0 + ly * 0.4, cx + lx * 0.8, cy + 6.0 + ly * 0.75, 2.5, rgba(STEEL_LIT));
+        plate(&mut c, &[(cx + lx - 9.0, cy + ly - 2.0), (cx + lx + 9.0, cy + ly - 2.0), (cx + lx + 11.0, cy + ly + 6.0), (cx + lx - 11.0, cy + ly + 6.0)], [34, 37, 44], 1.0);
     }
     // Raised hull.
-    c.ellipse_shaded(cx, cy - 1.0, 9.0, 5.0, GUNMETAL);
-    c.rect((cx - 6.0) as i32, (cy + 1.0) as i32, 12, 2, rgba(team));
-    // Recoil shield + long barrel, slightly elevated.
-    c.ellipse_shaded(cx - dx * 2.0, cy - 6.0, 4.5, 3.0, scale_rgb(GUNMETAL, 1.15));
-    c.line(cx + dx * 2.0, cy - 7.0 + dy * 1.0, cx + dx * 17.0, cy - 9.5 + dy * 7.0, 2.6, rgba(GUNMETAL_DARK));
-    c.line(cx + dx * 14.0, cy - 9.0 + dy * 5.8, cx + dx * 17.5, cy - 9.7 + dy * 7.1, 1.5, rgba([160, 165, 175]));
-    c.ellipse(cx - dx * 3.0, cy - 7.5, 1.6, 1.1, rgba(team));
-    c.outline(OUTLINE);
+    plate(&mut c, &[(36.0, 56.0), (116.0, 56.0), (108.0, 82.0), (44.0, 82.0)], GUNMETAL, 1.0);
+    c.rect(44, 74, 64, 5, rgba(team));
+    c.line(60.0, 58.0, 56.0, 74.0, 1.4, rgba(GUNMETAL_DARK));
+    c.line(92.0, 58.0, 96.0, 74.0, 1.4, rgba(GUNMETAL_DARK));
+    // Recoil shield: big angular wedge behind the gun.
+    let sx = cx - dx * 10.0;
+    let sy = cy - 34.0;
+    plate(&mut c, &[(sx - 18.0, sy - 6.0), (sx + 10.0, sy - 12.0), (sx + 16.0, sy + 10.0), (sx - 14.0, sy + 14.0)], scale_rgb(GUNMETAL, 1.15), 1.0);
+    // Elevated siege barrel: two segments, muzzle brake, charge glow.
+    let bx = cx + dx * 66.0;
+    let by = sy - 12.0 + dy * 30.0;
+    c.line(sx + dx * 10.0, sy + dy * 4.0, bx, by, 7.0, rgba(GUNMETAL_DARK));
+    c.line(sx + dx * 16.0, sy + dy * 7.0, bx - dx * 4.0, by - dy * 2.0, 3.5, rgba([32, 35, 42]));
+    c.line(bx - dx * 8.0, by - dy * 4.0, bx, by, 9.0, rgba(STEEL_LIT));
+    let chg = if frame == 0 { 0.5 } else { 0.9 };
+    c.glow(bx, by, 7.0, team, chg);
+    // Warning strobes while deployed.
+    if frame == 1 {
+        c.glow(44.0, 52.0, 6.0, AMBER, 0.9);
+        c.glow(108.0, 52.0, 6.0, AMBER, 0.9);
+    }
+    c.set(44, 52, rgba(AMBER));
+    c.set(108, 52, rgba(AMBER));
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.28);
     c
 }
 
-/// Skywing: delta-wing gunship. Drawn along its facing. 36x30.
+/// Skywing: delta-wing gunship. 144x120.
 fn paint_skywing(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(36, 30);
+    let mut c = Canvas::new(144, 120);
     let (dx, dy) = facing_vec(f);
-    // Screen-space squash for the iso look.
-    let (dy_i, px, py) = (dy * 0.6, 18.0, 15.0);
-    let nose = (px + dx * 9.0, py + dy_i * 9.0);
-    let tail = (px - dx * 8.0, py - dy_i * 8.0);
-    // Perpendicular for wings.
+    let (dy_i, px, py) = (dy * 0.6, 72.0, 60.0);
+    let nose = (px + dx * 40.0, py + dy_i * 40.0);
+    let tail = (px - dx * 30.0, py - dy_i * 30.0);
     let (wx, wy) = (-dy_i, dx * 0.6);
-    // Wings: swept back from mid-fuselage toward tail, team colored.
+    // Swept delta wings: angular panels with team edge stripes.
     for side in [-1.0f32, 1.0] {
-        let root = (px + dx * 2.0, py + dy_i * 2.0);
-        let tip = (
-            px - dx * 4.0 + wx * 11.0 * side,
-            py - dy_i * 4.0 + wy * 11.0 * side,
-        );
-        c.line(root.0, root.1, tip.0, tip.1, 3.4, rgba(scale_rgb(GUNMETAL, 0.9)));
-        c.line(
-            root.0 - dx * 2.0 + wx * 4.0 * side,
-            root.1 - dy_i * 2.0 + wy * 4.0 * side,
-            tip.0,
-            tip.1,
-            1.4,
-            rgba(team),
-        );
+        let root_f = (px + dx * 12.0, py + dy_i * 12.0);
+        let root_b = (px - dx * 16.0, py - dy_i * 16.0);
+        let tip = (px - dx * 22.0 + wx * 44.0 * side, py - dy_i * 22.0 + wy * 44.0 * side);
+        let shade = if side < 0.0 { 1.05 } else { 0.85 };
+        c.poly(&[root_f, tip, root_b], rgba(scale_rgb(GUNMETAL, shade)));
+        // Leading-edge team stripe.
+        c.line(root_f.0, root_f.1, tip.0, tip.1, 2.6, rgba(team));
+        // Wingtip nav light.
+        c.glow(tip.0, tip.1, 4.0, if side < 0.0 { [255, 80, 70] } else { [90, 255, 120] }, 0.8);
     }
-    // Fuselage.
-    c.line(nose.0, nose.1, tail.0, tail.1, 4.2, rgba(GUNMETAL));
-    c.line(nose.0, nose.1, px + dx * 4.0, py + dy_i * 4.0, 2.4, rgba(scale_rgb(GUNMETAL, 1.2)));
-    // Cockpit.
-    c.ellipse(px + dx * 4.5, py + dy_i * 4.5, 1.9, 1.4, rgba([140, 235, 255]));
-    // Engine glow (flickers with frame).
-    let g = if frame == 0 { 1.6 } else { 2.3 };
-    c.ellipse(tail.0, tail.1, g, g * 0.8, rgba([255, 170, 90]));
-    c.ellipse(tail.0, tail.1, g * 0.5, g * 0.4, rgba([255, 240, 200]));
-    c.outline(OUTLINE);
+    // Fuselage: dart-shaped hull with a raised spine.
+    c.poly(&[
+        (nose.0, nose.1),
+        (px + dx * 4.0 + wx * 9.0, py + dy_i * 4.0 + wy * 9.0),
+        (tail.0 + wx * 6.0, tail.1 + wy * 6.0),
+        (tail.0 - wx * 6.0, tail.1 - wy * 6.0),
+        (px + dx * 4.0 - wx * 9.0, py + dy_i * 4.0 - wy * 9.0),
+    ], rgba(GUNMETAL));
+    c.line(nose.0, nose.1, tail.0, tail.1, 3.0, rgba(scale_rgb(GUNMETAL, 1.25)));
+    // Chin gun pod.
+    c.line(px + dx * 16.0, py + dy_i * 16.0 + 4.0, px + dx * 30.0, py + dy_i * 30.0 + 4.0, 2.5, rgba([32, 35, 42]));
+    // Canopy glow.
+    c.poly(&[
+        (px + dx * 18.0 + wx * 4.0, py + dy_i * 18.0 + wy * 4.0),
+        (px + dx * 28.0, py + dy_i * 28.0),
+        (px + dx * 18.0 - wx * 4.0, py + dy_i * 18.0 - wy * 4.0),
+        (px + dx * 12.0, py + dy_i * 12.0),
+    ], rgba([110, 220, 245]));
+    c.glow(px + dx * 20.0, py + dy_i * 20.0, 6.0, VISOR, 0.6);
+    // Twin engines: bright cores + flame trail flicker.
+    let g = if frame == 0 { 1.0 } else { 1.45 };
+    for side in [-1.0f32, 1.0] {
+        let ex = tail.0 + wx * 8.0 * side;
+        let ey = tail.1 + wy * 8.0 * side;
+        c.glow(ex, ey, 9.0 * g, [90, 180, 255], 0.8);
+        c.ellipse(ex, ey, 3.5, 3.0, rgba([210, 240, 255]));
+        c.line(ex, ey, ex - dx * 10.0 * g, ey - dy_i * 10.0 * g, 2.0, [150, 210, 255, 160]);
+    }
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.25);
     c
 }
 
-/// Stormcaller: robed psionic with a crackling orb. 26x32.
+/// Stormcaller: robed psionic with a crackling orb. 104x128.
 fn paint_stormcaller(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(26, 32);
+    let mut c = Canvas::new(104, 128);
     let (dx, dy) = facing_vec(f);
-    let cx = 13.0;
-    let cy = 18.0;
-    let robe = [58, 60, 84];
-    // Robe: tall tapered body.
-    c.ellipse_shaded(cx, cy + 4.0, 5.5, 4.0, scale_rgb(robe, 0.9));
-    c.ellipse_shaded(cx, cy - 1.0, 4.5, 7.0, robe);
-    // Team sash.
-    c.line(cx - 3.0, cy - 4.0, cx + 3.0, cy + 4.0, 1.6, rgba(team));
-    // Hood + face glow.
-    c.ellipse_shaded(cx, cy - 9.0, 3.2, 3.4, scale_rgb(robe, 1.15));
+    let cx = 52.0;
+    let cy = 72.0;
+    let robe = [46, 48, 68];
+    // Robe: tall silhouette with a jagged, wind-torn hem.
+    c.poly(&[
+        (cx - 16.0, cy + 34.0), (cx - 10.0, cy + 28.0), (cx - 5.0, cy + 35.0),
+        (cx + 2.0, cy + 27.0), (cx + 8.0, cy + 34.0), (cx + 14.0, cy + 29.0),
+        (cx + 18.0, cy + 20.0), (cx + 12.0, cy - 24.0), (cx - 12.0, cy - 24.0), (cx - 18.0, cy + 20.0),
+    ], rgba(robe));
+    // Lit fold + deep shadow folds.
+    c.line(cx - 10.0, cy - 20.0, cx - 14.0, cy + 28.0, 2.5, rgba(scale_rgb(robe, 1.35)));
+    c.line(cx + 2.0, cy - 18.0, cx + 4.0, cy + 24.0, 2.0, rgba(scale_rgb(robe, 0.62)));
+    c.line(cx + 10.0, cy - 16.0, cx + 13.0, cy + 22.0, 1.6, rgba(scale_rgb(robe, 0.62)));
+    // Team sash + belt sigil.
+    c.line(cx - 10.0, cy - 14.0, cx + 10.0, cy + 12.0, 4.0, rgba(team));
+    c.glow(cx, cy + 2.0, 6.0, team, 0.6);
+    // Shoulder cowl: angular.
+    plate(&mut c, &[(cx - 16.0, cy - 28.0), (cx + 16.0, cy - 28.0), (cx + 12.0, cy - 16.0), (cx - 12.0, cy - 16.0)], scale_rgb(robe, 1.15), 1.0);
+    // Hood: peaked, face in shadow with glowing eyes.
+    c.poly(&[(cx - 9.0, cy - 30.0), (cx, cy - 48.0), (cx + 9.0, cy - 30.0), (cx + 7.0, cy - 24.0), (cx - 7.0, cy - 24.0)], rgba(scale_rgb(robe, 1.2)));
+    c.poly(&[(cx - 5.0, cy - 32.0), (cx + 5.0, cy - 32.0), (cx + 4.0, cy - 25.0), (cx - 4.0, cy - 25.0)], rgba([14, 14, 22]));
     if dy > -0.4 {
-        c.ellipse(cx + dx * 1.4, cy - 9.0 + dy * 0.8, 1.6, 1.1, rgba([150, 240, 255]));
+        let ex = cx + dx * 2.5;
+        c.set((ex - 2.0) as i32, (cy - 29.0) as i32, rgba([150, 240, 255]));
+        c.set((ex + 2.0) as i32, (cy - 29.0) as i32, rgba([150, 240, 255]));
+        c.glow(ex, cy - 29.0, 5.0, VISOR, 0.6);
     }
-    // Floating orb toward facing, crackling.
-    let ox = cx + dx * 7.0;
-    let oy = cy - 4.0 + dy * 3.0;
-    c.ellipse(ox, oy, 2.6, 2.6, rgba([64, 210, 230]));
-    c.ellipse(ox - 0.8, oy - 0.8, 1.0, 1.0, rgba([230, 255, 255]));
+    // Storm orb held toward facing: layered glow + crackling arcs.
+    let ox = cx + dx * 28.0;
+    let oy = cy - 16.0 + dy * 12.0;
+    c.glow(ox, oy, 16.0, [64, 210, 230], 0.55);
+    c.ellipse(ox, oy, 7.0, 7.0, rgba([64, 210, 230]));
+    c.ellipse(ox - 2.0, oy - 2.0, 3.0, 3.0, rgba([230, 255, 255]));
     let a0 = if frame == 0 { 0.6f32 } else { 2.2 };
-    for k in 0..3 {
-        let a = a0 + k as f32 * 2.1;
-        c.line(ox, oy, ox + a.cos() * 4.5, oy + a.sin() * 4.5, 1.0, [170, 245, 255, 200]);
+    for k in 0..4 {
+        let a = a0 + k as f32 * 1.65;
+        let r1 = 12.0 + (hash2(k, f as i32, 89) % 6) as f32;
+        // Jagged two-segment arc.
+        let mx = ox + (a.cos() * r1 * 0.6) + 2.0;
+        let my = oy + (a.sin() * r1 * 0.6) - 2.0;
+        c.line(ox, oy, mx, my, 1.4, [170, 245, 255, 220]);
+        c.line(mx, my, ox + a.cos() * r1, oy + a.sin() * r1, 1.2, [170, 245, 255, 180]);
     }
-    c.outline(OUTLINE);
+    // Arm reaching to the orb.
+    c.line(cx + dx * 8.0, cy - 14.0, ox - dx * 6.0, oy + 2.0, 3.5, rgba(scale_rgb(robe, 1.1)));
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.3);
     c
 }
 
