@@ -43,6 +43,14 @@ struct Params {
     counter_build: bool,
     /// Pull endangered workers out of harm's way.
     worker_flee: bool,
+    /// Guard/strike squad split + staging (off = old whole-army waves).
+    use_squads: bool,
+    /// Engagement score (x100) required to launch a push.
+    attack_score: i64,
+    /// Score below which a push comes home.
+    retreat_score: i64,
+    /// Ranged units focus-fire the weakest target in range.
+    focus_fire: bool,
 }
 
 impl Difficulty {
@@ -61,6 +69,10 @@ impl Difficulty {
                 react_interval: 24 * 3,
                 counter_build: false,
                 worker_flee: false,
+                use_squads: false,
+                attack_score: 0,
+                retreat_score: 0,
+                focus_fire: false,
             },
             Difficulty::Normal => Params {
                 think_interval: 12,
@@ -72,9 +84,13 @@ impl Difficulty {
                 mineral_buffer: 100,
                 use_forge: true,
                 memory_ticks: 24 * 15,
-                react_interval: 24 * 2,
+                react_interval: 24 * 4,
                 counter_build: true,
                 worker_flee: true,
+                use_squads: true,
+                attack_score: 95, // optimistic: pushes near-even fights
+                retreat_score: 45,
+                focus_fire: true,
             },
             Difficulty::Hard => Params {
                 think_interval: 6,
@@ -86,9 +102,13 @@ impl Difficulty {
                 mineral_buffer: 40,
                 use_forge: true,
                 memory_ticks: 24 * 30,
-                react_interval: 12,
+                react_interval: 24 * 2,
                 counter_build: true,
                 worker_flee: true,
+                use_squads: true,
+                attack_score: 110, // picks winning fights
+                retreat_score: 60,
+                focus_fire: true,
             },
         }
     }
@@ -100,10 +120,9 @@ impl Difficulty {
 #[derive(Clone, Copy)]
 struct Sighting {
     pos: FxVec2,
-    /// Supply-weighted strength, split by what stands on the ground vs
-    /// what flies (the split decides who can even shoot back).
-    ground: u32,
-    air: u32,
+    /// REAL aggregate combat profile of what was seen here — same scale
+    /// as our own side's evaluation, so engagement scores mean something.
+    power: crate::ai_combat::SidePower,
     /// Any enemy structure here (attack targets + "their base is there").
     building: bool,
     tick: u32,
@@ -112,6 +131,10 @@ struct Sighting {
 pub struct Bot {
     pub player: u8,
     pub difficulty: Difficulty,
+    /// A/B benchmark switch: true disables perception/memory/defense/
+    /// posture/counter-build, reverting to the old open-loop bot. Used by
+    /// the arena example to MEASURE how much the intelligence is worth.
+    pub legacy: bool,
     /// Personality: small deterministic offsets to timings/caps so games
     /// against (and between) bots vary run to run.
     pub style: u64,
@@ -123,6 +146,26 @@ pub struct Bot {
     memory: Vec<(i32, Sighting)>,
     last_defense_tick: u32,
     last_flee_tick: u32,
+    /// Home guard: units that stay near the base and intercept threats.
+    last_score: i64,
+    last_known: i64,
+    /// One concentrated army ball — splitting into home-guard + strike
+    /// lost fights by defeat-in-detail (measured in the arena).
+    ball: BallState,
+    /// A base threat existed on the previous think (repel detection).
+    had_threat: bool,
+    last_rally_tick: u32,
+    last_focus_tick: u32,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum BallState {
+    /// Assembled at the ramp anchor, letting attackers walk into us.
+    Hold,
+    /// Committed to an attack across the map.
+    Push,
+    /// Coming home to the anchor after a bad fight.
+    Retreat,
 }
 
 impl Bot {
@@ -138,13 +181,37 @@ impl Bot {
         Bot {
             player,
             difficulty,
+            legacy: false,
             style,
             last_attack_tick: 0,
             scouted: false,
             memory: Vec::new(),
             last_defense_tick: 0,
             last_flee_tick: 0,
+            last_score: 0,
+            last_known: 0,
+            ball: BallState::Hold,
+            had_threat: false,
+            last_rally_tick: 0,
+            last_focus_tick: 0,
         }
+    }
+
+    // Debug taps for the probe example (cheap, read-only).
+    pub fn dbg_guard(&self) -> usize {
+        0
+    }
+    pub fn dbg_strike(&self) -> usize {
+        matches!(self.ball, BallState::Push) as usize
+    }
+    pub fn dbg_pushing(&self) -> bool {
+        matches!(self.ball, BallState::Push)
+    }
+    pub fn dbg_score(&self) -> i64 {
+        self.last_score
+    }
+    pub fn dbg_known(&self) -> i64 {
+        self.last_known
     }
 
     pub fn think(&mut self, s: &State) -> Vec<(u8, Command)> {
@@ -295,10 +362,10 @@ impl Bot {
 
         // ---- perception: fog-honest view of the enemy, folded into a
         // decaying memory so scouting information actually gets USED ----
+        let legacy = self.legacy;
         let cell = |pos: FxVec2| -> i32 {
             (pos.y.floor_int() / 8) * 64 + (pos.x.floor_int() / 8)
         };
-        let strength_of = |d: &crate::UnitDef| -> u32 { d.supply * 4 + 2 };
         // Current vision pass: per-cell aggregation of visible enemies.
         let mut seen_now: Vec<(i32, Sighting)> = Vec::new();
         for e in s.entities.iter() {
@@ -312,23 +379,39 @@ impl Bot {
                 continue;
             }
             let c = cell(e.pos);
-            let (g, a, b) = match e.kind {
+            let mut power = crate::ai_combat::SidePower::default();
+            let mut building = false;
+            match e.kind {
                 EntityKind::Unit => {
-                    let d = &s.data.units[e.def as usize];
-                    if d.fly { (0, strength_of(d), false) } else { (strength_of(d), 0, false) }
+                    let lvl = s.players[e.owner as usize].weapons_level as u32;
+                    power.add_unit(&s.data.units[e.def as usize], e.hp, lvl);
                 }
-                EntityKind::Building => (0, 0, true),
+                EntityKind::Building => {
+                    building = true;
+                    // Tech inference: a structure that trains flyers means
+                    // air is COMING — pretend one wing already exists so
+                    // counter-build reacts before the first one flies.
+                    let b = &s.data.buildings[e.def as usize];
+                    if let Some(&u) =
+                        b.trains.iter().find(|&&u| s.data.units[u as usize].fly)
+                    {
+                        let d = &s.data.units[u as usize];
+                        power.add_unit(d, d.hp, 0);
+                    }
+                }
                 EntityKind::Resource => unreachable!(),
-            };
+            }
             match seen_now.iter_mut().find(|(cc, _)| *cc == c) {
                 Some((_, sg)) => {
-                    sg.ground += g;
-                    sg.air += a;
-                    sg.building |= b;
+                    sg.power.dps_ground += power.dps_ground;
+                    sg.power.dps_air += power.dps_air;
+                    sg.power.hp_ground += power.hp_ground;
+                    sg.power.hp_air += power.hp_air;
+                    sg.building |= building;
                 }
                 None => seen_now.push((
                     c,
-                    Sighting { pos: e.pos, ground: g, air: a, building: b, tick: s.tick },
+                    Sighting { pos: e.pos, power, building, tick: s.tick },
                 )),
             }
         }
@@ -343,14 +426,21 @@ impl Bot {
         self.memory.extend(seen_now.iter().cloned());
         self.memory.sort_unstable_by_key(|(c, _)| *c);
 
-        // What the enemy has, as far as we know.
-        let known_air: u32 = self.memory.iter().map(|(_, sg)| sg.air).sum();
-        let known_ground: u32 = self.memory.iter().map(|(_, sg)| sg.ground).sum();
+        // What the enemy has, as far as we know (real combat profile).
+        let mut known_power = crate::ai_combat::SidePower::default();
+        for (_, sg) in &self.memory {
+            known_power.dps_ground += sg.power.dps_ground;
+            known_power.dps_air += sg.power.dps_air;
+            known_power.hp_ground += sg.power.hp_ground;
+            known_power.hp_air += sg.power.hp_air;
+        }
+        let known_air: u32 = (known_power.hp_air / 12).max(0) as u32;
+        let known_ground: u32 = (known_power.hp_ground / 12).max(0) as u32;
         let known_army = known_air + known_ground;
 
         // ---- threat evaluation: enemy strength near each of our bases ----
-        let mut base_threat: Option<(FxVec2, u32, u32)> = None; // pos, ground, air
-        let radius_sq = (crate::Fx::from_int(16).0 as i64).pow(2);
+        let mut base_threat: Option<(FxVec2, crate::ai_combat::SidePower)> = None;
+        let radius_sq = (crate::Fx::from_int(12).0 as i64).pow(2);
         for e in s.entities.iter() {
             if !(e.alive
                 && e.owner == p
@@ -359,19 +449,26 @@ impl Bot {
             {
                 continue;
             }
-            let (mut tg, mut ta) = (0u32, 0u32);
+            let mut tp = crate::ai_combat::SidePower::default();
             let mut tpos = None;
             for (_, sg) in &self.memory {
+                if sg.building {
+                    continue; // enemy structures near us are not a raid
+                }
                 if crate::fixed::dist_sq_raw(e.pos, sg.pos) <= radius_sq {
-                    tg += sg.ground;
-                    ta += sg.air;
+                    tp.dps_ground += sg.power.dps_ground;
+                    tp.dps_air += sg.power.dps_air;
+                    tp.hp_ground += sg.power.hp_ground;
+                    tp.hp_air += sg.power.hp_air;
                     tpos.get_or_insert(sg.pos);
                 }
             }
-            if tg + ta > 0 {
-                let worse = base_threat.map_or(true, |(_, bg, ba)| tg + ta > bg + ba);
+            if tp.hp_ground + tp.hp_air > 0 {
+                let worse = base_threat
+                    .as_ref()
+                    .map_or(true, |(_, bp)| tp.hp_ground + tp.hp_air > bp.hp_ground + bp.hp_air);
                 if worse {
-                    base_threat = Some((tpos.unwrap(), tg, ta));
+                    base_threat = Some((tpos.unwrap(), tp));
                 }
             }
         }
@@ -511,11 +608,12 @@ impl Bot {
                         .map_or(false, |w| w.air)
                 })
                 .count() as u32;
-            let need_aa = prm.counter_build && known_air > 0 && own_aa * 8 < known_air;
+            let need_aa =
+                !legacy && prm.counter_build && known_air > 0 && own_aa * 8 < known_air;
             let score = |u: DefId| -> i64 {
                 let d = &s.data.units[u as usize];
                 let mut v = (d.cost_minerals + d.cost_gas) as i64;
-                if prm.counter_build {
+                if prm.counter_build && !legacy {
                     let hits_air = d.weapon.as_ref().map_or(false, |w| w.air);
                     if known_air > known_ground && hits_air {
                         v += 220;
@@ -550,139 +648,240 @@ impl Bot {
             }
         }
 
-        // ---- attack posture: strength-aware, not a blind timer. Attack
-        // when we outmatch what we KNOW the enemy fields (memory-fed by
-        // scouting), never while the home base is under threat; target the
-        // nearest remembered enemy structure ----
-        let own_army_strength: u32 = army
-            .iter()
-            .filter_map(|id| s.get(*id))
-            .map(|e| strength_of(&s.data.units[e.def as usize]))
-            .sum();
+        // ---- the army ball: ONE concentrated force with a state machine.
+        // Hold at the ramp anchor (attackers walk into the ball), push
+        // across the map when the fight math wins, retreat when it turns.
+        // Splitting the army lost fights by defeat-in-detail — measured. ----
+        let anchor = self.defense_anchor(s);
+        let army_ids: Vec<u32> = army.iter().map(|id| id.idx).collect();
+        let army_power = crate::ai_combat::power_of_units(
+            s,
+            &army_ids,
+            s.players[p as usize].weapons_level as u32,
+        );
+        let fight_score = crate::ai_combat::engagement_score(army_power, known_power);
+        self.last_score = fight_score;
+        self.last_known = known_power.hp_ground + known_power.hp_air;
         let late_game = s.tick > 24 * 60 * 13;
-        let outmatch = own_army_strength >= known_army + known_army / 5;
-        if army_supply >= prm.attack_supply
-            && base_threat.is_none()
-            && (outmatch || known_army == 0 || late_game)
-            && s.tick.saturating_sub(self.last_attack_tick) >= prm.reattack_interval
-        {
-            let enemy_start = s.map.starts[(1 - p as usize).min(s.map.starts.len() - 1)];
-            let hq_pos = hq.map(|i| s.entities[i as usize].pos);
-            let target = self
-                .memory
-                .iter()
-                .filter(|(_, sg)| sg.building)
-                .min_by_key(|(c, sg)| {
-                    let d = hq_pos
-                        .map(|hp| crate::fixed::dist_sq_raw(hp, sg.pos))
-                        .unwrap_or(i64::MAX);
-                    (d, *c)
-                })
-                .map(|(_, sg)| sg.pos)
-                .unwrap_or_else(|| enemy_start.center());
-            cmds.push(Command::AttackMove { units: army.clone(), target, queued: false });
-            self.last_attack_tick = s.tick;
-        }
-        // Retreat: mid-push discovery that we're badly outmatched sends the
-        // army home instead of feeding it away (late game excepted — the
-        // map is mined out, there is nothing to save up for).
-        else if !late_game
-            && self.last_attack_tick > 0
-            && s.tick.saturating_sub(self.last_attack_tick) < prm.reattack_interval
-            && known_army > own_army_strength * 2
-            && base_threat.is_none()
-        {
-            if let Some(hq_idx) = hq {
-                let home = s.entities[hq_idx as usize].pos;
-                let far: Vec<EntityId> = army
-                    .iter()
-                    .copied()
-                    .filter(|id| {
-                        s.get(*id).map_or(false, |e| {
-                            crate::fixed::dist_sq_raw(e.pos, home)
-                                > (crate::Fx::from_int(24).0 as i64).pow(2)
-                        })
-                    })
-                    .collect();
-                if !far.is_empty() {
-                    cmds.push(Command::Move { units: far, target: home, queued: false });
-                    // Back off the next push a little.
-                    self.last_attack_tick = s.tick;
-                }
-            }
-        }
+        let held_back =
+            s.tick.saturating_sub(self.last_attack_tick) >= prm.reattack_interval * 2;
 
-        // ---- base defense: the reported hole. A threat at home gets an
-        // interception force made of units that can actually SHOOT it —
-        // air harass answered by anti-air, not by melee staring upward ----
-        if let Some((tpos, tg, ta)) = base_threat {
-            if s.tick.saturating_sub(self.last_defense_tick) >= prm.react_interval {
-                let mut defenders: Vec<(i64, EntityId, u32)> = Vec::new();
-                for &id in &army {
-                    let Some(e) = s.get(id) else { continue };
-                    let d = &s.data.units[e.def as usize];
-                    let hits_air = d.weapon.as_ref().map_or(false, |w| w.air);
-                    let hits_ground = d.weapon.is_some() || d.weapon_siege.is_some();
-                    // Useful against this particular threat mix?
-                    let useful = (ta > 0 && hits_air) || (tg > 0 && hits_ground);
-                    if useful {
-                        defenders.push((
-                            crate::fixed::dist_sq_raw(e.pos, tpos),
-                            id,
-                            strength_of(d),
-                        ));
-                    }
-                }
-                defenders.sort_unstable_by_key(|(d, id, _)| (*d, id.idx));
-                // Send enough to outmatch the threat by 25%.
-                let want = (tg + ta) + (tg + ta) / 4;
-                let mut sent = 0u32;
-                let mut squad: Vec<EntityId> = Vec::new();
-                for (_, id, st) in defenders {
-                    if sent >= want {
-                        break;
-                    }
-                    squad.push(id);
-                    sent += st;
-                }
-                if !squad.is_empty() {
-                    cmds.push(Command::AttackMove { units: squad, target: tpos, queued: false });
-                    self.last_defense_tick = s.tick;
-                }
-                // Workers flee when the threat outguns what we sent.
-                if prm.worker_flee
-                    && sent < tg + ta
-                    && s.tick.saturating_sub(self.last_flee_tick) >= prm.react_interval * 2
-                {
-                    let danger_sq = (crate::Fx::from_int(9).0 as i64).pow(2);
-                    let fleeing: Vec<EntityId> = workers
-                        .iter()
-                        .filter(|&&w| {
-                            crate::fixed::dist_sq_raw(s.entities[w as usize].pos, tpos)
-                                <= danger_sq
-                        })
-                        .map(|&w| s.id_of(w))
-                        .collect();
-                    if !fleeing.is_empty() {
-                        // Run directly away from the threat, toward map center.
-                        if let Some(hq_idx) = hq {
-                            let hp = s.entities[hq_idx as usize].pos;
-                            let away = FxVec2::new(
-                                hp.x + (hp.x - tpos.x),
-                                hp.y + (hp.y - tpos.y),
-                            );
-                            let away = s.map.clamp_pos(away);
-                            cmds.push(Command::Move {
-                                units: fleeing,
-                                target: away,
+        if prm.use_squads && !legacy {
+            match self.ball {
+                BallState::Hold => {
+                    // Home threat: engage it when the math says we win or
+                    // it reaches our workers — otherwise stay concentrated
+                    // at the choke and make them come to us.
+                    if let Some((tpos, them)) = base_threat {
+                        let vs = crate::ai_combat::engagement_score(army_power, them);
+                        let urgent = hq
+                            .map(|i| {
+                                crate::fixed::dist_sq_raw(
+                                    s.entities[i as usize].pos,
+                                    tpos,
+                                ) <= (crate::Fx::from_int(9).0 as i64).pow(2)
+                            })
+                            .unwrap_or(false);
+                        if (vs >= 80 || urgent)
+                            && s.tick.saturating_sub(self.last_defense_tick)
+                                >= prm.react_interval
+                            && !army.is_empty()
+                        {
+                            // Only units that can shoot this threat mix.
+                            let squad: Vec<EntityId> = army
+                                .iter()
+                                .copied()
+                                .filter(|id| {
+                                    let Some(e) = s.get(*id) else { return false };
+                                    let d = &s.data.units[e.def as usize];
+                                    let aa = d.weapon.as_ref().map_or(false, |w| w.air);
+                                    let ag =
+                                        d.weapon.is_some() || d.weapon_siege.is_some();
+                                    (them.hp_air > 0 && aa)
+                                        || (them.hp_ground > 0 && ag)
+                                })
+                                .collect();
+                            if !squad.is_empty() {
+                                cmds.push(Command::AttackMove {
+                                    units: squad,
+                                    target: tpos,
+                                    queued: false,
+                                });
+                                self.last_defense_tick = s.tick;
+                            }
+                        }
+                        // Workers flee only when the whole ball loses.
+                        if prm.worker_flee
+                            && vs < 60
+                            && s.tick.saturating_sub(self.last_flee_tick)
+                                >= prm.react_interval * 2
+                        {
+                            let danger_sq = (crate::Fx::from_int(9).0 as i64).pow(2);
+                            let fleeing: Vec<EntityId> = workers
+                                .iter()
+                                .filter(|&&w| {
+                                    crate::fixed::dist_sq_raw(
+                                        s.entities[w as usize].pos,
+                                        tpos,
+                                    ) <= danger_sq
+                                })
+                                .map(|&w| s.id_of(w))
+                                .collect();
+                            if !fleeing.is_empty() {
+                                if let Some(hq_idx) = hq {
+                                    let hp = s.entities[hq_idx as usize].pos;
+                                    let away = s.map.clamp_pos(FxVec2::new(
+                                        hp.x + (hp.x - tpos.x),
+                                        hp.y + (hp.y - tpos.y),
+                                    ));
+                                    cmds.push(Command::Move {
+                                        units: fleeing,
+                                        target: away,
+                                        queued: false,
+                                    });
+                                    self.last_flee_tick = s.tick;
+                                }
+                            }
+                        }
+                    } else {
+                        // No threat: keep the ball assembled at the anchor
+                        // (new units walk there instead of loitering).
+                        if s.tick.saturating_sub(self.last_rally_tick) >= 24 * 4 {
+                            let scattered: Vec<EntityId> = army
+                                .iter()
+                                .copied()
+                                .filter(|id| {
+                                    s.get(*id).map_or(false, |e| {
+                                        crate::fixed::dist_sq_raw(e.pos, anchor)
+                                            > (crate::Fx::from_int(8).0 as i64).pow(2)
+                                    })
+                                })
+                                .collect();
+                            if scattered.len() > 1 {
+                                cmds.push(Command::AttackMove {
+                                    units: scattered,
+                                    target: anchor,
+                                    queued: false,
+                                });
+                                self.last_rally_tick = s.tick;
+                            }
+                        }
+                        // Launch: winning math (or ignorance, or timing
+                        // pressure) + supply threshold. A wave we just
+                        // repelled opens a counter-window: the enemy is at
+                        // its weakest right after its push dies.
+                        let repelled = self.had_threat;
+                        let go = fight_score >= prm.attack_score
+                            || (repelled && fight_score >= 90)
+                            || known_army == 0
+                            || late_game
+                            || held_back;
+                        if army_supply >= prm.attack_supply
+                            && go
+                            && s.tick.saturating_sub(self.last_attack_tick)
+                                >= prm.reattack_interval
+                            && !army.is_empty()
+                        {
+                            let target = self.attack_target(s, hq);
+                            cmds.push(Command::AttackMove {
+                                units: army.clone(),
+                                target,
                                 queued: false,
                             });
-                            self.last_flee_tick = s.tick;
+                            self.last_attack_tick = s.tick;
+                            self.ball = BallState::Push;
                         }
                     }
                 }
+                BallState::Push => {
+                    // Full recall only when home is genuinely burning.
+                    let home_burning = base_threat
+                        .as_ref()
+                        .map(|(tpos, them)| {
+                            them.hp_ground + them.hp_air > 100
+                                && hq.map_or(false, |i| {
+                                    crate::fixed::dist_sq_raw(
+                                        s.entities[i as usize].pos,
+                                        *tpos,
+                                    ) <= (crate::Fx::from_int(12).0 as i64)
+                                        .pow(2)
+                                })
+                        })
+                        .unwrap_or(false);
+                    if home_burning && !late_game {
+                        cmds.push(Command::AttackMove {
+                            units: army.clone(),
+                            target: base_threat.as_ref().unwrap().0,
+                            queued: false,
+                        });
+                        self.ball = BallState::Hold;
+                        self.last_defense_tick = s.tick;
+                    } else if fight_score < prm.retreat_score && !late_game {
+                        cmds.push(Command::Move {
+                            units: army.clone(),
+                            target: anchor,
+                            queued: false,
+                        });
+                        self.ball = BallState::Retreat;
+                        self.last_attack_tick = s.tick;
+                    } else if known_army == 0
+                        && s.tick.saturating_sub(self.last_attack_tick)
+                            >= prm.reattack_interval
+                    {
+                        // Push went stale (target cleared): re-target.
+                        let target = self.attack_target(s, hq);
+                        cmds.push(Command::AttackMove {
+                            units: army.clone(),
+                            target,
+                            queued: false,
+                        });
+                        self.last_attack_tick = s.tick;
+                    }
+                }
+                BallState::Retreat => {
+                    // Arrived home (or died trying): hold.
+                    let centroid = {
+                        let (mut sx, mut sy, mut n) = (0i64, 0i64, 0i64);
+                        for id in &army {
+                            if let Some(e) = s.get(*id) {
+                                sx += e.pos.x.0 as i64;
+                                sy += e.pos.y.0 as i64;
+                                n += 1;
+                            }
+                        }
+                        if n == 0 {
+                            None
+                        } else {
+                            Some(FxVec2::new(
+                                crate::Fx((sx / n) as i32),
+                                crate::Fx((sy / n) as i32),
+                            ))
+                        }
+                    };
+                    let arrived = centroid.map_or(true, |c| {
+                        crate::fixed::dist_sq_raw(c, anchor)
+                            <= (crate::Fx::from_int(10).0 as i64).pow(2)
+                    });
+                    if arrived {
+                        self.ball = BallState::Hold;
+                    }
+                }
+            }
+        } else {
+            // Legacy / Easy: the old timer waves with the whole army.
+            let go = legacy || fight_score >= prm.attack_score || known_army == 0 || late_game || held_back;
+            if army_supply >= prm.attack_supply
+                && go
+                && s.tick.saturating_sub(self.last_attack_tick) >= prm.reattack_interval
+                && !army.is_empty()
+            {
+                let target = self.attack_target(s, hq);
+                cmds.push(Command::AttackMove { units: army.clone(), target, queued: false });
+                self.last_attack_tick = s.tick;
             }
         }
+
+        self.had_threat = base_threat.is_some();
 
         // ---- combat micro: siege positioning + storms; fog-honest (only
         // reacts to enemies the player can actually see) ----
@@ -707,7 +906,8 @@ impl Bot {
                 continue;
             }
             let w = s.data.units[e.def as usize].weapon_siege.as_ref().unwrap();
-            let max_sq = (w.range.0 as i64) * (w.range.0 as i64);
+            let deploy_r = w.range + Fx::from_int(3);
+            let max_sq = (deploy_r.0 as i64) * (deploy_r.0 as i64);
             let min_sq = (w.min_range.0 as i64) * (w.min_range.0 as i64);
             let out_r = w.range + Fx::from_int(2);
             let out_sq = (out_r.0 as i64) * (out_r.0 as i64);
@@ -775,6 +975,73 @@ impl Bot {
             }
         }
 
+        // ---- micro: focus fire. Every couple of seconds, ranged units
+        // with an enemy in weapon range all switch to the weakest such
+        // enemy — concentrated fire kills units, spread fire tickles ----
+        if prm.focus_fire
+            && !legacy
+            && s.tick.saturating_sub(self.last_focus_tick) >= prm.react_interval
+        {
+            // Weakest visible enemy that at least one of ours can shoot.
+            let mut best: Option<(i32, u32)> = None; // (hp, enemy idx)
+            for (j, e) in s.entities.iter().enumerate() {
+                if !e.alive
+                    || e.owner == p
+                    || e.owner == crate::state::NEUTRAL
+                    || e.kind != EntityKind::Unit
+                {
+                    continue;
+                }
+                if !s.fog[p as usize].visible(&s.map, TilePos::of(e.pos)) {
+                    continue;
+                }
+                if best.map_or(true, |(hp, bj)| (e.hp, j as u32) < (hp, bj)) {
+                    // Only worth focusing if several of ours are in range.
+                    let can_hit = army
+                        .iter()
+                        .filter_map(|id| s.get(*id).map(|u| (id, u)))
+                        .filter(|(_, u)| {
+                            let d = &s.data.units[u.def as usize];
+                            let Some(w) = &d.weapon else { return false };
+                            if e.hp <= 0 || (s.data.units[e.def as usize].fly && !w.air) {
+                                return false;
+                            }
+                            let r = w.range + crate::Fx::from_int(1);
+                            crate::fixed::dist_sq_raw(u.pos, e.pos)
+                                <= (r.0 as i64) * (r.0 as i64)
+                        })
+                        .count();
+                    if can_hit >= 3 {
+                        best = Some((e.hp, j as u32));
+                    }
+                }
+            }
+            if let Some((_, j)) = best {
+                let target = s.id_of(j);
+                let tpos = s.entities[j as usize].pos;
+                let shooters: Vec<EntityId> = army
+                    .iter()
+                    .copied()
+                    .filter(|id| {
+                        let Some(u) = s.get(*id) else { return false };
+                        let d = &s.data.units[u.def as usize];
+                        let Some(w) = &d.weapon else { return false };
+                        if s.data.units[s.entities[j as usize].def as usize].fly && !w.air {
+                            return false;
+                        }
+                        // Ranged only, and already close enough to fire.
+                        w.range > crate::Fx::from_int(2)
+                            && crate::fixed::dist_sq_raw(u.pos, tpos)
+                                <= ((w.range + crate::Fx::from_int(1)).0 as i64).pow(2)
+                    })
+                    .collect();
+                if shooters.len() >= 3 {
+                    cmds.push(Command::AttackTarget { units: shooters, target });
+                    self.last_focus_tick = s.tick;
+                }
+            }
+        }
+
         // ---- one-time worker scout (~80s, style-jittered): peek at the
         // enemy main, come home ----
         if !self.scouted
@@ -800,6 +1067,47 @@ impl Bot {
         }
 
         cmds.into_iter().map(|c| (p, c)).collect()
+    }
+
+    /// Nearest remembered enemy structure, else the enemy start.
+    fn attack_target(&self, s: &State, hq: Option<u32>) -> FxVec2 {
+        let enemy_start =
+            s.map.starts[(1 - self.player as usize).min(s.map.starts.len() - 1)];
+        let hq_pos = hq.map(|i| s.entities[i as usize].pos);
+        self.memory
+            .iter()
+            .filter(|(_, sg)| sg.building)
+            .min_by_key(|(c, sg)| {
+                let d = hq_pos
+                    .map(|hp| crate::fixed::dist_sq_raw(hp, sg.pos))
+                    .unwrap_or(i64::MAX);
+                (d, *c)
+            })
+            .map(|(_, sg)| sg.pos)
+            .unwrap_or_else(|| enemy_start.center())
+    }
+
+    /// The ramp chokepoint guarding home — centroid of ramp tiles near the
+    /// HQ, else the HQ itself. Where the guard falls back to and the
+    /// strike stages.
+    fn defense_anchor(&self, s: &State) -> FxVec2 {
+        let Some(hq_tile) = self.hq_tile(s) else {
+            return s.map.clamp_pos(FxVec2::from_int(1, 1));
+        };
+        let (mut sx, mut sy, mut n) = (0i64, 0i64, 0i64);
+        for y in (hq_tile.y - 20).max(0)..(hq_tile.y + 20).min(s.map.height) {
+            for x in (hq_tile.x - 20).max(0)..(hq_tile.x + 20).min(s.map.width) {
+                if s.map.kind_at(x, y) == crate::map::TileKind::Ramp {
+                    sx += x as i64;
+                    sy += y as i64;
+                    n += 1;
+                }
+            }
+        }
+        if n == 0 {
+            return hq_tile.center();
+        }
+        TilePos::new((sx / n) as i32, (sy / n) as i32).center()
     }
 
     /// Pick a builder and a site near the HQ, spiral-scanned deterministically.

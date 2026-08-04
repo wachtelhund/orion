@@ -12,6 +12,7 @@
 //! passed to `State::step`.
 
 pub mod ai;
+pub mod ai_combat;
 pub mod combat;
 pub mod data;
 pub mod econ;
