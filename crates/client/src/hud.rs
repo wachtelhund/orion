@@ -851,7 +851,10 @@ impl App {
                     let met = self.state.requirement_met(self.human, b.requires);
                     let cost = if !met {
                         let req = &self.state.data.buildings[b.requires.unwrap() as usize];
-                        format!("NEEDS {}", req.name)
+                        format!(
+                            "NEEDS {}",
+                            req.name.split_whitespace().last().unwrap_or(&req.name)
+                        )
                     } else if b.cost_gas > 0 {
                         format!("{} {}G", b.cost_minerals, b.cost_gas)
                     } else {
@@ -920,7 +923,10 @@ impl App {
                         let cost = if !met {
                             let req =
                                 &self.state.data.buildings[d.requires.unwrap() as usize];
-                            format!("NEEDS {}", req.name)
+                            format!(
+                                "NEEDS {}",
+                                req.name.split_whitespace().last().unwrap_or(&req.name)
+                            )
                         } else if d.cost_gas > 0 {
                             format!("{} {}G", d.cost_minerals, d.cost_gas)
                         } else {
@@ -1018,11 +1024,11 @@ impl App {
                     if self.any_selected_caster() {
                         list.push((
                             key_of(crate::config::Action::CastStorm),
-                            "STORM 75E".into(),
+                            format!("STORM {}E", orion_sim::STORM_COST),
                             CardIcon::Letter,
                             CardAction::StormBtn,
                             Self::tip_action(
-                                "PLASMA STORM - 75 ENERGY",
+                                &format!("PLASMA STORM - {} ENERGY", orion_sim::STORM_COST),
                                 "CRACKLING ZONE THAT DAMAGES EVERYTHING INSIDE FOR 3 SECONDS.",
                             ),
                         ));
@@ -1110,8 +1116,16 @@ impl App {
         let hint = match self.mode {
             Mode::AttackMove => Some("ATTACK MOVE: CLICK TARGET"),
             Mode::Placing(_) => Some("CLICK TO PLACE   SHIFT: CHAIN   ESC: CANCEL"),
-            Mode::CastTarget => Some("PLASMA STORM: CLICK TARGET (100 ENERGY)"),
+            Mode::CastTarget => None, // handled below with the live cost
             _ => None,
+        };
+        let storm_hint;
+        let hint = if matches!(self.mode, Mode::CastTarget) {
+            storm_hint =
+                format!("PLASMA STORM: CLICK TARGET ({} ENERGY)", orion_sim::STORM_COST);
+            Some(storm_hint.as_str())
+        } else {
+            hint
         };
         if let Some(hint) = hint {
             let ts = self.ts(1.5);
@@ -1258,7 +1272,7 @@ impl App {
                 .unwrap_or_default()
                 .to_uppercase();
             let line = format!(
-                "P{}  {}  UNITS {}  LOST {}  MINED {}+{}G",
+                "P{}  {}  UNITS {}  LOST {}  MINERALS {}  PLASMA {}",
                 p + 1,
                 name,
                 pl.units_built,
@@ -1280,7 +1294,11 @@ impl App {
                 y += 18.0 * self.ui();
             }
         }
-        let sub = "R: PLAY AGAIN   ESC: MENU";
+        let sub = if self.mp.is_some() || self.replay.is_some() {
+            "ESC: MENU"
+        } else {
+            "R: PLAY AGAIN   ESC: MENU"
+        };
         let ts2 = self.ts(2.0);
         let sw = self.gfx.text_width(ts2, sub);
         self.gfx.text(out, (w - sw) * 0.5, y + 8.0 * self.ui(), ts2, [0.7, 0.7, 0.7, 1.0], sub);

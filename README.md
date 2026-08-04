@@ -64,6 +64,8 @@ Playable game — single player vs AI, or 1v1 multiplayer (direct connect):
   the password — all through a Cloudflare Worker relay, no IPs, no port
   forwarding. WebSocket lockstep, input-delay 4 ticks, checksum desync
   detection; menus don't pause MP
+- **Ladder**: top ranked players by Elo right in the multiplayer menu,
+  served live by the relay
 - **Ranked matchmaking**: FIND MATCH queues you by MMR (Elo, K=32, start
   1200) *and* latency — the search window widens the longer you wait. No
   bots, humans only; matches are made on a random map from the pool, both

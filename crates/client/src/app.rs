@@ -889,8 +889,13 @@ impl App {
             }
         }
 
-        // Restart after game over.
-        if code == KeyCode::KeyR && self.state.winner.is_some() && self.replay.is_none() {
+        // Restart after game over (single player only — in MP it would
+        // silently abandon the session into a bot game).
+        if code == KeyCode::KeyR
+            && self.state.winner.is_some()
+            && self.replay.is_none()
+            && self.mp.is_none()
+        {
             let d = self.difficulty;
             self.start_game(d);
             return;
