@@ -1536,11 +1536,9 @@ impl App {
         }
     }
 
-    pub(crate) fn cancel_train(&mut self, slot: usize) {
-        if let Some(bid) = self.primary_selected_building() {
-            self.pending
-                .push((self.human, Command::CancelTrain { building: bid, slot: slot as u8 }));
-        }
+    pub(crate) fn cancel_train_in(&mut self, building: EntityId, slot: usize) {
+        self.pending
+            .push((self.human, Command::CancelTrain { building, slot: slot as u8 }));
     }
 
     // ------------------------------------------------------- selection ----

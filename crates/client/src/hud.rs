@@ -260,15 +260,12 @@ impl App {
             }
         }
         // Production queue slots.
-        if let Some(bid) = self.single_own_building() {
-            let b = &self.state.entities[bid.idx as usize];
-            for (x, y, w, h, slot) in self.queue_slot_rects() {
-                if mx >= x && mx <= x + w && my >= y && my <= y + h {
-                    let unit = b.queue[slot];
-                    let mut t = self.tip_unit(unit);
-                    t.push(("CLICK TO CANCEL - FULL REFUND".into(), TIP_WARN));
-                    return Some(t);
-                }
+        for (x, y, w, h, bid, slot) in self.queue_slots() {
+            if mx >= x && mx <= x + w && my >= y && my <= y + h {
+                let unit = self.state.get(bid)?.queue.get(slot).copied()?;
+                let mut t = self.tip_unit(unit);
+                t.push(("CLICK TO CANCEL - FULL REFUND".into(), TIP_WARN));
+                return Some(t);
             }
         }
         // Multi-select strip tiles.
@@ -601,19 +598,40 @@ impl App {
 
     /// Production queue slot rects for the selected building (hit-testing +
     /// drawing share this).
-    pub(crate) fn queue_slot_rects(&self) -> Vec<(f32, f32, f32, f32, usize)> {
-        let Some(bid) = self.single_own_building() else { return Vec::new() };
-        let b = &self.state.entities[bid.idx as usize];
-        if b.queue.is_empty() {
-            return Vec::new();
-        }
+    /// Combined production queue: one slot per queued unit across EVERY
+    /// selected building of the active building type, tagged with its
+    /// building — so training into the least-queued building is visible,
+    /// and click-cancel hits the right queue. Buildings are separated by a
+    /// small gap; each building's front slot carries its progress bar.
+    pub(crate) fn queue_slots(
+        &self,
+    ) -> Vec<(f32, f32, f32, f32, orion_sim::EntityId, usize)> {
+        let Some(pb) = self.primary_selected_building() else { return Vec::new() };
+        let Some(pe) = self.state.get(pb) else { return Vec::new() };
+        let def = pe.def;
         let ui = self.ui();
         let (mx, _, size) = self.minimap_rect();
         let x0 = mx + size + 24.0 * ui + 104.0 * ui + 16.0 * ui;
         let y = self.cam.screen_h - self.console_h() + 84.0 * ui;
-        (0..b.queue.len())
-            .map(|k| (x0 + k as f32 * 42.0 * ui, y, 38.0 * ui, 44.0 * ui, k))
-            .collect()
+        let mut out = Vec::new();
+        let mut x = x0;
+        for id in &self.selection {
+            let Some(e) = self.state.get(*id) else { continue };
+            if e.kind != EntityKind::Building || e.def != def || e.owner != self.human {
+                continue;
+            }
+            for k in 0..e.queue.len() {
+                if out.len() >= 8 {
+                    return out;
+                }
+                out.push((x, y, 38.0 * ui, 44.0 * ui, *id, k));
+                x += 42.0 * ui;
+            }
+            if !e.queue.is_empty() {
+                x += 8.0 * ui; // building separator
+            }
+        }
+        out
     }
 
     fn draw_info_panel(&self, out: &mut Vec<Inst>) {
@@ -752,18 +770,19 @@ impl App {
             );
         }
 
-        // Production queue: clickable slots with the front item's progress.
-        if e.kind == EntityKind::Building && !e.queue.is_empty() {
-            self.gfx.text(out, tx, cy + 50.0 * ui + 0.0, self.ts(1.0), dim, "");
-            for (bx, by, bw, bh, k) in self.queue_slot_rects() {
-                let unit = e.queue[k];
+        // Production queue: combined across every selected building of this
+        // type; each building's in-progress slot shows its own bar.
+        if e.kind == EntityKind::Building {
+            for (bx, by, bw, bh, bid, k) in self.queue_slots() {
+                let Some(qb) = self.state.get(bid) else { continue };
+                let Some(&unit) = qb.queue.get(k) else { continue };
                 let r = book.unit(self.unit_type[unit as usize], team, 2, 0);
                 self.gfx.quad(out, bx, by, bw, bh, [0.06, 0.06, 0.09, 1.0]);
                 self.gfx.quad(out, bx, by, bw, 1.5 * ui, [0.3, 0.33, 0.4, 1.0]);
                 self.gfx.sprite(out, r, bx + bw * 0.5, by + bh * 0.45, r.w as f32 * 0.9 * ui, r.h as f32 * 0.9 * ui, WHITE);
                 if k == 0 {
                     let total = self.state.data.units[unit as usize].build_ticks;
-                    let frac = e.progress as f32 / total.max(1) as f32;
+                    let frac = qb.progress as f32 / total.max(1) as f32;
                     self.gfx.quad(out, bx, by + bh - 3.0 * ui, bw * frac, 3.0 * ui, [0.3, 0.8, 1.0, 1.0]);
                 }
             }
@@ -1288,14 +1307,14 @@ impl App {
             self.cam.cy = iy;
             return;
         }
-        // Production queue cancel.
-        for (bx, by, bw, bh, slot) in self.queue_slot_rects() {
+        // Production queue cancel — routed to the slot's own building.
+        for (bx, by, bw, bh, bid, slot) in self.queue_slots() {
             if self.mouse.0 >= bx
                 && self.mouse.0 <= bx + bw
                 && self.mouse.1 >= by
                 && self.mouse.1 <= by + bh
             {
-                self.cancel_train(slot);
+                self.cancel_train_in(bid, slot);
                 return;
             }
         }
