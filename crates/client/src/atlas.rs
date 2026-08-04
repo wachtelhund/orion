@@ -454,25 +454,32 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
     c.rect(0, 0, 8, 8, [255, 255, 255, 255]);
     let white = p.place(&c);
 
-    let mut c = Canvas::new(32, 32);
-    c.ellipse(16.0, 16.0, 15.0, 15.0, [255, 255, 255, 255]);
+    let mut c = Canvas::new(128, 128);
+    for y in 0..128 {
+        for x in 0..128 {
+            let d = ((x as f32 + 0.5 - 64.0).powi(2) + (y as f32 + 0.5 - 64.0).powi(2)).sqrt();
+            let a = ((62.0 - d).clamp(0.0, 2.0) * 127.5) as u8;
+            if a > 0 {
+                c.set(x, y, [255, 255, 255, a]);
+            }
+        }
+    }
     let circle = p.place(&c);
 
-    let mut c = Canvas::new(32, 32);
-    for y in 0..32 {
-        for x in 0..32 {
-            let dx = x as f32 + 0.5 - 16.0;
-            let dy = y as f32 + 0.5 - 16.0;
-            let d = (dx * dx + dy * dy).sqrt();
-            if d <= 15.5 && d >= 12.5 {
-                c.set(x, y, [255, 255, 255, 255]);
+    let mut c = Canvas::new(128, 128);
+    for y in 0..128 {
+        for x in 0..128 {
+            let d = ((x as f32 + 0.5 - 64.0).powi(2) + (y as f32 + 0.5 - 64.0).powi(2)).sqrt();
+            let a = ((62.0 - d).clamp(0.0, 1.5) * (d - 50.0).clamp(0.0, 1.5) * 113.0) as u8;
+            if a > 0 {
+                c.set(x, y, [255, 255, 255, a]);
             }
         }
     }
     let ring = p.place(&c);
 
-    let diamond = p.place(&diamond_canvas(64, 32, [255, 255, 255, 255], false));
-    let diamond_outline = p.place(&diamond_canvas(64, 32, [255, 255, 255, 255], true));
+    let diamond = p.place(&diamond_canvas(256, 128, [255, 255, 255, 255], false));
+    let diamond_outline = p.place(&diamond_canvas(256, 128, [255, 255, 255, 255], true));
 
     // Terrain (painted at SS; tiles are drawn at explicit world sizes so
     // the region scale is informational here).
@@ -558,45 +565,70 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
         p.place_s(&c, SS)
     };
 
-    // Effects.
-    let flash = p.place(&star_flash());
+    // Effects (painted at SS, drawn at explicit screen sizes).
+    let flash = p.place_s(&star_flash(), SS);
     let spark = {
-        let mut c = Canvas::new(7, 7);
-        c.ellipse(3.5, 3.5, 3.0, 3.0, [255, 240, 160, 255]);
-        c.ellipse(3.5, 3.5, 1.6, 1.6, [255, 255, 255, 255]);
-        p.place(&c)
+        let mut c = Canvas::new(28, 28);
+        c.glow(14.0, 14.0, 13.0, [255, 240, 160], 0.9);
+        c.ellipse(14.0, 14.0, 6.0, 6.0, rgba([255, 240, 160]));
+        c.ellipse(14.0, 14.0, 3.0, 3.0, rgba([255, 255, 255]));
+        p.place_s(&c, SS)
     };
     let blast_ring = {
-        let mut c = Canvas::new(24, 24);
-        for y in 0..24 {
-            for x in 0..24 {
-                let dx = x as f32 + 0.5 - 12.0;
-                let dy = (y as f32 + 0.5 - 12.0) * 2.0;
+        let mut c = Canvas::new(96, 96);
+        for y in 0..96 {
+            for x in 0..96 {
+                let dx = x as f32 + 0.5 - 48.0;
+                let dy = (y as f32 + 0.5 - 48.0) * 2.0;
                 let d = (dx * dx + dy * dy).sqrt();
-                if d <= 11.5 && d >= 8.5 {
-                    c.set(x, y, [255, 200, 120, 255]);
+                let a = ((46.0 - d).clamp(0.0, 2.0) * (d - 36.0).clamp(0.0, 2.0) * 63.0) as u8;
+                if a > 0 {
+                    c.set(x, y, [255, 200, 120, a]);
                 }
             }
         }
-        p.place(&c)
+        p.place_s(&c, SS)
     };
     let corpse = {
-        let mut c = Canvas::new(20, 10);
-        c.ellipse_shaded(10.0, 5.0, 9.0, 4.0, [52, 46, 44]);
-        c.outline([20, 18, 18, 255]);
-        p.place(&c)
+        let mut c = Canvas::new(80, 40);
+        // Scorched stain with debris chunks.
+        c.ellipse(40.0, 22.0, 36.0, 14.0, [26, 22, 22, 180]);
+        c.ellipse(38.0, 21.0, 26.0, 10.0, [38, 32, 30, 220]);
+        for k in 0..6 {
+            let h = hash2(k, 3, 517);
+            let px = 16.0 + (h % 48) as f32;
+            let py = 14.0 + ((h >> 8) % 14) as f32;
+            c.dome(px, py, 3.0 + (h % 3) as f32, 2.0, [52, 46, 44]);
+        }
+        c.line(30.0, 18.0, 46.0, 24.0, 1.6, rgba([70, 64, 58]));
+        p.place_s(&c, SS)
     };
     let rubble = {
-        let mut c = Canvas::new(48, 28);
-        for k in 0..14 {
+        let mut c = Canvas::new(192, 112);
+        // Collapsed plates and girder stubs in a dust bed.
+        c.ellipse(96.0, 60.0, 84.0, 34.0, [30, 27, 26, 160]);
+        for k in 0..10 {
             let h = hash2(k, 7, 99);
-            let x = 6.0 + (h % 36) as f32;
-            let y = 6.0 + ((h >> 8) % 16) as f32;
-            let r = 2.0 + ((h >> 16) % 4) as f32;
-            c.ellipse_shaded(x, y, r, r * 0.6, [70, 64, 60]);
+            let x = 30.0 + (h % 130) as f32;
+            let y = 32.0 + ((h >> 8) % 52) as f32;
+            let r = 7.0 + ((h >> 16) % 10) as f32;
+            c.poly(&[
+                (x - r, y + r * 0.3),
+                (x - r * 0.3, y - r * 0.5),
+                (x + r * 0.7, y - r * 0.35),
+                (x + r, y + r * 0.4),
+                (x, y + r * 0.55),
+            ], rgba([64, 60, 56]));
+            c.line(x - r * 0.3, y - r * 0.5, x + r * 0.7, y - r * 0.35, 1.4, rgba([92, 86, 80]));
         }
-        c.outline([24, 22, 20, 255]);
-        p.place(&c)
+        for k in 0..3 {
+            let h = hash2(k, 11, 313);
+            let x = 46.0 + (h % 100) as f32;
+            let y = 40.0 + ((h >> 8) % 36) as f32;
+            c.line(x, y, x + 10.0, y - 14.0, 2.5, rgba([46, 44, 48]));
+        }
+        c.outline_t([20, 18, 17, 255], 2);
+        p.place_s(&c, SS)
     };
 
     // Console chrome (SC:R-style): navy tech panels, gold piping, beveled
@@ -935,7 +967,7 @@ fn diamond_canvas(w: i32, h: i32, c: Color, outline_only: bool) -> Canvas {
             let dx = (x as f32 + 0.5 - w as f32 / 2.0) / (w as f32 / 2.0);
             let dy = (y as f32 + 0.5 - h as f32 / 2.0) / (h as f32 / 2.0);
             let d = dx.abs() + dy.abs();
-            let inside = if outline_only { d <= 1.0 && d >= 0.82 } else { d <= 1.0 };
+            let inside = if outline_only { d <= 1.0 && d >= 0.93 } else { d <= 1.0 };
             if inside {
                 cv.set(x, y, c);
             }
@@ -2650,18 +2682,20 @@ fn paint_archive(team: [u8; 3]) -> Canvas {
 // --------------------------------------------------------------- effects ----
 
 fn star_flash() -> Canvas {
-    let mut c = Canvas::new(11, 11);
+    let mut c = Canvas::new(44, 44);
+    c.glow(22.0, 22.0, 20.0, [255, 230, 150], 0.55);
     for k in 0..4 {
         let a = k as f32 * std::f32::consts::FRAC_PI_4;
         c.line(
-            5.5 - a.cos() * 5.0,
-            5.5 - a.sin() * 5.0,
-            5.5 + a.cos() * 5.0,
-            5.5 + a.sin() * 5.0,
-            1.4,
+            22.0 - a.cos() * 19.0,
+            22.0 - a.sin() * 19.0,
+            22.0 + a.cos() * 19.0,
+            22.0 + a.sin() * 19.0,
+            2.6,
             [255, 230, 150, 255],
         );
     }
-    c.ellipse(5.5, 5.5, 2.2, 2.2, [255, 255, 255, 255]);
+    c.ellipse(22.0, 22.0, 8.0, 8.0, [255, 255, 255, 255]);
     c
 }
+
