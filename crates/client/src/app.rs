@@ -440,6 +440,20 @@ impl App {
     }
 
     /// Selection acknowledgment: race-flavored blip for the active thing.
+    /// What a thing is made of, for death presentation: 0 mech (explodes),
+    /// 1 flesh (bleeds), 2 alien (goos). By sprite type.
+    fn material(&self, kind: EntityKind, def: u16) -> u8 {
+        if kind == EntityKind::Building {
+            let bt = self.building_type[def as usize];
+            return if (7..=13).contains(&bt) { 2 } else { 0 };
+        }
+        match self.unit_type[def as usize] {
+            1 | 2 | 5 => 1,
+            7..=12 | 15 => 2,
+            _ => 0,
+        }
+    }
+
     /// Weapon presentation class by attacker sprite type: how its fire
     /// looks and sounds. 0 rifle, 1 energy blade, 2 cannon, 3 rapid bolts,
     /// 4 acid glob, 5 chitin claw, 6 heavy claw, 7 electric arc, 8 rail
@@ -2113,46 +2127,60 @@ impl App {
                         ttl: 0.4, style: 0,
                     });
                 }
-                SimEvent::Death { pos, kind, .. } => {
+                SimEvent::Death { pos, kind, def, .. } => {
                     let t = TilePos::of(pos);
                     let seen = self.reveal_all
                         || self.state.fog[self.human as usize].visible(&self.state.map, t);
                     if !seen {
                         continue;
                     }
+                    let mat = self.material(kind, def);
                     if death_sounds < 2 {
                         death_sounds += 1;
                         self.sfx(if kind == EntityKind::Building {
                             Sfx::BigExplosion
-                        } else {
+                        } else if mat == 0 {
                             Sfx::Explosion
+                        } else {
+                            Sfx::Slash
                         });
                     }
                     let (x, y) = (pos.x.to_f32(), pos.y.to_f32());
-                    self.effects.push(Effect {
-                        kind: EffKind::Ring,
-                        ax: x,
-                        ay: y,
-                        bx: if kind == EntityKind::Building { 2.0 } else { 1.0 },
-                        by: 0.0,
-                        age: 0.0,
-                        ttl: 0.35,
-                        style: 0,
-                    });
-                    self.effects.push(Effect {
-                        kind: if kind == EntityKind::Building {
-                            EffKind::Rubble
-                        } else {
-                            EffKind::Corpse
-                        },
-                        ax: x,
-                        ay: y,
-                        bx: 0.0,
-                        by: 0.0,
-                        age: 0.0,
-                        ttl: if kind == EntityKind::Building { 30.0 } else { 8.0 },
-                        style: 0,
-                    });
+                    let big = kind == EntityKind::Building;
+                    let push = |fx: &mut Vec<Effect>, kind, bx, by, ttl, st| {
+                        fx.push(Effect { kind, ax: x, ay: y, bx, by, age: 0.0, ttl, style: st });
+                    };
+                    match mat {
+                        // Mech: flash, ring, flying plates, smoke, scorch.
+                        0 => {
+                            push(&mut self.effects, EffKind::Flash, 0.0, 0.0, 0.14, 1);
+                            push(&mut self.effects, EffKind::Ring, if big { 2.0 } else { 1.0 }, 0.0, 0.35, 0);
+                            push(&mut self.effects, EffKind::Burst, 0.0, 0.0, if big { 0.7 } else { 0.5 }, 2);
+                            for k in 0..if big { 4 } else { 2 } {
+                                push(&mut self.effects, EffKind::Smoke, k as f32 * 5.0, 6.0 + k as f32 * 2.0, 1.6 + k as f32 * 0.4, 0);
+                            }
+                            push(&mut self.effects, EffKind::Stain, 0.0, 0.0, if big { 30.0 } else { 12.0 }, 2);
+                        }
+                        // Flesh: blood spray + stain + the body.
+                        1 => {
+                            push(&mut self.effects, EffKind::Burst, 0.0, 0.0, 0.4, 0);
+                            push(&mut self.effects, EffKind::Stain, 0.0, 0.0, 14.0, 0);
+                        }
+                        // Alien: goo burst + puddle.
+                        _ => {
+                            push(&mut self.effects, EffKind::Burst, 0.0, 0.0, 0.45, 1);
+                            push(&mut self.effects, EffKind::Stain, 0.0, 0.0, 16.0, 1);
+                            if big {
+                                push(&mut self.effects, EffKind::Burst, 3.0, 0.0, 0.6, 1);
+                                push(&mut self.effects, EffKind::Ring, 1.6, 0.0, 0.35, 0);
+                            }
+                        }
+                    }
+                    if big {
+                        push(&mut self.effects, EffKind::Rubble, 0.0, 0.0, 30.0, 0);
+                    } else if mat == 1 {
+                        push(&mut self.effects, EffKind::Corpse, 0.0, 0.0, 8.0, 0);
+                    }
                 }
             }
         }
@@ -3221,6 +3249,18 @@ impl App {
                 EffKind::Rubble => {
                     let fade = (1.0 - e.age / e.ttl).min(1.0);
                     self.gfx.sprite(out, book.rubble, sx, sy, 48.0 * zoom, 28.0 * zoom, [1.0, 1.0, 1.0, fade]);
+                }
+                EffKind::Stain => {
+                    // Ground decal: quick soak-in, slow fade-out.
+                    let f = e.age / e.ttl;
+                    let a = (f * 12.0).min(1.0) * (1.0 - f).powf(0.6);
+                    let (c, w, h) = match e.style {
+                        1 => ([0.32, 0.55, 0.2], 15.0, 8.0),  // goo puddle
+                        2 => ([0.06, 0.055, 0.05], 18.0, 9.0), // scorch
+                        _ => ([0.4, 0.07, 0.05], 12.0, 6.0),   // blood
+                    };
+                    self.gfx.sprite(out, book.circle, sx, sy + 1.0 * zoom, w * zoom, h * zoom, [c[0], c[1], c[2], a * 0.75]);
+                    self.gfx.sprite(out, book.circle, sx - 2.0 * zoom, sy, w * 0.4 * zoom, h * 0.4 * zoom, [c[0], c[1], c[2], a * 0.6]);
                 }
                 _ => {}
             }

@@ -206,7 +206,7 @@ pub enum Command {
 pub enum SimEvent {
     /// `from` hit `to` (both entity indices, valid at emission time).
     Attack { from: u32, to: u32 },
-    Death { pos: FxVec2, owner: u8, kind: EntityKind },
+    Death { pos: FxVec2, owner: u8, kind: EntityKind, def: u16 },
     /// A Plasma Storm landed here.
     Cast { pos: FxVec2 },
     /// A unit finished training.
@@ -461,7 +461,7 @@ impl State {
             return;
         }
         if e.kind != EntityKind::Resource {
-            self.events.push(SimEvent::Death { pos: e.pos, owner: e.owner, kind: e.kind });
+            self.events.push(SimEvent::Death { pos: e.pos, owner: e.owner, kind: e.kind, def: e.def });
             let owner = e.owner as usize;
             let kind = e.kind;
             if owner < self.players.len() {
