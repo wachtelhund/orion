@@ -537,8 +537,9 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
                 12 => paint_roost(TEAMS[team]),
                 _ => paint_cortex(TEAMS[team]),
             };
-            building_px_h[b_type] = c.h as f32;
-            buildings.push(p.place(&c));
+            let bsc = if b_type <= 6 { SS } else { 1.0 };
+            building_px_h[b_type] = c.h as f32 / bsc;
+            buildings.push(p.place_s(&c, bsc));
         }
     }
 
@@ -2099,19 +2100,19 @@ fn paint_cortex(team: [u8; 3]) -> Canvas {
 
 // ------------------------------------------------------------- buildings ----
 
-/// Isometric box: top diamond + two shaded walls. The bread and butter of
-/// every structure.
-fn iso_box(
+/// Iso building block at 4x: top plate + two walls with panel seams, wear
+/// speckle, a lit roof lip and an optional emissive trim line under it.
+/// The bread and butter of every Vanguard structure.
+fn iso_box4(
     c: &mut Canvas,
     cx: f32,
     top_cy: f32,
     half_w: f32,
     wall_h: f32,
     top: [u8; 3],
-    accent: Option<[u8; 3]>,
+    trim: Option<[u8; 3]>,
 ) {
     let half_h = half_w * 0.5;
-    // Walls first.
     for x in (cx - half_w) as i32..=(cx + half_w) as i32 {
         let dxf = (x as f32 + 0.5 - cx) / half_w;
         if dxf.abs() > 1.0 {
@@ -2119,123 +2120,222 @@ fn iso_box(
         }
         let edge_y = top_cy + half_h * (1.0 - dxf.abs());
         let left = dxf < 0.0;
-        let base: [u8; 3] = if left { scale_rgb(top, 0.55) } else { scale_rgb(top, 0.75) };
+        let base = if left { scale_rgb(top, 0.50) } else { scale_rgb(top, 0.72) };
+        let seam = (x - (cx - half_w) as i32) % 16;
         for wy in 0..wall_h as i32 {
             let mut t = base;
-            if wy == 0 {
-                t = scale_rgb(base, 1.3);
+            let h = hash2(x, wy, 271);
+            if h % 43 == 0 {
+                t = scale_rgb(base, 0.86);
             }
-            // Accent stripe near the bottom.
-            if let Some(a) = accent {
-                if wy == wall_h as i32 - 3 || wy == wall_h as i32 - 4 {
+            if h % 57 == 0 {
+                t = scale_rgb(base, 1.10);
+            }
+            if seam == 0 {
+                t = scale_rgb(base, 0.78);
+            }
+            if seam == 1 {
+                t = scale_rgb(base, 1.08);
+            }
+            if wy == 0 {
+                t = scale_rgb(base, 1.45);
+            }
+            if wy >= wall_h as i32 - 2 {
+                t = scale_rgb(base, 0.55);
+            }
+            if let Some(a) = trim {
+                if wy == 2 || wy == 3 {
                     t = a;
                 }
             }
             c.set(x, (edge_y + wy as f32) as i32, rgba(t));
         }
     }
-    // Top surface.
     for y in (top_cy - half_h) as i32..=(top_cy + half_h) as i32 {
         for x in (cx - half_w) as i32..=(cx + half_w) as i32 {
             let dxf = (x as f32 + 0.5 - cx) / half_w;
             let dyf = (y as f32 + 0.5 - top_cy) / half_h;
-            if dxf.abs() + dyf.abs() <= 1.0 {
-                let lit = if dxf - dyf < -0.2 { 1.12 } else if dxf - dyf > 0.5 { 0.92 } else { 1.0 };
-                c.set(x, y, rgba(scale_rgb(top, lit)));
+            if dxf.abs() + dyf.abs() > 1.0 {
+                continue;
             }
+            let h = hash2(x, y, 653);
+            let mut f = if dxf - dyf < -0.2 {
+                1.12
+            } else if dxf - dyf > 0.5 {
+                0.92
+            } else {
+                1.0
+            };
+            if h % 61 == 0 {
+                f *= 0.88;
+            }
+            if h % 71 == 0 {
+                f *= 1.10;
+            }
+            // Roof plating seams parallel to the diamond edges.
+            let s1 = ((x as f32 - cx) * 0.5 + (y as f32 - top_cy)).rem_euclid(22.0);
+            let s2 = ((x as f32 - cx) * 0.5 - (y as f32 - top_cy)).rem_euclid(26.0);
+            if s1 < 1.0 || s2 < 1.0 {
+                f *= 0.82;
+            }
+            c.set(x, y, rgba(scale_rgb(top, f)));
         }
     }
 }
 
-fn windows(c: &mut Canvas, cx: f32, edge_cy: f32, half_w: f32, wall_h: f32, lit: [u8; 3]) {
+/// Emissive window strips along a wall, with glow halos.
+fn windows4(c: &mut Canvas, cx: f32, edge_cy: f32, half_w: f32, wall_h: f32, lit: [u8; 3]) {
     let half_h = half_w * 0.5;
+    let mut x = cx - half_w + 14.0;
     let mut k = 0;
-    let mut x = cx - half_w + 4.0;
-    while x < cx + half_w - 3.0 {
+    while x < cx + half_w - 12.0 {
         let dxf = (x - cx) / half_w;
         let edge_y = edge_cy + half_h * (1.0 - dxf.abs());
         if k % 2 == 0 {
-            c.rect(x as i32, (edge_y + wall_h * 0.35) as i32, 2, 2, rgba(lit));
+            let wy = edge_y + wall_h * 0.38;
+            c.rect(x as i32, wy as i32, 6, 8, rgba(lit));
+            c.rect(x as i32 + 1, wy as i32 + 1, 2, 3, rgba(scale_rgb(lit, 1.35)));
+            c.glow(x + 3.0, wy + 4.0, 8.0, lit, 0.35);
         }
-        x += 4.0;
+        x += 14.0;
         k += 1;
     }
 }
 
-/// Headquarters: 96px-wide command center. Base + main hall + tower + pad.
-fn paint_hq(team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(100, 78);
-    let cx = 50.0;
-    let concrete = [120, 118, 112];
-    let hull = [138, 136, 130];
+/// Worn hazard chevrons along an edge.
+fn hazard(c: &mut Canvas, x0: f32, y0: f32, n: i32) {
+    for k in 0..n {
+        let x = x0 + k as f32 * 8.0;
+        let col = if k % 2 == 0 { [196, 160, 58] } else { [28, 28, 32] };
+        c.poly(&[(x, y0), (x + 4.0, y0), (x + 8.0, y0 + 5.0), (x + 4.0, y0 + 5.0)], rgba(col));
+    }
+}
 
-    // Ground plate.
-    iso_box(&mut c, cx, 54.0, 48.0, 6.0, concrete, None);
+/// Industrial pipe with a top highlight and end flanges.
+fn pipe(c: &mut Canvas, x0: f32, y0: f32, x1: f32, y1: f32, t: f32) {
+    c.line(x0, y0, x1, y1, t, rgba([58, 61, 70]));
+    c.line(x0, y0 - t * 0.25, x1, y1 - t * 0.25, t * 0.3, rgba([104, 110, 122]));
+    c.rect((x0 - 2.0) as i32, (y0 - t * 0.6) as i32, 4, (t * 1.2) as i32, rgba([76, 80, 92]));
+    c.rect((x1 - 2.0) as i32, (y1 - t * 0.6) as i32, 4, (t * 1.2) as i32, rgba([76, 80, 92]));
+}
+
+/// Headquarters: fortified command complex. 400x312.
+fn paint_hq(team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(400, 312);
+    let cx = 200.0;
+    let concrete = [92, 90, 86];
+    let hull = [104, 102, 98];
+    iso_box4(&mut c, cx, 216.0, 192.0, 24.0, concrete, None);
+    hazard(&mut c, cx - 64.0, 244.0, 16);
     // Main hall.
-    iso_box(&mut c, cx, 40.0, 36.0, 16.0, hull, Some(team));
-    windows(&mut c, cx, 40.0, 36.0, 16.0, [255, 220, 130]);
-    // Command tower.
-    iso_box(&mut c, cx - 10.0, 26.0, 16.0, 15.0, scale_rgb(hull, 1.06), Some(team));
-    // Landing pad.
-    c.ellipse(cx + 18.0, 38.0, 12.0, 6.0, rgba(scale_rgb(concrete, 0.9)));
-    c.ellipse(cx + 18.0, 38.0, 8.0, 4.0, rgba(scale_rgb(concrete, 1.1)));
-    c.ellipse(cx + 18.0, 38.0, 3.0, 1.5, rgba(team));
-    // Antenna.
-    c.line(cx - 14.0, 24.0, cx - 14.0, 10.0, 1.2, rgba([90, 92, 100]));
-    c.set((cx - 14.0) as i32, 9, [255, 80, 70, 255]);
-    c.set((cx - 15.0) as i32, 10, [255, 160, 150, 255]);
-    c.outline(OUTLINE);
+    iso_box4(&mut c, cx, 160.0, 144.0, 64.0, hull, Some(team));
+    windows4(&mut c, cx, 160.0, 144.0, 64.0, [255, 200, 110]);
+    // Command tower with its own trim + windows.
+    iso_box4(&mut c, cx - 40.0, 104.0, 64.0, 60.0, scale_rgb(hull, 1.06), Some(team));
+    windows4(&mut c, cx - 40.0, 104.0, 64.0, 60.0, [255, 200, 110]);
+    // Roof greebles: vent block + comms dish.
+    iso_box4(&mut c, cx + 56.0, 132.0, 26.0, 14.0, scale_rgb(hull, 1.1), None);
+    c.dome(cx - 76.0, 78.0, 14.0, 8.0, [96, 100, 108]);
+    c.line(cx - 76.0, 78.0, cx - 66.0, 66.0, 2.0, rgba(STEEL_LIT));
+    // Landing pad with a glowing team ring.
+    c.ellipse(cx + 72.0, 152.0, 48.0, 24.0, rgba(scale_rgb(concrete, 0.8)));
+    c.ellipse(cx + 72.0, 152.0, 40.0, 20.0, rgba(scale_rgb(concrete, 1.05)));
+    for k in 0..8 {
+        let a = k as f32 * 0.785;
+        let lx = cx + 72.0 + a.cos() * 34.0;
+        let ly = 152.0 + a.sin() * 17.0;
+        c.set(lx as i32, ly as i32, rgba(scale_rgb(team, 1.3)));
+        c.glow(lx, ly, 4.5, team, 0.55);
+    }
+    c.rect((cx + 68.0) as i32, 146, 3, 12, rgba(scale_rgb(team, 1.2)));
+    c.rect((cx + 74.0) as i32, 146, 3, 12, rgba(scale_rgb(team, 1.2)));
+    // Storage tanks + feed pipe.
+    c.dome(cx + 132.0, 200.0, 20.0, 14.0, [84, 88, 96]);
+    c.dome(cx + 160.0, 208.0, 15.0, 11.0, [78, 82, 90]);
+    pipe(&mut c, cx + 112.0, 180.0, cx + 132.0, 198.0, 5.0);
+    // Antenna mast + red strobe.
+    c.line(cx - 56.0, 96.0, cx - 56.0, 40.0, 2.5, rgba([80, 84, 94]));
+    c.line(cx - 56.0, 50.0, cx - 44.0, 58.0, 1.5, rgba([80, 84, 94]));
+    c.glow(cx - 56.0, 38.0, 6.0, [255, 90, 80], 0.85);
+    c.set((cx - 56.0) as i32, 38, rgba([255, 130, 120]));
+    c.outline_t(OUTLINE, 3);
+    c.rim(OUTLINE, 1.22);
     c
 }
 
-/// Supply Pylon: base plate + glowing team-colored obelisk.
+/// Supply Pylon: fenced power obelisk. 272x248.
 fn paint_pylon(team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(68, 62);
-    let cx = 34.0;
-    iso_box(&mut c, cx, 46.0, 30.0, 6.0, [118, 116, 110], None);
-    // Obelisk: tapering vertical crystal.
-    for y in 0..34 {
-        let f = y as f32 / 34.0; // 0 top -> 1 bottom
-        let w = 3.0 + f * 8.0;
-        let yy = 12.0 + y as f32;
+    let mut c = Canvas::new(272, 248);
+    let cx = 136.0;
+    iso_box4(&mut c, cx, 184.0, 120.0, 24.0, [88, 86, 82], None);
+    hazard(&mut c, cx - 40.0, 212.0, 10);
+    // Anchor collar.
+    iso_box4(&mut c, cx, 172.0, 44.0, 20.0, [70, 73, 82], Some(team));
+    // Cables to the plate corners.
+    c.line(cx - 36.0, 182.0, cx - 92.0, 196.0, 2.0, rgba([48, 50, 58]));
+    c.line(cx + 36.0, 182.0, cx + 92.0, 196.0, 2.0, rgba([48, 50, 58]));
+    // Obelisk: tapered energy crystal with hard facets.
+    for y in 48..172 {
+        let f = (y - 48) as f32 / 124.0;
+        let w = 10.0 + f * 34.0;
         for x in (cx - w) as i32..=(cx + w) as i32 {
             let side = (x as f32 - cx) / w;
-            let base = if side < -0.2 {
-                scale_rgb(team, 1.25)
-            } else if side > 0.4 {
-                scale_rgb(team, 0.6)
+            let base = if side < -0.25 {
+                scale_rgb(team, 1.3)
+            } else if side > 0.45 {
+                scale_rgb(team, 0.55)
             } else {
                 team
             };
-            c.set(x, yy as i32, rgba(base));
+            c.set(x, y, rgba(base));
         }
     }
-    // Inner glow + floating tip.
-    c.ellipse(cx, 22.0, 2.0, 6.0, rgba([255, 255, 255]));
-    c.ellipse(cx, 7.0, 2.5, 3.0, rgba(scale_rgb(team, 1.3)));
-    c.outline(OUTLINE);
+    // White-hot core slit + halo.
+    c.rect((cx - 3.0) as i32, 70, 6, 70, rgba([245, 250, 255]));
+    c.glow(cx, 110.0, 44.0, team, 0.4);
+    // Floating tip shard.
+    c.poly(&[(cx - 7.0, 34.0), (cx, 12.0), (cx + 7.0, 34.0), (cx, 42.0)], rgba(scale_rgb(team, 1.35)));
+    c.glow(cx, 26.0, 12.0, team, 0.8);
+    c.outline_t(OUTLINE, 3);
+    c.rim(OUTLINE, 1.2);
     c
 }
 
-/// Muster Hall: wide barracks with door + roof vents.
+/// Muster Hall: bunker barracks with a blast door. 400x280.
 fn paint_barracks(team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(100, 70);
-    let cx = 50.0;
-    let hull = [128, 122, 112];
-    iso_box(&mut c, cx, 50.0, 48.0, 6.0, [116, 114, 108], None);
-    iso_box(&mut c, cx, 34.0, 38.0, 18.0, hull, Some(team));
-    windows(&mut c, cx, 34.0, 38.0, 18.0, [255, 220, 130]);
-    // Door on the lower-left wall.
-    let dx = -14.0f32;
-    let edge_y = 34.0 + 19.0 * (1.0 - (dx / 38.0f32).abs());
-    c.rect((cx + dx - 4.0) as i32, (edge_y + 2.0) as i32, 9, 12, rgba([60, 58, 62]));
-    c.rect((cx + dx - 4.0) as i32, (edge_y + 2.0) as i32, 9, 2, rgba(team));
+    let mut c = Canvas::new(400, 280);
+    let cx = 200.0;
+    let hull = [100, 96, 90];
+    iso_box4(&mut c, cx, 200.0, 192.0, 24.0, [88, 87, 84], None);
+    iso_box4(&mut c, cx, 136.0, 152.0, 72.0, hull, Some(team));
+    windows4(&mut c, cx, 136.0, 152.0, 72.0, [255, 200, 110]);
+    // Blast door on the lower-left wall: dark slab, glowing team seam,
+    // hazard posts, entry steps.
+    let dxf: f32 = -56.0;
+    let edge_y = 136.0 + 76.0 * (1.0 - (dxf / 152.0f32).abs());
+    let dx0 = cx + dxf;
+    c.poly(&[(dx0 - 20.0, edge_y - 26.0), (dx0 + 20.0, edge_y - 18.0), (dx0 + 20.0, edge_y + 14.0), (dx0 - 20.0, edge_y + 10.0)], rgba([40, 42, 48]));
+    c.line(dx0, edge_y - 22.0, dx0, edge_y + 12.0, 2.5, rgba(scale_rgb(team, 1.2)));
+    c.glow(dx0, edge_y - 4.0, 12.0, team, 0.4);
+    c.rect((dx0 - 24.0) as i32, (edge_y - 26.0) as i32, 4, 40, rgba([196, 160, 58]));
+    c.rect((dx0 + 20.0) as i32, (edge_y - 18.0) as i32, 4, 34, rgba([196, 160, 58]));
+    hazard(&mut c, dx0 - 24.0, edge_y + 16.0, 7);
     // Roof vents.
     for k in 0..3 {
-        let vx = cx - 12.0 + k as f32 * 12.0;
-        iso_box(&mut c, vx, 26.0, 5.0, 4.0, scale_rgb(hull, 1.1), None);
+        let vx = cx - 48.0 + k as f32 * 48.0;
+        iso_box4(&mut c, vx, 104.0, 20.0, 14.0, scale_rgb(hull, 1.1), None);
     }
-    c.outline(OUTLINE);
+    // Supply crates on the apron.
+    for (bx, by, bw) in [(cx + 120.0, 196.0, 14.0), (cx + 142.0, 204.0, 11.0), (cx + 106.0, 208.0, 9.0)] {
+        c.poly(&[(bx - bw, by), (bx, by - bw * 0.5), (bx + bw, by), (bx, by + bw * 0.5)], rgba([86, 90, 82]));
+        c.poly(&[(bx - bw, by), (bx, by + bw * 0.5), (bx, by + bw * 0.9), (bx - bw, by + bw * 0.4)], rgba([62, 65, 60]));
+        c.poly(&[(bx + bw, by), (bx, by + bw * 0.5), (bx, by + bw * 0.9), (bx + bw, by + bw * 0.4)], rgba([74, 78, 71]));
+    }
+    // Comms antenna.
+    c.line(cx + 96.0, 112.0, cx + 96.0, 76.0, 2.0, rgba([80, 84, 94]));
+    c.glow(cx + 96.0, 74.0, 5.0, [255, 90, 80], 0.7);
+    c.outline_t(OUTLINE, 3);
+    c.rim(OUTLINE, 1.22);
     c
 }
 
@@ -2281,95 +2381,139 @@ fn paint_geyser() -> Canvas {
     c
 }
 
-/// Plasma Condenser: squat industrial extractor with tank + intake pipe.
+/// Plasma Condenser: tanked extractor rig. 272x232.
 fn paint_condenser(team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(68, 58);
-    let cx = 34.0;
-    let hull = [122, 118, 108];
-    iso_box(&mut c, cx, 42.0, 30.0, 6.0, [112, 110, 104], None);
-    // Main intake housing.
-    iso_box(&mut c, cx, 32.0, 22.0, 12.0, hull, Some(team));
-    // Condensation tank on top.
-    c.ellipse_shaded(cx - 6.0, 22.0, 9.0, 6.5, scale_rgb(hull, 1.08));
-    c.ellipse(cx - 6.0, 19.0, 5.0, 3.0, rgba([64, 210, 200]));
-    c.ellipse(cx - 7.5, 18.2, 2.0, 1.2, rgba([190, 255, 248]));
-    // Intake pipe to the vent side.
-    c.line(cx + 8.0, 26.0, cx + 20.0, 34.0, 3.0, rgba(scale_rgb(hull, 0.8)));
-    c.line(cx + 9.0, 25.0, cx + 20.0, 32.5, 1.2, rgba(scale_rgb(hull, 1.2)));
-    // Gauge light.
-    c.set((cx + 10.0) as i32, 24, [64, 220, 210, 255]);
-    c.outline(OUTLINE);
+    let mut c = Canvas::new(272, 232);
+    let cx = 136.0;
+    let hull = [96, 94, 88];
+    iso_box4(&mut c, cx, 168.0, 120.0, 24.0, [86, 85, 82], None);
+    iso_box4(&mut c, cx, 128.0, 88.0, 48.0, hull, Some(team));
+    windows4(&mut c, cx, 128.0, 88.0, 48.0, [255, 200, 110]);
+    // Condensation tank: steel dome with a glowing teal sight-glass.
+    c.dome(cx - 24.0, 88.0, 36.0, 26.0, [108, 112, 118]);
+    c.ellipse(cx - 24.0, 76.0, 20.0, 12.0, rgba([64, 210, 200]));
+    c.ellipse(cx - 30.0, 72.0, 8.0, 5.0, rgba([190, 255, 248]));
+    c.glow(cx - 24.0, 76.0, 26.0, [64, 210, 200], 0.4);
+    // Secondary tank.
+    c.dome(cx + 40.0, 96.0, 20.0, 14.0, [92, 96, 104]);
+    // Intake pipework down to the vent side.
+    pipe(&mut c, cx + 32.0, 104.0, cx + 80.0, 136.0, 7.0);
+    pipe(&mut c, cx + 56.0, 120.0, cx + 56.0, 148.0, 5.0);
+    // Gauge lights.
+    c.set((cx + 40.0) as i32, 96, rgba([64, 220, 210]));
+    c.glow(cx + 40.0, 96.0, 5.0, [64, 220, 210], 0.7);
+    c.outline_t(OUTLINE, 3);
+    c.rim(OUTLINE, 1.22);
     c
 }
 
-/// Forge: heavy factory with furnace glow and chimney. 100x74.
+/// Forge: heavy foundry — furnace maw, chimney, crane. 400x296.
 fn paint_forge(team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(100, 74);
-    let cx = 50.0;
-    let hull = [124, 116, 106];
-    iso_box(&mut c, cx, 50.0, 48.0, 6.0, [112, 110, 104], None);
-    iso_box(&mut c, cx, 32.0, 38.0, 20.0, hull, Some(team));
-    windows(&mut c, cx, 32.0, 38.0, 20.0, [255, 190, 110]);
-    // Furnace mouth on the lower-left wall.
-    c.rect((cx - 24.0) as i32, 46, 10, 8, rgba([255, 140, 60]));
-    c.rect((cx - 22.0) as i32, 48, 6, 4, rgba([255, 220, 140]));
-    // Chimney with smoke.
-    iso_box(&mut c, cx + 22.0, 16.0, 7.0, 14.0, scale_rgb(hull, 0.9), None);
+    let mut c = Canvas::new(400, 296);
+    let cx = 200.0;
+    let hull = [98, 92, 84];
+    iso_box4(&mut c, cx, 200.0, 192.0, 24.0, [86, 85, 82], None);
+    iso_box4(&mut c, cx, 128.0, 152.0, 80.0, hull, Some(team));
+    windows4(&mut c, cx, 128.0, 152.0, 80.0, [255, 190, 110]);
+    // Furnace maw on the lower-left wall: layered heat glow.
+    let mx = cx - 96.0;
+    let my = 184.0;
+    c.poly(&[(mx - 22.0, my + 14.0), (mx - 18.0, my - 12.0), (mx, my - 20.0), (mx + 18.0, my - 12.0), (mx + 22.0, my + 14.0)], rgba([34, 32, 36]));
+    c.glow(mx, my, 26.0, [255, 130, 50], 0.75);
+    c.poly(&[(mx - 14.0, my + 12.0), (mx - 10.0, my - 6.0), (mx, my - 12.0), (mx + 10.0, my - 6.0), (mx + 14.0, my + 12.0)], rgba([255, 150, 60]));
+    c.poly(&[(mx - 7.0, my + 10.0), (mx, my - 4.0), (mx + 7.0, my + 10.0)], rgba([255, 230, 150]));
+    hazard(&mut c, mx - 24.0, my + 18.0, 7);
+    // Slag channel glowing across the apron.
+    c.line(mx, my + 16.0, mx - 24.0, my + 34.0, 4.0, rgba([120, 52, 30]));
+    c.line(mx, my + 16.0, mx - 24.0, my + 34.0, 1.6, rgba([255, 140, 60]));
+    // Chimney with ember glow + smoke.
+    iso_box4(&mut c, cx + 88.0, 64.0, 28.0, 56.0, scale_rgb(hull, 0.92), None);
+    c.glow(cx + 88.0, 52.0, 12.0, [255, 120, 50], 0.5);
     for k in 0..3 {
         let h = hash2(k, 5, 60);
-        c.ellipse(cx + 22.0 + (h % 5) as f32 - 2.0, 8.0 - k as f32 * 3.0, 2.2, 1.4, [130, 130, 135, 140]);
+        c.glow(cx + 88.0 + (h % 9) as f32 - 4.0, 34.0 - k as f32 * 12.0, 8.0 + k as f32 * 2.0, [120, 120, 126], 0.25);
     }
-    // Crane arm.
-    c.line(cx - 30.0, 26.0, cx - 14.0, 18.0, 1.6, rgba([90, 92, 100]));
-    c.outline(OUTLINE);
+    // Gantry crane.
+    c.line(cx - 120.0, 104.0, cx - 56.0, 72.0, 3.0, rgba([70, 74, 84]));
+    c.line(cx - 88.0, 88.0, cx - 88.0, 116.0, 1.5, rgba([60, 63, 72]));
+    c.rect((cx - 92.0) as i32, 116, 8, 6, rgba(STEEL_LIT));
+    c.outline_t(OUTLINE, 3);
+    c.rim(OUTLINE, 1.22);
     c
 }
 
-/// Aerie: landing pad + control tower. 100x70.
+/// Aerie: flight deck + control tower. 400x280.
 fn paint_aerie(team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(100, 70);
-    let cx = 50.0;
-    iso_box(&mut c, cx, 48.0, 48.0, 6.0, [112, 110, 104], None);
-    // Raised landing pad.
-    iso_box(&mut c, cx + 8.0, 38.0, 34.0, 8.0, [96, 100, 108], None);
-    // Pad markings.
-    c.ellipse(cx + 8.0, 38.0, 13.0, 6.5, rgba([120, 126, 136]));
-    c.ellipse(cx + 8.0, 38.0, 9.0, 4.5, rgba([96, 100, 108]));
-    c.rect((cx + 6.0) as i32, 35, 4, 7, rgba(team));
-    // Hazard stripes on the pad's front edge.
-    for k in 0..8 {
-        let x = (cx - 20.0 + k as f32 * 7.0) as i32;
-        c.rect(x, 49, 4, 2, rgba(if k % 2 == 0 { [220, 180, 60] } else { [40, 40, 44] }));
+    let mut c = Canvas::new(400, 280);
+    let cx = 200.0;
+    iso_box4(&mut c, cx, 192.0, 192.0, 24.0, [86, 85, 82], None);
+    // Raised flight deck.
+    iso_box4(&mut c, cx + 32.0, 152.0, 136.0, 32.0, [76, 80, 88], None);
+    hazard(&mut c, cx - 48.0, 220.0, 12);
+    // Deck markings: rings + team glow ring + approach chevrons.
+    c.ellipse(cx + 32.0, 152.0, 52.0, 26.0, rgba([96, 102, 112]));
+    c.ellipse(cx + 32.0, 152.0, 40.0, 20.0, rgba([76, 80, 88]));
+    for k in 0..10 {
+        let a = k as f32 * 0.628;
+        let lx = cx + 32.0 + a.cos() * 46.0;
+        let ly = 152.0 + a.sin() * 23.0;
+        c.set(lx as i32, ly as i32, rgba(scale_rgb(team, 1.3)));
+        c.glow(lx, ly, 4.0, team, 0.5);
     }
-    // Control tower.
-    iso_box(&mut c, cx - 28.0, 22.0, 12.0, 18.0, [132, 130, 124], Some(team));
-    c.rect((cx - 34.0) as i32, 20, 12, 4, rgba([150, 230, 250]));
-    c.line(cx - 28.0, 12.0, cx - 28.0, 4.0, 1.2, rgba([90, 92, 100]));
-    c.set((cx - 28.0) as i32, 3, [255, 80, 70, 255]);
-    c.outline(OUTLINE);
+    for k in 0..3 {
+        let x = cx - 32.0 + k as f32 * 12.0;
+        c.poly(&[(x, 148.0), (x + 6.0, 152.0), (x, 156.0), (x - 6.0, 152.0)], rgba(scale_rgb(team, 0.9)));
+    }
+    // Control tower with a glass band.
+    iso_box4(&mut c, cx - 112.0, 88.0, 48.0, 72.0, [104, 102, 98], Some(team));
+    let gy = 96;
+    c.rect((cx - 136.0) as i32, gy, 48, 10, rgba([110, 220, 245]));
+    c.rect((cx - 132.0) as i32, gy + 2, 12, 4, rgba([210, 245, 255]));
+    c.glow(cx - 112.0, gy as f32 + 5.0, 26.0, VISOR, 0.35);
+    // Dish + mast + strobe.
+    c.dome(cx - 88.0, 52.0, 12.0, 7.0, [96, 100, 108]);
+    c.line(cx - 112.0, 52.0, cx - 112.0, 18.0, 2.5, rgba([80, 84, 94]));
+    c.glow(cx - 112.0, 16.0, 6.0, [255, 90, 80], 0.85);
+    c.set((cx - 112.0) as i32, 16, rgba([255, 130, 120]));
+    c.outline_t(OUTLINE, 3);
+    c.rim(OUTLINE, 1.22);
     c
 }
 
-/// Archive: research dome with antenna array. 70x62.
+/// Archive: faceted research dome + antenna array. 280x248.
 fn paint_archive(team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(70, 62);
-    let cx = 35.0;
-    iso_box(&mut c, cx, 46.0, 30.0, 6.0, [114, 112, 108], None);
-    // Dome.
-    c.ellipse_shaded(cx, 32.0, 20.0, 14.0, [136, 134, 130]);
-    c.ellipse(cx - 6.0, 26.0, 6.0, 4.0, rgba([170, 170, 168]));
-    // Data windows band.
-    for k in 0..6 {
-        let x = (cx - 14.0 + k as f32 * 5.0) as i32;
-        c.rect(x, 38, 2, 3, rgba([120, 220, 255]));
+    let mut c = Canvas::new(280, 248);
+    let cx = 140.0;
+    iso_box4(&mut c, cx, 184.0, 120.0, 24.0, [86, 85, 82], None);
+    iso_box4(&mut c, cx, 148.0, 92.0, 32.0, [100, 98, 94], Some(team));
+    // Dome with horizontal band seams.
+    c.dome(cx, 116.0, 76.0, 52.0, [112, 110, 106]);
+    for band in 0..4 {
+        let by = 84.0 + band as f32 * 18.0;
+        for x in (cx - 74.0) as i32..=(cx + 74.0) as i32 {
+            let dx = (x as f32 - cx) / 76.0;
+            let dy = (by - 116.0) / 52.0;
+            if dx * dx + dy * dy < 0.96 {
+                c.blend(x, by as i32, [30, 30, 34, 90]);
+            }
+        }
     }
-    c.rect((cx - 16.0) as i32, 42, 32, 2, rgba(team));
-    // Antenna array.
-    for (ax, ah) in [(-10.0f32, 12.0f32), (0.0, 16.0), (10.0, 10.0)] {
-        c.line(cx + ax, 22.0, cx + ax, 22.0 - ah, 1.1, rgba([90, 92, 100]));
-        c.set((cx + ax) as i32, (21.0 - ah) as i32, [140, 240, 255, 255]);
+    // Data window band: teal cells around the equator.
+    for k in 0..7 {
+        let x = cx - 54.0 + k as f32 * 18.0;
+        c.rect(x as i32, 132, 8, 10, rgba([90, 210, 245]));
+        c.rect(x as i32 + 2, 134, 3, 4, rgba([200, 245, 255]));
+        c.glow(x + 4.0, 137.0, 9.0, [90, 210, 245], 0.35);
     }
-    c.outline(OUTLINE);
+    // Antenna array with cyan tips.
+    for (ax, ah) in [(-40.0f32, 44.0f32), (0.0, 60.0), (40.0, 36.0)] {
+        c.line(cx + ax, 76.0, cx + ax, 76.0 - ah, 2.2, rgba([80, 84, 94]));
+        c.line(cx + ax, 76.0 - ah * 0.6, cx + ax + 8.0, 76.0 - ah * 0.6 - 5.0, 1.3, rgba([80, 84, 94]));
+        c.glow(cx + ax, 74.0 - ah, 5.0, [140, 240, 255], 0.8);
+        c.set((cx + ax) as i32, (74.0 - ah) as i32, rgba([190, 250, 255]));
+    }
+    c.outline_t(OUTLINE, 3);
+    c.rim(OUTLINE, 1.22);
     c
 }
 
