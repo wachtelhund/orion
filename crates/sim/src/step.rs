@@ -70,8 +70,7 @@ impl State {
                 if !self.gatherable(player, *resource) {
                     return;
                 }
-                let rt = TilePos::of(self.entities[resource.idx as usize].pos);
-                let field = self.fields.insert(compute_flow_field(&self.map, &self.blocked, rt));
+                let field = self.approach_field(resource.idx);
                 for id in units {
                     if let Some(i) = self.owned_unit(player, *id) {
                         if self.data.units[self.entities[i].def as usize].harvester {
@@ -252,11 +251,13 @@ impl State {
                     }
                 }
                 // Cost is deducted when construction actually starts (worker
-                // arrives), like SC. Here we only order the travel.
+                // arrives), like SC. Here we only order the travel. The
+                // field seeds from the whole site ring — any open side.
                 let (fw, fh) = self.data.buildings[*building as usize].footprint;
-                let center_tile = TilePos::new(site.x + fw / 2, site.y + fh / 2);
-                let field =
-                    self.fields.insert(compute_flow_field(&self.map, &self.blocked, center_tile));
+                let seeds = crate::path::ring_seeds(*site, fw, fh);
+                let field = self
+                    .fields
+                    .insert(crate::path::compute_flow_field_multi(&self.map, &self.blocked, &seeds));
                 self.issue_order(
                     i,
                     Order::Build { def: *building, site: *site, phase: BuildPhase::Travel, field },
@@ -437,19 +438,27 @@ impl State {
         }
     }
 
-    /// Plasma Storms pulse damage in their radius every 8 ticks.
+    /// Plasma Storms pulse damage in their radius every 8 ticks. A unit
+    /// inside several storms takes ONE pulse, not one per storm — stacked
+    /// storms would otherwise multiply damage past any counterplay.
     fn tick_storms(&mut self, hits: &mut Vec<(u32, i32)>) {
         let radius = crate::STORM_RADIUS;
         let r_sq = (radius.0 as i64) * (radius.0 as i64);
+        // Pulses ride the global clock (not per-storm phase) so "one pulse
+        // per unit" holds across storms cast at different times.
+        let mut struck = vec![false; self.entities.len()];
+        let pulse_now = self.tick % 8 == 0;
         for k in 0..self.storms.len() {
             self.storms[k].ticks_left -= 1;
-            if self.storms[k].ticks_left % 8 == 0 {
+            if pulse_now {
                 let pos = self.storms[k].pos;
                 for (i, e) in self.entities.iter().enumerate() {
                     if e.alive
+                        && !struck[i]
                         && e.kind != EntityKind::Resource
                         && dist_sq_raw(pos, e.pos) <= r_sq
                     {
+                        struck[i] = true;
                         hits.push((i as u32, crate::STORM_PULSE_DMG));
                     }
                 }

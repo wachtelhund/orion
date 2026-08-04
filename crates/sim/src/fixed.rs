@@ -124,7 +124,10 @@ impl Mul for Fx {
     type Output = Fx;
     #[inline]
     fn mul(self, o: Fx) -> Fx {
-        Fx(((self.0 as i64 * o.0 as i64) >> FRAC_BITS) as i32)
+        // Truncate toward zero (NOT an arithmetic shift, which floors):
+        // (-a)*b must equal -(a*b) exactly, or mirrored halves of the map
+        // simulate differently and spawn positions gain a bias.
+        Fx(((self.0 as i64 * o.0 as i64) / (1i64 << FRAC_BITS)) as i32)
     }
 }
 impl Div for Fx {

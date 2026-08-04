@@ -292,13 +292,19 @@ impl State {
             let origin = TilePos::new(start.x - 1, start.y - 1);
             let id = s.spawn_building(p, hq, origin, false);
             let center = s.entities[id.idx as usize].pos;
-            // Workers in an arc on the mineral-line side of the HQ.
+            // Workers in an arc on the mineral-line side of the HQ. The
+            // arc is centered and fully sign-flipped per side so the two
+            // spawns are exact point-mirrors — an off-center arc gave the
+            // SE main a measurably different opening (mirror.rs probe).
             let side = if start.x < s.map.width / 2 { -1 } else { 1 };
             for w in 0..START_WORKERS {
-                let off = FxVec2::new(
-                    Fx::from_int(side * 3),
-                    Fx::from_int(w as i32 - (START_WORKERS as i32 / 2)),
-                );
+                // Quarter-tile nudge keeps spawn positions OFF tile
+                // boundaries: a unit exactly on a boundary floors into
+                // different tiles on the two mirrored halves, which is
+                // enough to diverge the whole opening.
+                let base = 2 * w as i32 - (START_WORKERS as i32 - 1);
+                let centered = Fx::from_ratio(base, 2) + Fx::from_ratio(base.signum(), 4);
+                let off = FxVec2::new(Fx::from_int(side * 3), centered * Fx::from_int(side));
                 s.spawn_unit(p, worker, center + off);
             }
         }
@@ -469,6 +475,28 @@ impl State {
 
     // ---- footprints & placement ----
 
+    /// Flow field for approaching entity `idx` (resource or building):
+    /// seeded from every open tile ringing its footprint, so units reach
+    /// whichever side is open instead of marching at one (possibly sealed)
+    /// tile. Returns the inserted field slot.
+    pub fn approach_field(&mut self, idx: u32) -> u32 {
+        let e = &self.entities[idx as usize];
+        let (origin, fw, fh) = match e.kind {
+            EntityKind::Building => {
+                let (fw, fh) = self.data.buildings[e.def as usize].footprint;
+                (self.footprint_origin(e.def, e.pos), fw, fh)
+            }
+            EntityKind::Resource => {
+                let side = if e.def == RES_GEYSER { 2 } else { 1 };
+                (TilePos::of(e.pos), side, side)
+            }
+            EntityKind::Unit => (TilePos::of(e.pos), 1, 1),
+        };
+        let seeds = crate::path::ring_seeds(origin, fw, fh);
+        self.fields
+            .insert(crate::path::compute_flow_field_multi(&self.map, &self.blocked, &seeds))
+    }
+
     pub fn footprint_origin(&self, def: DefId, center: FxVec2) -> TilePos {
         let (fw, fh) = self.data.buildings[def as usize].footprint;
         TilePos::new(
@@ -546,8 +574,14 @@ impl State {
     /// exit in the useful direction.
     pub fn spawn_tile_near(&self, def: DefId, origin: TilePos, toward: FxVec2) -> Option<TilePos> {
         let (fw, fh) = self.data.buildings[def as usize].footprint;
+        // Distance ties (common: rally straight at a mineral line makes the
+        // ring symmetric) must break toward mirrored tiles on the two map
+        // halves, or every spawn drifts NW and the halves play differently.
+        let n = (self.map.width * self.map.height) as u32;
+        let flip = 2 * (self.map.idx(origin.x, origin.y) as u32) > n - 1;
+        let key = |x: i32, y: i32| if flip { (-x, -y) } else { (x, y) };
         for r in 1..8 {
-            let mut best: Option<(i64, i32, i32)> = None;
+            let mut best: Option<(i64, (i32, i32))> = None;
             for y in origin.y - r..origin.y + fh + r {
                 for x in origin.x - r..origin.x + fw + r {
                     let on_ring =
@@ -560,13 +594,14 @@ impl State {
                             TilePos::new(x, y).center(),
                             toward,
                         );
-                        if best.map_or(true, |(bd, bx, by)| (d, x, y) < (bd, bx, by)) {
-                            best = Some((d, x, y));
+                        if best.map_or(true, |(bd, bk)| (d, key(x, y)) < (bd, bk)) {
+                            best = Some((d, key(x, y)));
                         }
                     }
                 }
             }
-            if let Some((_, x, y)) = best {
+            if let Some((_, k)) = best {
+                let (x, y) = if flip { (-k.0, -k.1) } else { k };
                 return Some(TilePos::new(x, y));
             }
         }

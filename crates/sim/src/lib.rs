@@ -39,9 +39,11 @@ pub const TICKS_PER_SEC: u32 = 24;
 /// Supply cap per player.
 pub const SUPPLY_CAP: u32 = 200;
 
-/// Plasma Storm tuning.
-pub const STORM_COST: u16 = 75;
+/// Plasma Storm tuning. 8 pulses x 6 = 48 total damage, two casts per
+/// full-energy caster, and overlapping storms do NOT stack (SC2 rule) —
+/// the 72-damage stacking version deleted armies outright.
+pub const STORM_COST: u16 = 100;
 pub const STORM_RADIUS: fixed::Fx = fixed::Fx::from_ratio(5, 2);
-pub const STORM_PULSE_DMG: i32 = 8;
-pub const STORM_DURATION: u16 = 72;
+pub const STORM_PULSE_DMG: i32 = 6;
+pub const STORM_DURATION: u16 = 64;
 pub const STORM_CAST_RANGE: fixed::Fx = fixed::Fx::from_int(8);

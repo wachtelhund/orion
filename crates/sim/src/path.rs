@@ -63,9 +63,13 @@ impl FlowField {
 /// `blocked` marks tiles occupied by buildings/resources (dynamic blockers on
 /// top of terrain). Same length as the map grid.
 pub fn compute_flow_field(map: &Map, blocked: &[bool], target: TilePos) -> FlowField {
-    let n = (map.width * map.height) as usize;
-    let mut cost = vec![u32::MAX; n];
-    let mut dir = vec![NO_DIR; n];
+    // Tie-break mirroring (see the Dijkstra comment below): targets in the
+    // SE half scan in point-mirrored order everywhere, ring search included
+    // — a gather field toward a blocked mineral tile must resolve to the
+    // mirrored adjacent tile on the mirrored side of the map.
+    let n_tiles = (map.width * map.height) as u32;
+    let flip = 2 * (map.idx(target.x, target.y) as u32) > n_tiles - 1;
+    let m = |v: i32| if flip { -v } else { v };
 
     let mut target = target;
     // If the target tile itself is blocked (e.g. right-click on a building),
@@ -77,7 +81,7 @@ pub fn compute_flow_field(map: &Map, blocked: &[bool], target: TilePos) -> FlowF
                     if dx.abs() != r && dy.abs() != r {
                         continue;
                     }
-                    let (x, y) = (target.x + dx, target.y + dy);
+                    let (x, y) = (target.x + m(dx), target.y + m(dy));
                     if open(map, blocked, x, y) {
                         target = TilePos::new(x, y);
                         break 'search;
@@ -86,23 +90,58 @@ pub fn compute_flow_field(map: &Map, blocked: &[bool], target: TilePos) -> FlowF
             }
         }
     }
-    if !open(map, blocked, target.x, target.y) {
+    compute_flow_field_multi(map, blocked, &[target])
+}
+
+/// Flow field seeded from EVERY open tile in `seeds` at cost 0. Used for
+/// destinations with a footprint (depots, resources, build sites): units
+/// then approach whichever side of the structure is actually reachable.
+/// A single-tile seed picked by ring search can land in a sealed pocket
+/// beside a walled-in building — every worker outside gets an unreachable
+/// field and the economy freezes (found by soak).
+pub fn compute_flow_field_multi(map: &Map, blocked: &[bool], seeds: &[TilePos]) -> FlowField {
+    let n = (map.width * map.height) as usize;
+    let mut cost = vec![u32::MAX; n];
+    let mut dir = vec![NO_DIR; n];
+    let n_tiles = n as u32;
+
+    let open_seeds: Vec<usize> =
+        seeds.iter().filter(|t| open(map, blocked, t.x, t.y)).map(|t| map.idx(t.x, t.y)).collect();
+    let target = seeds.first().copied().unwrap_or(TilePos::new(0, 0));
+    if open_seeds.is_empty() {
         return FlowField { target, dir, cost };
     }
+    // Mirror-consistent flip for a seed SET: min+max index straddles the
+    // map midpoint antisymmetrically under 180-degree rotation.
+    let lo = *open_seeds.iter().min().unwrap() as u32;
+    let hi = *open_seeds.iter().max().unwrap() as u32;
+    let flip = lo + hi > n_tiles - 1;
 
-    // Dijkstra outward from target. heap entries: (cost, tile_idx).
-    let mut heap: BinaryHeap<Reverse<(u32, u32)>> = BinaryHeap::new();
-    let ti = map.idx(target.x, target.y);
-    cost[ti] = 0;
-    heap.push(Reverse((0, ti as u32)));
+    // Dijkstra outward from target. Tie-breaks (heap order, DIRS scan
+    // order) decide which of several equal-cost paths a field prefers.
+    // Left as-is they always prefer the NW, which on a 180-degree-mirrored
+    // map gives one spawn systematically better path shapes (the Kyth
+    // mirror SE bias). Fields whose target lies in the SE half therefore
+    // run with point-mirrored tie-breaks, making mirrored orders produce
+    // mirrored fields.
+    let heap_key = |i: u32| if flip { n_tiles - 1 - i } else { i };
+    // heap entries: (cost, tie_key, tile_idx).
+    let mut heap: BinaryHeap<Reverse<(u32, u32, u32)>> = BinaryHeap::new();
+    for &si in &open_seeds {
+        cost[si] = 0;
+        heap.push(Reverse((0, heap_key(si as u32), si as u32)));
+    }
 
-    while let Some(Reverse((c, i))) = heap.pop() {
+    while let Some(Reverse((c, _, i))) = heap.pop() {
         if c > cost[i as usize] {
             continue;
         }
         let x = i as i32 % map.width;
         let y = i as i32 / map.width;
-        for (di, &(dx, dy)) in DIRS.iter().enumerate() {
+        for k in 0..8 {
+            // Mirrored scan: DIRS[d] -> DIRS[d+4] is exactly (dx,dy) -> (-dx,-dy).
+            let di = if flip { (k + 4) % 8 } else { k };
+            let (dx, dy) = DIRS[di];
             let (nx, ny) = (x + dx, y + dy);
             if !map.in_bounds(nx, ny) || !open(map, blocked, nx, ny) {
                 continue;
@@ -129,7 +168,7 @@ pub fn compute_flow_field(map: &Map, blocked: &[bool], target: TilePos) -> FlowF
                 cost[ni] = nc;
                 // Unit at (nx,ny) should move opposite the expansion dir.
                 dir[ni] = ((di + 4) % 8) as u8;
-                heap.push(Reverse((nc, ni as u32)));
+                heap.push(Reverse((nc, heap_key(ni as u32), ni as u32)));
             }
         }
     }
@@ -140,6 +179,22 @@ pub fn compute_flow_field(map: &Map, blocked: &[bool], target: TilePos) -> FlowF
 #[inline]
 fn open(map: &Map, blocked: &[bool], x: i32, y: i32) -> bool {
     map.walkable(x, y) && !blocked[map.idx(x, y)]
+}
+
+/// The tiles ringing a footprint at `origin` (fw x fh) — seed set for
+/// `compute_flow_field_multi` so units can approach from any open side.
+pub fn ring_seeds(origin: TilePos, fw: i32, fh: i32) -> Vec<TilePos> {
+    let mut v = Vec::with_capacity(((fw + 2) * (fh + 2) - fw * fh) as usize);
+    for y in origin.y - 1..=origin.y + fh {
+        for x in origin.x - 1..=origin.x + fw {
+            let inside =
+                x >= origin.x && x < origin.x + fw && y >= origin.y && y < origin.y + fh;
+            if !inside {
+                v.push(TilePos::new(x, y));
+            }
+        }
+    }
+    v
 }
 
 /// Pool of flow fields referenced by unit orders. Freed by periodic mark-and-

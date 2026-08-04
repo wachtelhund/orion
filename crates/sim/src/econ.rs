@@ -4,7 +4,6 @@
 use crate::entity::EntityId;
 use crate::fixed::{dist, dist_sq_raw, Fx, FxVec2};
 use crate::map::TilePos;
-use crate::path::compute_flow_field;
 use crate::state::{
     BuildPhase, EntityKind, GatherPhase, Order, State, CARRY_AMOUNT, MINE_TICKS, RES_MINERALS,
 };
@@ -96,9 +95,7 @@ impl State {
                     }
                     // Back to the source (or a nearby one if it ran out).
                     if self.gatherable(owner, resource) {
-                        let rt = TilePos::of(self.entities[resource.idx as usize].pos);
-                        let f =
-                            self.fields.insert(compute_flow_field(&self.map, &self.blocked, rt));
+                        let f = self.approach_field(resource.idx);
                         self.entities[i].order = Order::Gather {
                             resource,
                             phase: GatherPhase::ToResource,
@@ -130,8 +127,7 @@ impl State {
         match best {
             Some((_, j)) => {
                 let rid = self.id_of(j);
-                let rt = TilePos::of(self.entities[j as usize].pos);
-                let f = self.fields.insert(compute_flow_field(&self.map, &self.blocked, rt));
+                let f = self.approach_field(j);
                 self.entities[i].order =
                     Order::Gather { resource: rid, phase: GatherPhase::ToResource, field: f };
             }
@@ -146,8 +142,7 @@ impl State {
             self.finish_order(i);
             return;
         };
-        let dt = TilePos::of(self.entities[depot as usize].pos);
-        let f = self.fields.insert(compute_flow_field(&self.map, &self.blocked, dt));
+        let f = self.approach_field(depot);
         self.entities[i].order =
             Order::Gather { resource, phase: GatherPhase::ToDepot, field: f };
     }
