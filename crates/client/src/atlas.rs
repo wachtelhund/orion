@@ -486,8 +486,8 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
     let cliff_right = p.place_s(&cliff_face(false), SS);
 
     // Minerals + geyser.
-    let minerals = std::array::from_fn(|i| p.place(&mineral_cluster(i as u32)));
-    let geyser = p.place(&paint_geyser());
+    let minerals = std::array::from_fn(|i| p.place_s(&mineral_cluster(i as u32), SS));
+    let geyser = p.place_s(&paint_geyser(), SS);
 
     // Units: [type][team][facing][frame].
     let mut units = Vec::new();
@@ -543,14 +543,19 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
     }
 
     // Destructible flora + rocks.
-    let trees = [p.place(&tree_canvas(0)), p.place(&tree_canvas(1))];
+    let trees = [p.place_s(&tree_canvas(0), SS), p.place_s(&tree_canvas(1), SS)];
     let rock_wall = {
-        let mut c = Canvas::new(22, 18);
-        c.ellipse_shaded(7.0, 11.0, 6.5, 5.0, [96, 92, 88]);
-        c.ellipse_shaded(15.0, 12.0, 6.0, 4.5, [88, 84, 82]);
-        c.ellipse_shaded(11.0, 7.0, 5.0, 4.0, [104, 100, 94]);
-        c.outline([30, 28, 26, 255]);
-        p.place(&c)
+        let mut c = Canvas::new(88, 72);
+        // Angular basalt slabs: dark mass, lit top facets, cracks.
+        c.poly(&[(6.0, 52.0), (30.0, 34.0), (62.0, 36.0), (82.0, 52.0), (60.0, 64.0), (22.0, 64.0)], rgba([74, 70, 74]));
+        c.poly(&[(14.0, 46.0), (34.0, 30.0), (52.0, 34.0), (36.0, 46.0)], rgba([96, 92, 96]));
+        c.poly(&[(40.0, 44.0), (58.0, 32.0), (74.0, 46.0), (56.0, 52.0)], rgba([88, 84, 88]));
+        c.poly(&[(6.0, 52.0), (22.0, 64.0), (24.0, 52.0)], rgba([52, 49, 52]));
+        c.line(34.0, 34.0, 40.0, 58.0, 1.6, rgba([44, 41, 44]));
+        c.line(56.0, 36.0, 52.0, 60.0, 1.3, rgba([48, 45, 48]));
+        c.outline_t([22, 20, 22, 255], 2);
+        c.rim([22, 20, 22, 255], 1.25);
+        p.place_s(&c, SS)
     };
 
     // Effects.
@@ -718,25 +723,51 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
 /// A gnarled alien conifer: dark trunk, layered teal-green canopy. Two
 /// variants via `v` so forests don't tile visibly.
 fn tree_canvas(v: i32) -> Canvas {
-    let mut c = Canvas::new(20, 26);
-    // Trunk.
-    c.rect(9, 18, 2, 6, [58, 44, 34, 255]);
-    c.rect(8, 22, 4, 2, [48, 36, 28, 255]);
-    // Canopy: three stacked shaded blobs, slightly skewed per variant.
-    let sk = if v == 0 { 0.0 } else { 1.5 };
-    c.ellipse_shaded(10.0 + sk, 14.0, 8.0, 5.0, [38, 92, 74]);
-    c.ellipse_shaded(10.0 - sk, 9.0, 6.5, 4.5, [46, 108, 82]);
-    c.ellipse_shaded(10.0, 5.0, 4.5, 3.5, [58, 124, 92]);
-    // Sparse lighter needles.
-    for k in 0..10 {
-        let h = hash2(k, v, 421);
-        let x = 4 + (h % 12) as i32;
-        let y = 3 + ((h >> 8) % 12) as i32;
-        c.blend(x, y, [92, 160, 118, 160]);
+    let mut c = Canvas::new(80, 104);
+    let cx = 40.0 + if v == 0 { 0.0 } else { 3.0 };
+    // Trunk + root flare.
+    c.poly(&[(cx - 4.0, 98.0), (cx + 4.0, 98.0), (cx + 2.5, 62.0), (cx - 2.5, 62.0)], rgba([50, 38, 28]));
+    c.poly(&[(cx - 10.0, 100.0), (cx + 10.0, 100.0), (cx + 5.0, 93.0), (cx - 5.0, 93.0)], rgba([42, 32, 24]));
+    c.line(cx - 1.5, 94.0, cx - 2.5, 68.0, 1.5, rgba([64, 48, 36]));
+    // Three serrated conifer tiers — sharp silhouette, drooping spiked
+    // skirts, apex skewed per variant so the forest isn't cloned.
+    let tiers: [(f32, f32, f32, [u8; 3]); 3] = [
+        (86.0, 27.0, 30.0, [28, 56, 44]),
+        (64.0, 20.0, 26.0, [36, 70, 52]),
+        (44.0, 13.0, 24.0, [46, 86, 62]),
+    ];
+    for (ti, &(by, hw, ah, col)) in tiers.iter().enumerate() {
+        let apex_x = cx + if v == 0 { [-2.0, 2.0, -1.0][ti] } else { [3.0, -2.0, 2.0][ti] };
+        let mut pts: Vec<(f32, f32)> = vec![(apex_x, by - ah), (cx + hw, by)];
+        let n = 6;
+        for k in 1..n {
+            let f = k as f32 / n as f32;
+            let x = cx + hw - f * hw * 2.0;
+            let droop = if k % 2 == 1 { 6.0 } else { 1.0 };
+            let jitter = (hash2(k, ti as i32 * 9 + v, 551) % 4) as f32;
+            pts.push((x, by + droop + jitter));
+        }
+        pts.push((cx - hw, by));
+        c.poly(&pts, rgba(col));
+        // Lit left slope, shadowed underside.
+        c.line(apex_x, by - ah, cx - hw + 2.0, by - 1.0, 1.6, rgba(scale_rgb(col, 1.35)));
+        c.line(cx - hw * 0.5, by + 3.0, cx + hw * 0.6, by + 2.0, 2.0, rgba(scale_rgb(col, 0.6)));
     }
-    c.outline([16, 26, 22, 255]);
+    // Needle spire tip.
+    c.line(cx, 22.0, cx + if v == 0 { -1.0 } else { 2.0 }, 8.0, 2.0, rgba([54, 100, 70]));
+    // Bioluminescent specks in the foliage.
+    for k in 0..6 {
+        let h = hash2(k, v, 421);
+        let x = 22.0 + (h % 36) as f32;
+        let y = 34.0 + ((h >> 8) % 44) as f32;
+        c.glow(x, y, 3.0, [110, 235, 185], 0.7);
+        c.set(x as i32, y as i32, [180, 250, 215, 255]);
+    }
+    c.outline_t([10, 18, 14, 255], 2);
+    c.rim([10, 18, 14, 255], 1.3);
     c
 }
+
 
 // -------------------------------------------------------- console chrome ----
 
@@ -1169,37 +1200,46 @@ fn cliff_face(left: bool) -> Canvas {
 // -------------------------------------------------------------- minerals ----
 
 fn mineral_cluster(salt: u32) -> Canvas {
-    let mut c = Canvas::new(30, 26);
-    let body = [64, 190, 220];
-    let lite = [160, 240, 255];
-    let dark = [30, 110, 150];
+    let mut c = Canvas::new(120, 104);
+    let body = [58, 180, 215];
+    let lite = [132, 232, 255];
+    let dark = [24, 95, 140];
+    let glint = [225, 252, 255];
+    // Faint energy pool where the cluster meets the ground.
+    c.glow(60.0, 84.0, 36.0, [40, 160, 200], 0.30);
+    // (base_x, base_y, width, height); tallest shard in the middle.
     let shards: [(f32, f32, f32, f32); 4] = [
-        (9.0, 16.0, 4.0, 9.0),
-        (16.0, 14.0, 5.0, 12.0),
-        (22.0, 17.0, 3.5, 8.0),
-        (13.0, 19.0, 3.0, 6.0),
+        (36.0, 76.0, 17.0, 38.0),
+        (62.0, 70.0, 21.0, 52.0),
+        (88.0, 78.0, 14.0, 32.0),
+        (50.0, 86.0, 12.0, 24.0),
     ];
     for (i, &(x, y, w, h)) in shards.iter().enumerate() {
         if (salt == 1 && i == 3) || (salt == 2 && i >= 2) {
             continue; // depleted variants
         }
-        // Crystal: slanted quad + tip.
-        let tip = (x + 1.5, y - h);
-        for t in 0..=(h as i32 * 2) {
-            let f = t as f32 / (h * 2.0);
-            let cx = x + (tip.0 - x) * f;
-            let cy = y + (tip.1 - y) * f;
-            let ww = w * (1.0 - f * 0.7);
-            for px in (cx - ww / 2.0) as i32..=(cx + ww / 2.0) as i32 {
-                let facet = px as f32 > cx;
-                let col = if facet { dark } else { body };
-                c.blend(px, cy as i32, rgba(col));
-            }
-        }
-        // Highlight edge.
-        c.line(x - w * 0.3, y - 1.0, tip.0 - 0.5, tip.1 + 1.0, 1.0, rgba(lite));
+        let tip = (x + 5.0, y - h);
+        // Three hard facets — lit left, body center, deep right — plus a
+        // small base diamond so the crystal sits IN the ground.
+        c.poly(&[(x - w * 0.5, y - 2.0), (x, y + w * 0.16), (x + w * 0.5, y - 3.0), (x, y - w * 0.2)], rgba(scale_rgb(body, 0.7)));
+        c.poly(&[(x - w * 0.5, y - 2.0), (x - w * 0.12, y + w * 0.10), (tip.0 - 1.5, tip.1)], rgba(lite));
+        c.poly(&[(x - w * 0.12, y + w * 0.10), (x + w * 0.22, y + w * 0.04), (tip.0, tip.1)], rgba(body));
+        c.poly(&[(x + w * 0.22, y + w * 0.04), (x + w * 0.5, y - 3.0), (tip.0 + 1.5, tip.1)], rgba(dark));
+        // Glint running up the lit edge.
+        c.line(x - w * 0.34, y - h * 0.16, tip.0 - 1.5, tip.1 + 2.0, 1.6, rgba(glint));
+        // Internal light concentrated low in the shard.
+        c.glow(x + 1.0, y - h * 0.18, w * 0.7, [96, 224, 252], 0.4);
     }
-    c.outline([16, 40, 60, 255]);
+    // Chips scattered around the base.
+    for k in 0..5 {
+        let h = hash2(k, salt as i32, 87);
+        let px = 18.0 + (h % 84) as f32;
+        let py = 82.0 + ((h >> 8) % 14) as f32;
+        c.poly(&[(px - 3.0, py), (px - 0.5, py - 4.5), (px + 3.0, py), (px, py + 2.0)], rgba(body));
+        c.line(px - 2.0, py - 1.0, px - 0.5, py - 3.5, 1.0, rgba(lite));
+    }
+    c.outline_t([10, 34, 52, 255], 2);
+    c.rim([10, 34, 52, 255], 1.22);
     c
 }
 
@@ -1928,26 +1968,43 @@ fn paint_barracks(team: [u8; 3]) -> Canvas {
 
 /// Plasma geyser: rocky mound with a glowing teal vent. 2x2 tiles (64px).
 fn paint_geyser() -> Canvas {
-    let mut c = Canvas::new(64, 44);
-    // Mound.
-    c.ellipse_shaded(32.0, 30.0, 28.0, 12.0, [92, 84, 72]);
-    c.ellipse_shaded(32.0, 26.0, 20.0, 8.0, [104, 95, 80]);
-    // Vent crater.
-    c.ellipse(32.0, 24.0, 11.0, 5.0, rgba([56, 52, 48]));
-    // Plasma glow.
-    c.ellipse(32.0, 24.0, 8.0, 3.6, rgba([40, 200, 190]));
-    c.ellipse(32.0, 24.0, 4.5, 2.0, rgba([170, 255, 245]));
-    // Wisps.
-    for k in 0..3 {
-        let h = hash2(k, 3, 77);
-        let x = 26.0 + (h % 14) as f32;
-        let y = 12.0 - (k as f32 * 3.0);
-        c.ellipse(x, y, 2.0, 1.2, [120, 240, 230, 120]);
+    let mut c = Canvas::new(256, 176);
+    // Slag mound: overlapping dark domes give a lumpy silhouette.
+    c.dome(128.0, 120.0, 110.0, 44.0, [66, 58, 50]);
+    c.dome(70.0, 128.0, 44.0, 22.0, [60, 53, 46]);
+    c.dome(190.0, 126.0, 46.0, 22.0, [72, 63, 54]);
+    c.dome(128.0, 102.0, 74.0, 30.0, [78, 68, 58]);
+    // Crater bowl.
+    c.ellipse(128.0, 96.0, 46.0, 20.0, rgba([40, 37, 34]));
+    c.ellipse(128.0, 96.0, 40.0, 17.0, rgba([30, 28, 26]));
+    // Cracked veins radiating from the vent, glowing toward the source.
+    for k in 0..5 {
+        let h = hash2(k, 9, 501);
+        let a = 0.5 + k as f32 * 1.25 + (h % 40) as f32 * 0.01;
+        let (vx, vy) = (a.cos(), a.sin() * 0.45);
+        let r0 = 40.0;
+        let r1 = 78.0 + (h % 30) as f32;
+        c.line(128.0 + vx * r0, 100.0 + vy * r0, 128.0 + vx * r1, 100.0 + vy * r1, 2.0, rgba([30, 110, 100]));
+        let rm = r0 + (r1 - r0) * 0.55;
+        c.line(128.0 + vx * r0, 100.0 + vy * r0, 128.0 + vx * rm, 100.0 + vy * rm, 1.0, rgba([80, 215, 195]));
     }
-    // Scattered rocks.
-    c.ellipse_shaded(10.0, 36.0, 4.0, 2.2, [80, 74, 66]);
-    c.ellipse_shaded(54.0, 34.0, 3.4, 2.0, [80, 74, 66]);
-    c.outline([20, 26, 26, 255]);
+    // Plasma pool: layered glow with a white-hot heart.
+    c.glow(128.0, 96.0, 60.0, [40, 200, 185], 0.55);
+    c.ellipse(128.0, 96.0, 34.0, 14.0, rgba([46, 205, 190]));
+    c.ellipse(128.0, 95.0, 22.0, 9.0, rgba([150, 250, 235]));
+    c.ellipse(126.0, 94.0, 10.0, 4.0, rgba([230, 255, 250]));
+    // Rising vapor wisps.
+    for k in 0..4 {
+        let h = hash2(k, 3, 77);
+        let x = 104.0 + (h % 48) as f32;
+        let y = 62.0 - k as f32 * 14.0;
+        c.glow(x, y, 10.0 - k as f32 * 1.5, [110, 235, 220], 0.35);
+    }
+    // Scattered slag rocks.
+    c.dome(36.0, 146.0, 15.0, 8.0, [58, 52, 46]);
+    c.dome(218.0, 140.0, 13.0, 7.0, [58, 52, 46]);
+    c.outline_t([18, 24, 24, 255], 2);
+    c.rim([18, 24, 24, 255], 1.2);
     c
 }
 
