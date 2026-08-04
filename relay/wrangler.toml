@@ -17,3 +17,26 @@ new_sqlite_classes = ["Lobby"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["Directory"]
+
+# Per-IP rate limits, enforced at the edge before any Durable Object is
+# touched. These are per-colo rather than globally consistent — enough to make
+# scripted spam annoying, not a security boundary. Headroom check: a client
+# polls /lobbies every 3s (=20/min) and opens one socket per game.
+#
+# The rate-limit binding still lives under `unsafe`, so `wrangler deploy` warns
+# that it is experimental — expected, not a misconfiguration. Verify both
+# limiters appear in the bindings table on deploy: index.js deliberately fails
+# open, so an unbound limiter silently disables rate limiting rather than
+# breaking the relay. Deleting both blocks is a safe fallback; the per-DO caps
+# in index.js do not depend on them.
+[[unsafe.bindings]]
+name = "LIST_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }
+
+[[unsafe.bindings]]
+name = "WS_LIMITER"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 20, period = 60 }
