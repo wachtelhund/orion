@@ -39,9 +39,12 @@ pub enum Sfx {
     AckAttack,
     AckGather,
     AckBuild,
+    /// Match-start countdown tick and the GO chord.
+    CountTick,
+    CountGo,
 }
 
-pub const ALL_SFX: [Sfx; 23] = [
+pub const ALL_SFX: [Sfx; 25] = [
     Sfx::Click,
     Sfx::Error,
     Sfx::Shot,
@@ -65,6 +68,8 @@ pub const ALL_SFX: [Sfx; 23] = [
     Sfx::AckAttack,
     Sfx::AckGather,
     Sfx::AckBuild,
+    Sfx::CountTick,
+    Sfx::CountGo,
 ];
 
 pub struct Audio {
@@ -214,6 +219,10 @@ fn synth_sfx(s: Sfx) -> Vec<f32> {
             let hz = 500.0 + k as f32 * 160.0;
             square(t, hz) * 0.22 * env(t, 0.003, total) * if t * 24.0 % 1.0 < 0.6 { 1.0 } else { 0.2 }
         }, &mut rng),
+        Sfx::CountTick => render(0.12, |t, total, _| {
+            (sine(t, 880.0) * 0.6 + sine(t, 1760.0) * 0.2) * 0.4 * env(t, 0.004, total)
+        }, &mut rng),
+        Sfx::CountGo => melody(&[(523.0, 0.10), (659.0, 0.10), (784.0, 0.10), (1046.0, 0.22)], 0.3),
         Sfx::Ping => render(0.08, |t, total, _| {
             sine(t, 1200.0) * 0.18 * env(t, 0.002, total)
         }, &mut rng),

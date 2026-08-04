@@ -357,6 +357,33 @@ impl App {
         self.draw_console(out);
         self.draw_top_status(out);
         self.draw_banner(out);
+        self.draw_countdown(out);
+    }
+
+    /// Match-start freeze: big pulsing 5..1 with GET READY.
+    fn draw_countdown(&self, out: &mut Vec<Inst>) {
+        let Some((t0, _)) = self.countdown else { return };
+        let elapsed = t0.elapsed().as_secs_f32();
+        let remaining = (5.0 - elapsed).ceil().clamp(1.0, 5.0) as u32;
+        let frac = 1.0 - (elapsed - elapsed.floor());
+        let w = self.cam.screen_w;
+        let h = self.cam.screen_h;
+        self.gfx.quad(out, 0.0, 0.0, w, h, [0.0, 0.0, 0.02, 0.35]);
+        let label = "GET READY";
+        let ts = self.ts(2.2);
+        let lw = self.gfx.text_width(ts, label);
+        self.gfx.text(out, (w - lw) * 0.5, h * 0.30, ts, [0.8, 0.9, 1.0, 0.9], label);
+        let num = format!("{remaining}");
+        let ns = self.ts(9.0) * (0.85 + 0.35 * frac);
+        let nw = self.gfx.text_width(ns, &num);
+        self.gfx.text(
+            out,
+            (w - nw) * 0.5,
+            h * 0.38,
+            ns,
+            [0.95, 0.78, 0.25, (0.5 + 0.5 * frac).min(1.0)],
+            &num,
+        );
     }
 
     fn draw_console(&self, out: &mut Vec<Inst>) {
