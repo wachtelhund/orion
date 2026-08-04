@@ -391,7 +391,7 @@ pub struct SpriteBook {
     pub minerals: [Region; 3],
     pub geyser: Region,
     /// Destructible trees (two variants) + the rock wall boulder.
-    pub trees: [Region; 2],
+    pub trees: [Region; 4],
     pub rock_wall: Region,
     /// [unit_type][team][facing][frame]. 0-6: Vanguard Combine (worker,
     /// trooper, vanguard, breaker, skywing, stormcaller, breaker-sieged).
@@ -550,7 +550,7 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
     }
 
     // Destructible flora + rocks.
-    let trees = [p.place_s(&tree_canvas(0), SS), p.place_s(&tree_canvas(1), SS)];
+    let trees = std::array::from_fn(|i| p.place_s(&tree_canvas(i as i32), SS));
     let rock_wall = {
         let mut c = Canvas::new(88, 72);
         // Angular basalt slabs: dark mass, lit top facets, cracks.
@@ -755,43 +755,53 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
 /// A gnarled alien conifer: dark trunk, layered teal-green canopy. Two
 /// variants via `v` so forests don't tile visibly.
 fn tree_canvas(v: i32) -> Canvas {
-    let mut c = Canvas::new(80, 104);
-    let cx = 40.0 + if v == 0 { 0.0 } else { 3.0 };
-    // Trunk + root flare.
-    c.poly(&[(cx - 4.0, 98.0), (cx + 4.0, 98.0), (cx + 2.5, 62.0), (cx - 2.5, 62.0)], rgba([50, 38, 28]));
-    c.poly(&[(cx - 10.0, 100.0), (cx + 10.0, 100.0), (cx + 5.0, 93.0), (cx - 5.0, 93.0)], rgba([42, 32, 24]));
-    c.line(cx - 1.5, 94.0, cx - 2.5, 68.0, 1.5, rgba([64, 48, 36]));
-    // Three serrated conifer tiers — sharp silhouette, drooping spiked
-    // skirts, apex skewed per variant so the forest isn't cloned.
-    let tiers: [(f32, f32, f32, [u8; 3]); 3] = [
-        (86.0, 27.0, 30.0, [28, 56, 44]),
-        (64.0, 20.0, 26.0, [36, 70, 52]),
-        (44.0, 13.0, 24.0, [46, 86, 62]),
-    ];
-    for (ti, &(by, hw, ah, col)) in tiers.iter().enumerate() {
-        let apex_x = cx + if v == 0 { [-2.0, 2.0, -1.0][ti] } else { [3.0, -2.0, 2.0][ti] };
+    let mut c = Canvas::new(96, 176);
+    let tall = v >= 2;
+    let cx = 48.0 + if v % 2 == 0 { -1.0 } else { 2.0 };
+    let base = 162.0;
+    // Root shadow pool + flare so the tree sits IN the ground.
+    c.ellipse(cx, base + 4.0, 22.0, 7.0, [8, 12, 10, 110]);
+    c.poly(&[(cx - 11.0, base + 6.0), (cx + 11.0, base + 6.0), (cx + 6.0, base - 4.0), (cx - 6.0, base - 4.0)], rgba([42, 32, 24]));
+    let crown = if tall { 18.0 } else { 62.0 };
+    // Trunk with a lit bark edge.
+    c.poly(&[(cx - 4.5, base), (cx + 4.5, base), (cx + 2.5, crown + 30.0), (cx - 2.5, crown + 30.0)], rgba([50, 38, 28]));
+    c.line(cx - 2.0, base - 4.0, cx - 3.0, crown + 34.0, 1.8, rgba([66, 50, 38]));
+    // Serrated tiers, dark at the base brightening toward the crown.
+    let n = if tall { 5 } else { 4 };
+    for ti in 0..n {
+        let f = ti as f32 / (n - 1) as f32;
+        let by = base - 16.0 - f * (base - 16.0 - (crown + 26.0));
+        let hw = 30.0 - f * 17.0;
+        let ah = 26.0 - f * 6.0;
+        let col = [
+            (28.0 + f * 20.0) as u8,
+            (56.0 + f * 36.0) as u8,
+            (44.0 + f * 22.0) as u8,
+        ];
+        let skew = ((hash2(ti, v * 13, 907) % 9) as f32 - 4.0) * 0.9;
+        let apex_x = cx + skew;
         let mut pts: Vec<(f32, f32)> = vec![(apex_x, by - ah), (cx + hw, by)];
-        let n = 6;
-        for k in 1..n {
-            let f = k as f32 / n as f32;
-            let x = cx + hw - f * hw * 2.0;
-            let droop = if k % 2 == 1 { 6.0 } else { 1.0 };
-            let jitter = (hash2(k, ti as i32 * 9 + v, 551) % 4) as f32;
+        let teeth = 6;
+        for k in 1..teeth {
+            let tf = k as f32 / teeth as f32;
+            let x = cx + hw - tf * hw * 2.0;
+            let droop = if k % 2 == 1 { 7.0 } else { 1.0 };
+            let jitter = (hash2(k, ti * 9 + v, 551) % 4) as f32;
             pts.push((x, by + droop + jitter));
         }
         pts.push((cx - hw, by));
         c.poly(&pts, rgba(col));
-        // Lit left slope, shadowed underside.
         c.line(apex_x, by - ah, cx - hw + 2.0, by - 1.0, 1.6, rgba(scale_rgb(col, 1.35)));
         c.line(cx - hw * 0.5, by + 3.0, cx + hw * 0.6, by + 2.0, 2.0, rgba(scale_rgb(col, 0.6)));
     }
-    // Needle spire tip.
-    c.line(cx, 22.0, cx + if v == 0 { -1.0 } else { 2.0 }, 8.0, 2.0, rgba([54, 100, 70]));
-    // Bioluminescent specks in the foliage.
-    for k in 0..6 {
+    // Needle spire.
+    c.line(cx, crown + 8.0, cx + skew_tip(v), crown - 6.0, 2.2, rgba([54, 100, 70]));
+    // Bioluminescent specks, denser on the tall variants.
+    let specks = if tall { 9 } else { 6 };
+    for k in 0..specks {
         let h = hash2(k, v, 421);
-        let x = 22.0 + (h % 36) as f32;
-        let y = 34.0 + ((h >> 8) % 44) as f32;
+        let x = cx - 26.0 + (h % 52) as f32;
+        let y = crown + 14.0 + ((h >> 8) % ((base - crown - 30.0) as u32)) as f32;
         c.glow(x, y, 3.0, [110, 235, 185], 0.7);
         c.set(x as i32, y as i32, [180, 250, 215, 255]);
     }
@@ -799,6 +809,15 @@ fn tree_canvas(v: i32) -> Canvas {
     c.rim([10, 18, 14, 255], 1.3);
     c
 }
+
+fn skew_tip(v: i32) -> f32 {
+    if v % 2 == 0 {
+        -1.5
+    } else {
+        2.0
+    }
+}
+
 
 
 // -------------------------------------------------------- console chrome ----

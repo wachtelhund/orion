@@ -3051,9 +3051,14 @@ impl App {
                         self.gfx.sprite(out, r, sx, sy - 6.0 * zoom, r.w as f32 / r.scale * zoom, r.h as f32 / r.scale * zoom, tint);
                     } else if e.def == orion_sim::state::RES_TREE {
                         let t = TilePos::of(e.pos);
-                        let v = (crate::atlas::hash2(t.x, t.y, 77) % 2) as usize;
-                        let r = book.trees[v];
-                        self.gfx.sprite(out, r, sx, sy - 9.0 * zoom, r.w as f32 / r.scale * zoom, r.h as f32 / r.scale * zoom, tint);
+                        let h = crate::atlas::hash2(t.x, t.y, 77);
+                        let r = book.trees[(h % 4) as usize];
+                        // Per-tree size jitter breaks the cloned-forest look.
+                        let js = 0.88 + ((h >> 8) % 25) as f32 * 0.01;
+                        let tw = r.w as f32 / r.scale * js * zoom;
+                        let th = r.h as f32 / r.scale * js * zoom;
+                        self.gfx.sprite(out, book.circle, sx, sy + 2.0 * zoom, 26.0 * js * zoom, 11.0 * js * zoom, [0.0, 0.0, 0.0, 0.28]);
+                        self.gfx.sprite(out, r, sx, sy - (th / zoom * 0.5 - 3.0) * zoom, tw, th, tint);
                         if e.hp < orion_sim::state::TREE_HP {
                             let frac = e.hp as f32 / orion_sim::state::TREE_HP as f32;
                             self.bar(out, sx, sy - 24.0 * zoom, 16.0, frac, hp_color(frac));
