@@ -3048,124 +3048,173 @@ fn rust_wear(c: &mut Canvas, x0: i32, y0: i32, w: i32, h: i32, salt: u32) {
     }
 }
 
-/// Scrapper: wheeled salvage cart with a magnet crane. 96x96.
+/// Heavy walker leg: armored thigh quad + shin plate + wide foot, with a
+/// piston highlight. The cure for stick-figure syndrome.
+fn fer_leg(c: &mut Canvas, hip_x: f32, hip_y: f32, knee_x: f32, knee_y: f32, foot_x: f32, foot_y: f32, t: f32) {
+    // Thigh: broad armored quad hip->knee.
+    let (dx, dy) = (knee_x - hip_x, knee_y - hip_y);
+    let len = (dx * dx + dy * dy).sqrt().max(0.01);
+    let (px, py) = (-dy / len * t, dx / len * t);
+    c.poly(&[
+        (hip_x - px, hip_y - py),
+        (hip_x + px, hip_y + py),
+        (knee_x + px * 0.7, knee_y + py * 0.7),
+        (knee_x - px * 0.7, knee_y - py * 0.7),
+    ], rgba(RUST));
+    c.line(hip_x - px * 0.4, hip_y - py * 0.4, knee_x - px * 0.3, knee_y - py * 0.3, 1.6, rgba(RUST_LIT));
+    // Shin: darker plate knee->foot.
+    let (dx2, dy2) = (foot_x - knee_x, foot_y - knee_y);
+    let len2 = (dx2 * dx2 + dy2 * dy2).sqrt().max(0.01);
+    let (qx, qy) = (-dy2 / len2 * t * 0.75, dx2 / len2 * t * 0.75);
+    c.poly(&[
+        (knee_x - qx, knee_y - qy),
+        (knee_x + qx, knee_y + qy),
+        (foot_x + qx * 0.8, foot_y + qy * 0.8),
+        (foot_x - qx * 0.8, foot_y - qy * 0.8),
+    ], rgba([88, 66, 50]));
+    c.line(knee_x - qx * 0.5, knee_y - qy * 0.5, foot_x - qx * 0.4, foot_y - qy * 0.4, 1.4, rgba(RUST_LIT));
+    // Piston shine + knee cap.
+    c.line(knee_x, knee_y, foot_x * 0.6 + knee_x * 0.4, foot_y * 0.6 + knee_y * 0.4, 1.4, rgba(STEEL_LIT));
+    c.dome(knee_x, knee_y, t * 0.9, t * 0.8, SCRAP);
+    // Wide stomper foot.
+    c.poly(&[
+        (foot_x - t * 1.6, foot_y + 2.0),
+        (foot_x - t * 0.6, foot_y - 2.5),
+        (foot_x + t * 1.4, foot_y - 1.5),
+        (foot_x + t * 1.8, foot_y + 3.0),
+        (foot_x - t * 1.2, foot_y + 4.0),
+    ], rgba([46, 42, 44]));
+    c.line(foot_x - t * 1.2, foot_y - 0.5, foot_x + t * 1.2, foot_y + 0.5, 1.3, rgba([80, 74, 70]));
+}
+
+/// Scrapper: squat tracked hauler with a magnet boom. 104x96.
 fn paint_scrapper(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(96, 96);
+    let mut c = Canvas::new(104, 96);
     let (dx, dy) = facing_vec(f);
-    let cx = 48.0;
+    let cx = 52.0;
     let cy = 52.0;
-    let bob = if frame == 0 { 0.0 } else { -1.5 };
-    // Wheels.
-    for wx in [-18.0f32, 0.0, 18.0] {
-        c.dome(cx + wx, cy + 22.0, 8.0, 8.0, [40, 38, 40]);
-        c.dome(cx + wx, cy + 22.0, 3.5, 3.5, SCRAP);
+    let bob = if frame == 0 { 0.0 } else { -1.0 };
+    // Dozer tracks with armored side skirts.
+    plate(&mut c, &[(18.0, 66.0), (86.0, 66.0), (92.0, 84.0), (12.0, 84.0)], [44, 40, 42], 1.0);
+    for k in 0..8 {
+        let notch = 16 + k * 10 + (frame as i32) * 5;
+        if notch < 88 {
+            c.rect(notch, 72, 3, 10, rgba([74, 70, 74]));
+        }
     }
-    // Hopper body: rusted plates with junk heaped on top.
-    plate(&mut c, &[(20.0, 34.0 + bob), (76.0, 34.0 + bob), (82.0, 68.0), (14.0, 68.0)], RUST, 1.0);
-    rust_wear(&mut c, 18, (36.0 + bob) as i32, 60, 30, 11);
-    for k in 0..4 {
+    plate(&mut c, &[(14.0, 62.0), (90.0, 62.0), (94.0, 72.0), (10.0, 72.0)], RUST_DARK, 1.0);
+    rust_wear(&mut c, 14, 62, 76, 10, 301);
+    // Hull: layered rusted plates with a raised cab.
+    plate(&mut c, &[(20.0, 40.0 + bob), (84.0, 40.0 + bob), (90.0, 64.0), (14.0, 64.0)], RUST, 1.0);
+    plate(&mut c, &[(26.0, 28.0 + bob), (58.0, 28.0 + bob), (62.0, 42.0 + bob), (22.0, 42.0 + bob)], [116, 84, 58], 1.0);
+    rust_wear(&mut c, 20, (42.0 + bob) as i32, 64, 20, 307);
+    // Cab glass + team band.
+    if dy > -0.5 {
+        c.poly(&[(30.0 + dx * 4.0, 30.0 + bob), (52.0 + dx * 4.0, 30.0 + bob), (50.0 + dx * 4.0, 38.0 + bob), (32.0 + dx * 4.0, 38.0 + bob)], rgba([150, 210, 235]));
+    }
+    c.rect(18, 58, 68, 5, rgba(team));
+    // Hopper with heaped scrap.
+    for k in 0..5 {
         let h = hash2(k, 3, 517);
-        let jx = 28.0 + (h % 40) as f32;
-        c.dome(jx, 32.0 + bob, 5.0 + (h % 4) as f32, 3.5, SCRAP);
+        c.dome(62.0 + (h % 18) as f32, 34.0 + bob + ((h >> 8) % 6) as f32, 5.0 + (h % 4) as f32, 3.5, SCRAP);
     }
-    c.rect(18, 60, 12, 6, rgba(team));
-    // Crane arm to a glowing disc magnet.
+    // Magnet boom: heavy A-frame toward facing + glowing disc.
     let ax = cx + dx * 30.0;
-    let ay = cy + bob + dy * 16.0 - 8.0;
-    c.line(cx + dx * 8.0, cy + bob - 6.0, cx + dx * 20.0, cy + bob - 18.0, 4.0, rgba(RUST_DARK));
-    c.line(cx + dx * 20.0, cy + bob - 18.0, ax, ay, 3.0, rgba(SCRAP));
-    c.dome(ax, ay + 4.0, 7.0, 4.0, [60, 56, 64]);
-    c.glow(ax, ay + 6.0, 8.0, COIL, 0.7);
-    c.ellipse(ax, ay + 6.0, 3.0, 1.8, rgba(scale_rgb(COIL, 1.2)));
+    let ay = cy + bob + dy * 16.0 - 12.0;
+    c.line(cx + dx * 6.0 - 4.0, cy + bob - 10.0, cx + dx * 18.0, cy + bob - 22.0, 6.0, rgba(RUST_DARK));
+    c.line(cx + dx * 6.0 + 4.0, cy + bob - 8.0, cx + dx * 18.0, cy + bob - 22.0, 4.5, rgba(RUST));
+    c.line(cx + dx * 18.0, cy + bob - 22.0, ax, ay, 4.0, rgba(SCRAP));
+    c.line(cx + dx * 18.0, cy + bob - 20.0, ax * 0.7 + (cx + dx * 18.0) * 0.3, ay * 0.7 + (cy + bob - 20.0) * 0.3, 1.6, rgba(STEEL_LIT));
+    c.dome(ax, ay + 5.0, 10.0, 5.0, [58, 54, 62]);
+    c.glow(ax, ay + 7.0, 10.0, COIL, 0.7);
+    c.ellipse(ax, ay + 7.0, 4.0, 2.2, rgba(scale_rgb(COIL, 1.2)));
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.28);
     c
 }
 
-/// Arclight: reverse-knee arc-caster walker. 104x112.
+/// Arclight: armored chicken-walker with a shoulder arc array. 112x116.
 fn paint_arclight(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(104, 112);
+    let mut c = Canvas::new(112, 116);
     let (dx, dy) = facing_vec(f);
-    let cx = 52.0;
+    let cx = 56.0;
     let cy = 56.0;
     let step = if frame == 0 { 5.0 } else { -5.0 };
-    // Reverse-knee legs.
-    for (side, st) in [(-1.0f32, step), (1.0, -step)] {
-        let hip = (cx + side * 8.0, cy + 8.0);
-        let knee = (cx + side * 18.0 + st * 0.4, cy + 22.0);
-        let foot = (cx + side * 12.0 + st, cy + 44.0);
-        c.line(hip.0, hip.1, knee.0, knee.1, 4.0, rgba(RUST_DARK));
-        c.line(knee.0, knee.1, foot.0, foot.1, 3.0, rgba(SCRAP));
-        c.rect(foot.0 as i32 - 5, foot.1 as i32, 10, 4, rgba([44, 42, 44]));
-        c.set(knee.0 as i32, knee.1 as i32, rgba(RUST_LIT));
-    }
-    // Torso pod.
-    plate(&mut c, &[(34.0, 18.0), (70.0, 18.0), (74.0, 44.0), (30.0, 44.0)], RUST, 1.0);
-    rust_wear(&mut c, 32, 20, 40, 22, 23);
-    c.rect(34, 38, 36, 4, rgba(team));
-    // Optic head.
-    c.dome(cx, 12.0, 10.0, 8.0, SCRAP);
+    // Two heavy reverse-knee legs.
+    fer_leg(&mut c, cx - 9.0, cy + 8.0, cx - 15.0 + step * 0.4, cy + 26.0, cx - 11.0 + step, cy + 48.0, 5.5);
+    fer_leg(&mut c, cx + 9.0, cy + 8.0, cx + 15.0 - step * 0.4, cy + 26.0, cx + 11.0 - step, cy + 48.0, 5.5);
+    // Hip block.
+    plate(&mut c, &[(cx - 14.0, cy + 2.0), (cx + 14.0, cy + 2.0), (cx + 12.0, cy + 14.0), (cx - 12.0, cy + 14.0)], RUST_DARK, 1.0);
+    // Torso pod: broad, layered, armored.
+    plate(&mut c, &[(30.0, 18.0), (82.0, 18.0), (88.0, 48.0), (24.0, 48.0)], RUST, 1.0);
+    plate(&mut c, &[(34.0 + dx * 5.0, 22.0), (58.0 + dx * 8.0, 16.0 + dy * 3.0), (58.0 + dx * 8.0, 36.0), (38.0 + dx * 5.0, 42.0)], [124, 90, 62], 1.0);
+    rust_wear(&mut c, 30, 20, 52, 26, 311);
+    c.rect(32, 44, 48, 5, rgba(team));
+    // Optic visor band.
     if dy > -0.5 {
-        c.ellipse(cx + dx * 4.0, 12.0 + dy * 2.0, 3.5, 3.5, rgba(COIL));
-        c.glow(cx + dx * 4.0, 12.0 + dy * 2.0, 7.0, COIL, 0.8);
+        let vx = cx + dx * 8.0;
+        c.rect((vx - 8.0) as i32, 28, 16, 5, rgba([30, 28, 34]));
+        c.ellipse(vx, 30.0, 3.0, 2.2, rgba(COIL));
+        c.glow(vx, 30.0, 7.0, COIL, 0.8);
     }
-    c.line(cx - 8.0, 6.0, cx - 12.0, -2.0 + 8.0, 1.5, rgba(SCRAP));
-    // Arc-caster arm: forked prongs with a live arc.
-    let px = cx + dx * 26.0;
-    let py = cy - 8.0 + dy * 14.0;
-    c.line(cx + dx * 10.0, cy - 4.0, px, py, 3.5, rgba(RUST_DARK));
+    // Shoulder arc array: two heavy prong towers with a live arc between.
     for side in [-1.0f32, 1.0] {
-        c.line(px, py, px + dx * 9.0 - dy * side * 5.0, py + dy * 5.0 + dx * side * 3.0, 2.2, rgba(SCRAP));
+        let px = cx + side * 26.0;
+        plate(&mut c, &[(px - 5.0, 8.0), (px + 5.0, 8.0), (px + 7.0, 22.0), (px - 7.0, 22.0)], SCRAP, 1.0);
+        c.poly(&[(px - 3.0, 8.0), (px, -0.0 + 2.0), (px + 3.0, 8.0)], rgba(RUST_LIT));
+        c.set(px as i32, 3, rgba(scale_rgb(COIL, 1.3)));
     }
-    let a1 = (px + dx * 9.0 - dy * 5.0, py + dy * 5.0 + dx * 3.0);
-    let a2 = (px + dx * 9.0 + dy * 5.0, py + dy * 5.0 - dx * 3.0);
-    let mid = ((a1.0 + a2.0) * 0.5 + if frame == 0 { 2.0 } else { -2.0 }, (a1.1 + a2.1) * 0.5);
-    c.line(a1.0, a1.1, mid.0, mid.1, 1.3, rgba(scale_rgb(COIL, 1.2)));
-    c.line(mid.0, mid.1, a2.0, a2.1, 1.3, rgba(scale_rgb(COIL, 1.2)));
-    c.glow(mid.0, mid.1, 7.0, COIL, 0.8);
+    let arc_y = 5.0 + if frame == 0 { 0.0 } else { 2.0 };
+    c.line(cx - 26.0, 4.0, cx, arc_y, 1.4, rgba(scale_rgb(COIL, 1.2)));
+    c.line(cx, arc_y, cx + 26.0, 4.0, 1.4, rgba(scale_rgb(COIL, 1.2)));
+    c.glow(cx, arc_y, 9.0, COIL, 0.7);
+    // Cable run.
+    c.line(cx - 22.0, 22.0, cx - 12.0, 40.0, 1.6, rgba([60, 50, 46]));
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.3);
     c
 }
 
-/// Mauler: quad wrecking walker. 120x112.
+/// Mauler: crab-plated wrecking walker. 128x112.
 fn paint_mauler(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(120, 112);
+    let mut c = Canvas::new(128, 112);
     let (dx, dy) = facing_vec(f);
-    let cx = 60.0;
-    let cy = 58.0;
+    let cx = 64.0;
+    let cy = 56.0;
     let step = if frame == 0 { 4.0 } else { -4.0 };
-    // Four piston legs.
-    for (k, (ox, oy)) in [(-20.0f32, 4.0f32), (20.0, 4.0), (-12.0, 14.0), (12.0, 14.0)].iter().enumerate() {
-        let st = if k % 2 == 0 { step } else { -step };
-        c.line(cx + ox * 0.4, cy + 2.0, cx + ox + st * 0.3, cy + oy + 18.0, 5.0, rgba(RUST_DARK));
-        c.rect((cx + ox + st * 0.3) as i32 - 6, (cy + oy + 18.0) as i32, 12, 5, rgba([44, 42, 44]));
-        c.line(cx + ox * 0.4, cy + 4.0, cx + ox * 0.7 + st * 0.15, cy + oy + 10.0, 2.0, rgba(STEEL_LIT));
-    }
-    // Broad hull with furnace core.
-    plate(&mut c, &[(24.0, 28.0), (96.0, 28.0), (102.0, 60.0), (18.0, 60.0)], RUST, 1.0);
-    rust_wear(&mut c, 24, 30, 72, 28, 37);
-    c.rect(26, 54, 68, 5, rgba(team));
-    c.glow(cx - dx * 4.0, 44.0, 10.0, AMBER, 0.7);
-    c.rect((cx - dx * 4.0 - 4.0) as i32, 40, 8, 8, rgba([255, 150, 60]));
-    // Exhaust stacks.
-    for sx in [-14.0f32, 14.0] {
-        c.rect((cx + sx) as i32 - 2, 18, 5, 12, rgba(SCRAP));
-        if frame == 1 {
-            c.glow(cx + sx, 15.0, 4.0, [140, 140, 146], 0.4);
-        }
-    }
-    // Hydraulic claws.
+    // Four heavy legs.
+    fer_leg(&mut c, cx - 20.0, cy + 6.0, cx - 34.0, cy + 20.0 - step * 0.3, cx - 30.0 + step, cy + 40.0, 4.0);
+    fer_leg(&mut c, cx + 20.0, cy + 6.0, cx + 34.0, cy + 20.0 + step * 0.3, cx + 30.0 - step, cy + 40.0, 4.0);
+    fer_leg(&mut c, cx - 10.0, cy + 12.0, cx - 16.0, cy + 26.0 + step * 0.3, cx - 12.0 - step, cy + 44.0, 3.6);
+    fer_leg(&mut c, cx + 10.0, cy + 12.0, cx + 16.0, cy + 26.0 - step * 0.3, cx + 12.0 + step, cy + 44.0, 3.6);
+    // Carapace: broad domed shell of overlapping plates.
+    plate(&mut c, &[(20.0, 34.0), (108.0, 34.0), (100.0, 62.0), (28.0, 62.0)], RUST, 1.0);
+    plate(&mut c, &[(30.0, 22.0), (98.0, 22.0), (104.0, 38.0), (24.0, 38.0)], [120, 88, 60], 1.0);
+    plate(&mut c, &[(44.0, 12.0), (84.0, 12.0), (92.0, 24.0), (36.0, 24.0)], RUST_LIT, 0.95);
+    rust_wear(&mut c, 24, 24, 80, 34, 331);
+    c.rect(30, 58, 68, 5, rgba(team));
+    // Furnace core glowing through the front seam.
+    c.glow(cx + dx * 8.0, 42.0, 11.0, AMBER, 0.75);
+    c.rect((cx + dx * 8.0 - 5.0) as i32, 38, 10, 8, rgba([255, 150, 60]));
+    // Massive hydraulic claws.
     for side in [-1.0f32, 1.0] {
-        let px = cx + dx * 30.0 - dy * side * 16.0;
-        let py = cy + dy * 16.0 + dx * side * 10.0;
-        c.line(cx + dx * 12.0, cy + 2.0, px, py, 5.0, rgba(RUST_DARK));
+        let px = cx + dx * 34.0 - dy * side * 20.0;
+        let py = cy + dy * 18.0 + dx * side * 12.0;
+        c.line(cx + dx * 16.0, cy + 4.0, px, py, 7.0, rgba(RUST_DARK));
+        c.line(cx + dx * 16.0, cy + 2.0, px * 0.7 + (cx + dx * 16.0) * 0.3, py * 0.7 + (cy + 2.0) * 0.3, 2.0, rgba(STEEL_LIT));
+        // Two-finger crusher.
         c.poly(&[
-            (px, py - 5.0),
-            (px + dx * 18.0, py + dy * 10.0 - 3.0),
-            (px + dx * 14.0, py + dy * 8.0 + 6.0),
-            (px - 1.0, py + 4.0),
+            (px - 3.0, py - 6.0),
+            (px + dx * 20.0 + 2.0, py + dy * 11.0 - 5.0),
+            (px + dx * 16.0, py + dy * 9.0),
+            (px + 1.0, py - 1.0),
         ], rgba(SCRAP));
+        c.poly(&[
+            (px - 2.0, py + 5.0),
+            (px + dx * 18.0 + 1.0, py + dy * 10.0 + 6.0),
+            (px + dx * 14.0, py + dy * 8.0 + 1.0),
+            (px, py + 1.0),
+        ], rgba([78, 72, 68]));
         c.line(px + dx * 4.0, py, px + dx * 16.0, py + dy * 8.0, 1.8, rgba(team));
     }
     c.outline_t(OUTLINE, 2);
@@ -3173,121 +3222,150 @@ fn paint_mauler(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c
 }
 
-/// Lodestone: rail-coil artillery crawler. 136x124.
+/// Lodestone: skirted rail-coil artillery crawler. 136x124.
 fn paint_lodestone(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     let mut c = Canvas::new(136, 124);
     let (dx, dy) = facing_vec(f);
     let cx = 68.0;
     let cy = 70.0;
-    // Wheel skirt.
-    plate(&mut c, &[(22.0, 78.0), (114.0, 78.0), (118.0, 94.0), (18.0, 94.0)], RUST_DARK, 1.0);
+    // Heavy armored skirt over the wheels.
+    plate(&mut c, &[(16.0, 74.0), (120.0, 74.0), (126.0, 96.0), (10.0, 96.0)], RUST_DARK, 1.0);
     for k in 0..5 {
-        c.dome(32.0 + k as f32 * 18.0 + (frame as f32) * 2.0, 92.0, 7.0, 6.0, [40, 38, 40]);
+        c.dome(30.0 + k as f32 * 19.0 + (frame as f32) * 2.0, 96.0, 8.0, 6.5, [40, 38, 40]);
+        c.dome(30.0 + k as f32 * 19.0 + (frame as f32) * 2.0, 96.0, 3.0, 2.5, SCRAP);
     }
-    // Heavy plated hull.
-    plate(&mut c, &[(28.0, 54.0), (108.0, 54.0), (114.0, 78.0), (22.0, 78.0)], RUST, 1.0);
-    rust_wear(&mut c, 28, 56, 80, 22, 51);
-    c.rect(32, 72, 72, 5, rgba(team));
-    // Coil cannon: long barrel with glowing magnet rings.
+    // Skirt armor slats.
+    for k in 0..6 {
+        let x = 20 + k * 18;
+        c.rect(x, 78, 2, 14, rgba([70, 52, 40]));
+    }
+    // Hull: layered glacis.
+    plate(&mut c, &[(22.0, 52.0), (114.0, 52.0), (120.0, 76.0), (16.0, 76.0)], RUST, 1.0);
+    plate(&mut c, &[(32.0, 42.0), (104.0, 42.0), (110.0, 54.0), (26.0, 54.0)], [122, 88, 60], 1.0);
+    rust_wear(&mut c, 22, 44, 90, 30, 351);
+    c.rect(28, 70, 80, 5, rgba(team));
+    // Turret mount + massive coil cannon.
     let tx = cx + dx * 4.0;
-    let ty = cy - 24.0 + dy * 4.0;
-    plate(&mut c, &[(tx - 16.0, ty - 6.0), (tx + 12.0, ty - 9.0), (tx + 16.0, ty + 7.0), (tx - 12.0, ty + 10.0)], SCRAP, 1.0);
-    let bx = tx + dx * 54.0;
-    let by = ty + dy * 27.0;
-    c.line(tx + dx * 10.0, ty + dy * 5.0, bx, by, 5.5, rgba([58, 56, 60]));
+    let ty = cy - 26.0 + dy * 4.0;
+    plate(&mut c, &[(tx - 20.0, ty - 8.0), (tx + 16.0, ty - 11.0), (tx + 20.0, ty + 9.0), (tx - 16.0, ty + 12.0)], SCRAP, 1.0);
+    c.dome(tx - dx * 6.0, ty - 2.0, 8.0, 6.0, [104, 98, 92]);
+    let bx = tx + dx * 56.0;
+    let by = ty + dy * 28.0;
+    c.line(tx + dx * 10.0, ty + dy * 5.0, bx, by, 7.5, rgba([58, 56, 60]));
+    c.line(tx + dx * 12.0, ty + dy * 6.0 - 2.0, bx - dx * 2.0, by - dy * 1.0 - 2.0, 2.0, rgba([96, 94, 98]));
     for k in 1..=3 {
         let fr = k as f32 / 4.0;
         let rx = tx + dx * 10.0 + (bx - tx - dx * 10.0) * fr;
         let ry = ty + dy * 5.0 + (by - ty - dy * 5.0) * fr;
-        c.ellipse(rx, ry, 4.5, 3.5, rgba(scale_rgb(COIL, 0.8)));
-        c.glow(rx, ry, 6.0, COIL, 0.5);
+        c.ellipse(rx, ry, 5.5, 4.2, rgba(scale_rgb(COIL, 0.8)));
+        c.glow(rx, ry, 7.0, COIL, 0.5);
     }
+    // Muzzle brake + charge.
+    c.line(bx - dx * 5.0, by - dy * 2.5, bx, by, 10.0, rgba([88, 84, 88]));
     let chg = if frame == 0 { 0.5 } else { 0.9 };
-    c.glow(bx, by, 8.0, COIL, chg);
+    c.glow(bx, by, 9.0, COIL, chg);
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.26);
     c
 }
 
-/// Kestrel: ducted-fan salvage gunship. 144x112.
+/// Kestrel: fat-hulled ducted-fan gunship. 144x116.
 fn paint_kestrel(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(144, 112);
+    let mut c = Canvas::new(144, 116);
     let (dx, dy) = facing_vec(f);
-    let (dy_i, px, py) = (dy * 0.6, 72.0, 56.0);
+    let (dy_i, px, py) = (dy * 0.6, 72.0, 58.0);
     let (wx, wy) = (-dy_i, dx * 0.6);
-    // Ducted fans on outriggers.
+    // Thick-shrouded fans on stub wings.
     for side in [-1.0f32, 1.0] {
-        let fx = px - dx * 6.0 + wx * 34.0 * side;
-        let fy = py - dy_i * 6.0 + wy * 34.0 * side;
-        c.line(px, py, fx, fy, 4.0, rgba(RUST_DARK));
-        c.ellipse(fx, fy, 15.0, 9.0, rgba([48, 46, 48]));
-        c.ellipse(fx, fy, 11.0, 6.5, rgba([28, 27, 30]));
-        // Spinning blades.
+        let fx = px - dx * 4.0 + wx * 36.0 * side;
+        let fy = py - dy_i * 4.0 + wy * 36.0 * side;
+        // Stub wing.
+        c.poly(&[
+            (px + dx * 4.0, py + dy_i * 4.0 - 3.0),
+            (fx - wx * side * 6.0, fy - wy * side * 6.0 - 4.0),
+            (fx - wx * side * 4.0, fy - wy * side * 4.0 + 4.0),
+            (px + dx * 2.0, py + dy_i * 2.0 + 4.0),
+        ], rgba(RUST));
+        // Fat shroud ring.
+        c.ellipse(fx, fy, 17.0, 11.0, rgba([52, 48, 50]));
+        c.ellipse(fx, fy, 13.0, 8.0, rgba([26, 25, 28]));
+        c.ellipse(fx - 3.0, fy - 3.0, 4.0, 2.5, rgba([84, 80, 84]));
         let a0 = if frame == 0 { 0.4f32 } else { 1.2 };
         for k in 0..3 {
             let a = a0 + k as f32 * 2.09;
-            c.line(fx, fy, fx + a.cos() * 10.0, fy + a.sin() * 5.5, 1.4, rgba([120, 118, 122]));
+            c.line(fx, fy, fx + a.cos() * 12.0, fy + a.sin() * 7.0, 1.6, rgba([120, 118, 122]));
         }
-        c.glow(fx, fy, 6.0, COIL, 0.35);
-        c.set((fx + wx * 4.0 * side) as i32, (fy + wy * 4.0 * side) as i32, rgba(team));
+        c.glow(fx, fy, 7.0, COIL, 0.35);
+        c.set((fx + wx * 6.0 * side) as i32, (fy + wy * 6.0 * side) as i32, rgba(team));
     }
-    // Boxy hull.
-    let nose = (px + dx * 26.0, py + dy_i * 26.0);
-    let tail = (px - dx * 24.0, py - dy_i * 24.0);
+    // Fat fuselage: layered plates, chin turret, canopy.
+    let nose = (px + dx * 30.0, py + dy_i * 30.0);
+    let tail = (px - dx * 26.0, py - dy_i * 26.0);
     c.poly(&[
-        (nose.0, nose.1 - 4.0),
-        (px + dx * 6.0 + wx * 10.0, py + dy_i * 6.0 + wy * 10.0),
-        (tail.0 + wx * 7.0, tail.1 + wy * 7.0 - 2.0),
-        (tail.0 - wx * 7.0, tail.1 - wy * 7.0 - 2.0),
-        (px + dx * 6.0 - wx * 10.0, py + dy_i * 6.0 - wy * 10.0),
+        (nose.0, nose.1 - 6.0),
+        (px + dx * 8.0 + wx * 13.0, py + dy_i * 8.0 + wy * 13.0),
+        (tail.0 + wx * 9.0, tail.1 + wy * 9.0 - 2.0),
+        (tail.0, tail.1 + 6.0),
+        (tail.0 - wx * 9.0, tail.1 - wy * 9.0 - 2.0),
+        (px + dx * 8.0 - wx * 13.0, py + dy_i * 8.0 - wy * 13.0),
     ], rgba(RUST));
-    rust_wear(&mut c, (px - 20.0) as i32, (py - 10.0) as i32, 40, 18, 67);
-    // Tail fin + boom.
-    c.line(tail.0, tail.1, tail.0 - dx * 10.0, tail.1 - dy_i * 10.0, 3.0, rgba(SCRAP));
-    c.poly(&[(tail.0 - dx * 8.0, tail.1 - dy_i * 8.0), (tail.0 - dx * 14.0, tail.1 - dy_i * 14.0 - 10.0), (tail.0 - dx * 15.0, tail.1 - dy_i * 15.0)], rgba(RUST_LIT));
-    // Cockpit + chin magnet.
-    c.ellipse(px + dx * 14.0, py + dy_i * 14.0 - 2.0, 6.0, 4.0, rgba([150, 210, 235]));
-    c.line(px + dx * 18.0, py + dy_i * 18.0 + 4.0, px + dx * 24.0, py + dy_i * 24.0 + 6.0, 2.5, rgba([50, 48, 52]));
-    c.glow(px + dx * 25.0, py + dy_i * 25.0 + 6.0, 5.0, COIL, 0.6);
+    c.poly(&[
+        (nose.0 - dx * 4.0, nose.1 - dy_i * 4.0 - 5.0),
+        (px + dx * 6.0 + wx * 8.0, py + dy_i * 6.0 + wy * 8.0 - 3.0),
+        (px + dx * 2.0 - wx * 8.0, py + dy_i * 2.0 - wy * 8.0 - 3.0),
+    ], rgba([124, 90, 62]));
+    rust_wear(&mut c, (px - 22.0) as i32, (py - 12.0) as i32, 44, 22, 361);
+    // Tail boom + fin.
+    c.line(tail.0, tail.1, tail.0 - dx * 12.0, tail.1 - dy_i * 12.0, 5.0, rgba(RUST_DARK));
+    c.poly(&[
+        (tail.0 - dx * 9.0, tail.1 - dy_i * 9.0),
+        (tail.0 - dx * 17.0, tail.1 - dy_i * 17.0 - 12.0),
+        (tail.0 - dx * 18.0, tail.1 - dy_i * 18.0),
+    ], rgba(RUST_LIT));
+    // Canopy + chin gun.
+    c.ellipse(px + dx * 16.0, py + dy_i * 16.0 - 3.0, 7.0, 4.5, rgba([150, 210, 235]));
+    c.ellipse(px + dx * 14.0, py + dy_i * 14.0 - 4.5, 2.5, 1.5, rgba([220, 245, 255]));
+    c.line(px + dx * 20.0, py + dy_i * 20.0 + 5.0, px + dx * 28.0, py + dy_i * 28.0 + 7.0, 3.0, rgba([50, 48, 52]));
+    c.glow(px + dx * 29.0, py + dy_i * 29.0 + 7.0, 5.0, COIL, 0.6);
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.25);
     c
 }
 
-/// Resonant: hovering coil-priest. 104x128.
+/// Resonant: layered coil-priest on a hover skirt. 108x128.
 fn paint_resonant(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
-    let mut c = Canvas::new(104, 128);
+    let mut c = Canvas::new(108, 128);
     let (dx, dy) = facing_vec(f);
-    let cx = 52.0;
+    let cx = 54.0;
     let cy = 74.0;
-    // Hover glow under the bell skirt.
-    c.glow(cx, cy + 26.0, 16.0, COIL, 0.45);
-    // Rusted bell body.
-    c.dome(cx, cy, 20.0, 26.0, RUST);
-    rust_wear(&mut c, (cx - 18.0) as i32, (cy - 20.0) as i32, 36, 34, 83);
-    plate(&mut c, &[(cx - 20.0, cy + 18.0), (cx + 20.0, cy + 18.0), (cx + 14.0, cy + 27.0), (cx - 14.0, cy + 27.0)], RUST_DARK, 1.0);
+    c.glow(cx, cy + 28.0, 18.0, COIL, 0.5);
+    // Bell body: three stacked armored tiers.
+    plate(&mut c, &[(cx - 24.0, cy + 18.0), (cx + 24.0, cy + 18.0), (cx + 16.0, cy + 28.0), (cx - 16.0, cy + 28.0)], RUST_DARK, 1.0);
+    plate(&mut c, &[(cx - 20.0, cy - 4.0), (cx + 20.0, cy - 4.0), (cx + 24.0, cy + 20.0), (cx - 24.0, cy + 20.0)], RUST, 1.0);
+    plate(&mut c, &[(cx - 14.0, cy - 22.0), (cx + 14.0, cy - 22.0), (cx + 20.0, cy - 2.0), (cx - 20.0, cy - 2.0)], [122, 88, 60], 1.0);
+    rust_wear(&mut c, (cx - 20.0) as i32, (cy - 18.0) as i32, 40, 42, 371);
     // Team sash.
-    c.line(cx - 12.0, cy - 12.0, cx + 12.0, cy + 12.0, 4.0, rgba(team));
-    // Head: hooded optic.
-    c.dome(cx, cy - 32.0, 11.0, 10.0, SCRAP);
+    c.line(cx - 14.0, cy - 16.0, cx + 14.0, cy + 12.0, 4.5, rgba(team));
+    // Hooded head with optic.
+    c.dome(cx, cy - 32.0, 12.0, 11.0, SCRAP);
+    plate(&mut c, &[(cx - 12.0, cy - 34.0), (cx + 12.0, cy - 34.0), (cx + 9.0, cy - 24.0), (cx - 9.0, cy - 24.0)], RUST_LIT, 0.95);
     if dy > -0.5 {
-        c.ellipse(cx + dx * 4.0, cy - 32.0 + dy * 2.0, 3.0, 3.0, rgba(COIL));
-        c.glow(cx + dx * 4.0, cy - 32.0 + dy * 2.0, 6.0, COIL, 0.7);
+        c.ellipse(cx + dx * 4.0, cy - 30.0, 3.0, 3.0, rgba(COIL));
+        c.glow(cx + dx * 4.0, cy - 30.0, 6.0, COIL, 0.7);
     }
-    // Coil crown: three floating rings with arcs.
-    for (k, ry) in [(0usize, -50.0f32), (1, -60.0), (2, -68.0)].iter() {
-        let rr = 14.0 - *k as f32 * 3.5;
+    // Coil crown: rings on a mast.
+    c.line(cx, cy - 42.0, cx, cy - 58.0, 2.5, rgba(SCRAP));
+    for (k, ry) in [(0usize, -46.0f32), (1, -54.0), (2, -61.0)].iter() {
+        let rr = 15.0 - *k as f32 * 4.0;
         c.ellipse(cx, cy + ry, rr, rr * 0.4, rgba(scale_rgb(COIL, 0.75)));
         c.glow(cx, cy + ry, rr, COIL, 0.3);
     }
     let a0 = if frame == 0 { 0.5f32 } else { 2.1 };
     for k in 0..3 {
         let a = a0 + k as f32 * 2.1;
-        let x0 = cx + a.cos() * 12.0;
-        let y0 = cy - 58.0 + a.sin() * 5.0;
-        c.line(cx, cy - 44.0, x0, y0, 1.3, rgba(scale_rgb(COIL, 1.2)));
+        c.line(cx, cy - 54.0, cx + a.cos() * 13.0, cy - 54.0 + a.sin() * 6.0, 1.3, rgba(scale_rgb(COIL, 1.2)));
     }
-    c.glow(cx, cy - 58.0, 10.0, COIL, 0.6);
+    c.glow(cx, cy - 54.0, 10.0, COIL, 0.6);
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.3);
     c
