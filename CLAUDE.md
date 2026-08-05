@@ -186,7 +186,10 @@ the desk, which reads as a mystery disconnect in the logs.
 ## Maps
 
 `map.rs` registry: `MAP_NAMES` + `by_name` — names are replay/net
-identifiers, never rename a shipped one. Three maps: meridian (single-base,
+identifiers, never rename a shipped one. Four maps: causeway (88x88,
+central land-bridge plateau carrying two contested thirds; open flank
+ramp + rock-sealed breach ramp per third; groves on the flanks) and the
+original three: meridian (single-base,
 mines out ~15 min by design), caverns (Xel'Naga Caverns homage with
 natural expansions; `Map.expansions` holds suggested HQ origins and the bot
 takes its natural at ~13 workers), and thornwood (96x96, contested
@@ -256,19 +259,19 @@ of all versions.
 
 ## Known gaps / next milestones (see SPEC.md for full list)
 
-1. Bot ignores the new transform abilities (never deploys Bulwarks or
-   burrows Burrowers) — candidates for the next AI depth pass alongside
-   kiting and expansion denial.
-2. Replay sharing by code through the relay (replays themselves shipped
-   in v0.3.0; sharing is still manual file exchange).
-3. 2v2: lockstep generalizes to N players, but lobby/matchmaker/UI don't
+1. 2v2: lockstep generalizes to N players, but lobby/matchmaker/UI don't
    yet.
-4. macOS builds are unsigned — Gatekeeper right-click-open. Needs an
+2. macOS builds are unsigned — Gatekeeper right-click-open. Needs an
    Apple Developer ID in CI.
-5. Ferron balance is young — watch the `balance` round-robin after any
-   numbers change (VC leans ahead of Ferron; 8-seed Hard-bot runs are
-   noisy, don't over-tune on one sweep).
-6. Hard-bot mirrors on thornwood mostly hit the 20-minute balance
+3. VC still leads the cross-race Hard round-robin (meridian: VC 25 /
+   Kyth 15 / Ferron 8 after the v0.17.1 macro fixes; was 27/14/6, and
+   VC-vs-Ferron went 15-1 -> 12-4). Bot macro is no longer the whole
+   story — next lever is unit numbers, which deserves a dedicated
+   tuning pass; 8-seed sweeps are noisy, don't over-tune on one.
+4. Hard-bot mirrors on thornwood mostly hit the 20-minute balance
    budget (all races — turtling on the multi-base map), so the balance
    example's thornwood rows are mostly stalls. Normal-difficulty soak
    games finish fine.
+5. Web build parity: ranked queue, lobby browser and replay sharing are
+   desktop-only; a hidden browser tab plays in slow motion by design
+   (background keep-alive) rather than stalling the peer.
