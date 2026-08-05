@@ -292,6 +292,8 @@ impl Bot {
         let mut army_supply = 0u32;
         let mut siegers: Vec<u32> = Vec::new();
         let mut casters: Vec<u32> = Vec::new();
+        let mut shields: Vec<u32> = Vec::new();
+        let mut burrowers: Vec<u32> = Vec::new();
         let mut hq: Option<u32> = None;
         let mut deposits = 0usize;
         let mut barracks: Vec<u32> = Vec::new();
@@ -331,6 +333,12 @@ impl Bot {
                         }
                         if d.energy_max > 0 {
                             casters.push(i as u32);
+                        }
+                        if d.shield_aura.is_some() {
+                            shields.push(i as u32);
+                        }
+                        if d.burrow {
+                            burrowers.push(i as u32);
                         }
                     }
                 }
@@ -926,6 +934,96 @@ impl Bot {
             }
         }
 
+        // Shield micro: deploy bulwarks when a fight is on top of them,
+        // pack up when the field goes quiet (hysteresis avoids flapping).
+        if prm.use_squads {
+            let fight_sq = (Fx::from_int(8).0 as i64).pow(2);
+            let quiet_sq = (Fx::from_int(12).0 as i64).pow(2);
+            for &t in &shields {
+                let e = &s.entities[t as usize];
+                if e.transform != 0 {
+                    continue;
+                }
+                let fighting = visible_enemies
+                    .iter()
+                    .any(|&(pos, _)| dist_sq_raw(e.pos, pos) <= fight_sq);
+                let quiet = !visible_enemies
+                    .iter()
+                    .any(|&(pos, _)| dist_sq_raw(e.pos, pos) <= quiet_sq);
+                if !e.sieged && fighting {
+                    cmds.push(Command::Siege { units: vec![s.id_of(t)] });
+                } else if e.sieged && quiet {
+                    cmds.push(Command::Siege { units: vec![s.id_of(t)] });
+                }
+            }
+
+            // Burrow micro: holding burrowers near home dig in as an ambush
+            // screen; they surface for the bite when something walks onto
+            // them, or whenever the ball marches out.
+            let bite_sq = (Fx::from_int(3).0 as i64).pow(2);
+            let hide_sq = (Fx::from_int(9).0 as i64).pow(2);
+            let anchor_sq = (Fx::from_int(10).0 as i64).pow(2);
+            for &t in &burrowers {
+                let e = &s.entities[t as usize];
+                if e.transform != 0 {
+                    continue;
+                }
+                let near_enemy = visible_enemies
+                    .iter()
+                    .any(|&(pos, _)| dist_sq_raw(e.pos, pos) <= bite_sq);
+                let safe = !visible_enemies
+                    .iter()
+                    .any(|&(pos, _)| dist_sq_raw(e.pos, pos) <= hide_sq);
+                if e.burrowed {
+                    if near_enemy || matches!(self.ball, BallState::Push) {
+                        cmds.push(Command::Burrow { units: vec![s.id_of(t)] });
+                    }
+                } else if matches!(self.ball, BallState::Hold)
+                    && safe
+                    && dist_sq_raw(e.pos, anchor) <= anchor_sq
+                    && matches!(e.order, Order::Idle | Order::Hold)
+                {
+                    cmds.push(Command::Burrow { units: vec![s.id_of(t)] });
+                }
+            }
+        }
+
+        // Kite: reloading ranged units back off from melee that's closing
+        // in. Advanced micro only (same gate as focus fire).
+        if prm.focus_fire {
+            let danger_sq = (Fx::from_ratio(9, 5).0 as i64).pow(2);
+            for id in &army {
+                let Some(e) = s.get(*id) else { continue };
+                if e.sieged || e.burrowed || e.cooldown < 5 {
+                    continue;
+                }
+                let d = &s.data.units[e.def as usize];
+                let Some(w) = &d.weapon else { continue };
+                if w.range < Fx::from_int(3) || d.fly {
+                    continue;
+                }
+                let Some(&(tpos, _)) = visible_enemies
+                    .iter()
+                    .filter(|&&(pos, is_unit)| {
+                        is_unit && dist_sq_raw(e.pos, pos) <= danger_sq
+                    })
+                    .min_by_key(|&&(pos, _)| dist_sq_raw(e.pos, pos))
+                else {
+                    continue;
+                };
+                // Step directly away from the threat.
+                let away = FxVec2::new(
+                    e.pos.x + (e.pos.x - tpos.x) * Fx::from_int(2),
+                    e.pos.y + (e.pos.y - tpos.y) * Fx::from_int(2),
+                );
+                cmds.push(Command::Move {
+                    units: vec![*id],
+                    target: s.map.clamp_pos(away),
+                    queued: false,
+                });
+            }
+        }
+
         // Storm the biggest visible clump in cast range: at least 3 enemy
         // units, minus penalty for own units in the blast, and never on top
         // of an active storm (they no longer stack).
@@ -1070,10 +1168,18 @@ impl Bot {
         cmds.into_iter().map(|c| (p, c)).collect()
     }
 
-    /// Nearest remembered enemy structure, else the enemy start.
+    /// Nearest remembered enemy structure, else the enemy start. Late game
+    /// alternates pushes onto the enemy MAIN so mutual multi-base turtles
+    /// (Thornwood mirrors) collide and finish instead of trading at the
+    /// nearest wall forever.
     fn attack_target(&self, s: &State, hq: Option<u32>) -> FxVec2 {
         let enemy_start =
             s.map.starts[(1 - self.player as usize).min(s.map.starts.len() - 1)];
+        let late = s.tick > 24 * 60 * 15;
+        let deep_strike = late && (s.tick / (24 * 45)) % 2 == 0;
+        if deep_strike {
+            return enemy_start.center();
+        }
         let hq_pos = hq.map(|i| s.entities[i as usize].pos);
         self.memory
             .iter()

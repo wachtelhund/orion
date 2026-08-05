@@ -23,7 +23,11 @@ fn main() {
         (2, 1, "Ferron vs Kyth"),
     ];
     let mut race_wins = [0u32; 3];
+    let map_filter = std::env::var("ORION_BALANCE_MAP").ok();
     for map_name in MAP_NAMES {
+        if map_filter.as_deref().is_some_and(|f| f != *map_name) {
+            continue;
+        }
         println!("--- {map_name} (Hard, {n} seeds/matchup) ---");
         for (ra, rb, label) in matchups {
             let mut wins = [0u32; 2];
