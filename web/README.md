@@ -1,33 +1,29 @@
-# Orion web build (experimental)
+# Orion web build
 
-Status: compiles and boots in-browser — canvas attaches, the WebGPU
-adapter and device initialize, the full procedural atlas paints
-(console shows `orion: init complete`) — but frames don't reach the
-canvas yet. Black screen.
+**It works.** The full game runs in the browser on WebGPU — menus,
+single-player vs the bot, the map editor. Verified in Chrome at ~70 FPS.
 
-Build:
+Build + run:
 
-    rustup target add wasm32-unknown-unknown
-    cargo build --release -p orion-client --target wasm32-unknown-unknown
-    wasm-bindgen --target web --out-dir web/dist --no-typescript \
-        target/wasm32-unknown-unknown/release/orion-client.wasm
-    (cd web && python3 -m http.server 8765)  # open localhost:8765
+    ./web/build.sh
+    cd web && python3 serve.py     # then open http://localhost:8765
 
-Needs a WebGPU browser (Chrome/Edge); the 6144px atlas exceeds the
-WebGL2 floor, so no webgl fallback.
+Needs a WebGPU browser (Chrome/Edge). The 6144px atlas exceeds the
+WebGL2 floor, so there is no webgl fallback.
 
-What's stubbed on web: online play (relay_wasm.rs answers every entry
-point with "desktop build only" through the same channel shapes),
-native TLS/HTTP deps are cfg'd out, `std::time::Instant` goes through
-web-time.
+Web-specific behavior:
+- Online play is stubbed ("desktop build only") — a web-sys WebSocket
+  transport for the relay is the natural next step.
+- Settings/replays/custom maps don't persist (no filesystem);
+  localStorage adapters would fix that.
+- Audio depends on browser autoplay policy — it starts after the first
+  user gesture at best, silently stays off at worst (never fatal).
 
-Next debugging steps (in order of suspicion):
-1. Surface/canvas size negotiation — request_inner_size is issued, but
-   confirm winit's Resized event actually fires and reaches
-   App::resize; log inner_size at Gfx::new_async.
-2. Confirm RedrawRequested fires after init (the pre-init pump works;
-   post-init frames may not be scheduled — try requesting a redraw
-   directly in finish_init).
-3. Surface format: web prefers Bgra8Unorm; check what
-   surface.get_default_config picked and whether our sRGB conversion
-   assumptions hold.
+Porting notes (for the curious): the deterministic sim compiled with
+ZERO changes. Everything else was platform plumbing — native
+TLS/HTTP/WebSocket deps cfg'd out behind a same-shape stub, Instant/
+SystemTime through web-time, process::id gated, winit driven via
+spawn_app (run_app's exception-escape frees the handler's stack), an
+async wgpu bootstrap adopted on the next event-loop tick, and a manual
+canvas/surface size because winit-web's ResizeObserver left the
+backing store at 1x1.

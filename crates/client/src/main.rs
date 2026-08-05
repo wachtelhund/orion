@@ -8,9 +8,11 @@ mod config;
 /// Instant that works on wasm (std panics there).
 mod clock {
     #[cfg(not(target_arch = "wasm32"))]
-    pub use std::time::Instant;
+    pub use std::time::{Instant, SystemTime};
+    #[cfg(not(target_arch = "wasm32"))]
+    pub use std::time::UNIX_EPOCH;
     #[cfg(target_arch = "wasm32")]
-    pub use web_time::Instant;
+    pub use web_time::{Instant, SystemTime, UNIX_EPOCH};
 }
 mod editor;
 mod font;
@@ -62,7 +64,9 @@ struct Shell {
 
 impl ApplicationHandler for Shell {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.app.is_some() {
+        // Web fires resumed more than once; a second pass while the async
+        // gfx is still in flight must not spawn another window/canvas.
+        if self.app.is_some() || self.window.is_some() {
             return;
         }
         let window = Arc::new(
@@ -131,7 +135,37 @@ impl Shell {
                 let gfx = self.pending_gfx.borrow_mut().take();
                 if let (Some(gfx), Some(window)) = (gfx, self.window.clone()) {
                     web_sys::console::log_1(&"orion: init complete".into());
-                    self.finish_init(gfx, window);
+                    self.finish_init(gfx, window.clone());
+                    // Winit-web's ResizeObserver pipeline left the canvas
+                    // backing store at 1x1 — force real pixels into both
+                    // the canvas and the wgpu surface.
+                    use winit::platform::web::WindowExtWebSys;
+                    // Fill the browser viewport.
+                    let web_win = web_sys::window().unwrap();
+                    let w = web_win
+                        .inner_width()
+                        .ok()
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(1440.0) as u32;
+                    let h = web_win
+                        .inner_height()
+                        .ok()
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(900.0) as u32;
+                    if let Some(canvas) = window.canvas() {
+                        canvas.set_width(w);
+                        canvas.set_height(h);
+                        let st = canvas.style();
+                        let _ = st.set_property("width", &format!("{w}px"));
+                        let _ = st.set_property("height", &format!("{h}px"));
+                    }
+                    if let Some(app) = self.app.as_mut() {
+                        app.resize(w, h);
+                    }
+                    web_sys::console::log_1(&"orion: surface forced 1440x900".into());
+                    if let Some(win) = &self.window {
+                        win.request_redraw();
+                    }
                 }
                 // Keep the event loop breathing until init lands.
                 if let Some(w) = &self.window {
@@ -142,6 +176,7 @@ impl Shell {
     }
 
     fn finish_init(&mut self, gfx: Gfx, window: Arc<Window>) {
+
         let sf = window.scale_factor() as f32;
         let mut app = App::new(gfx, self.smoke, self.shot.clone(), sf);
         app.shot_focus = self.shot_focus;
@@ -233,6 +268,8 @@ impl Shell {
 }
 
 fn main() {
+    #[cfg(target_arch = "wasm32")]
+    console_error_panic_hook::set_once();
     env_logger::init();
     // rustls 0.23 needs a process-wide crypto provider before any TLS use.
     #[cfg(not(target_arch = "wasm32"))]
@@ -359,5 +396,13 @@ fn main() {
         stage,
         ..Default::default()
     };
+    // Web: run_app's exception-based escape would unwind main while events
+    // still target our stack-borrowed shell — spawn_app takes ownership.
+    #[cfg(target_arch = "wasm32")]
+    {
+        use winit::platform::web::EventLoopExtWebSys;
+        event_loop.spawn_app(shell);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     event_loop.run_app(&mut shell).expect("run app");
 }

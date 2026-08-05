@@ -617,8 +617,8 @@ impl App {
         let enemy = match self.enemy_race_choice {
             2 => {
                 // Pre-game choice, not sim: wall clock is fine here.
-                (std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
+                (crate::clock::SystemTime::now()
+                    .duration_since(crate::clock::UNIX_EPOCH)
                     .map(|d| d.subsec_nanos())
                     .unwrap_or(0)
                     % 2) as u8
@@ -628,8 +628,8 @@ impl App {
         let names = all_map_names();
         self.game_map = names[self.map_choice % names.len()].clone();
         self.state = new_game_with(self.chosen_race, enemy, &self.game_map);
-        let style = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let style = crate::clock::SystemTime::now()
+            .duration_since(crate::clock::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0);
         self.bot = Bot::with_style(BOT, difficulty, style);
@@ -2725,7 +2725,10 @@ impl App {
                 if let Some(suffix) = role.strip_prefix("queue:") {
                     // Ranked E2E: fresh identity per process so the
                     // matchmaker sees two distinct players.
+                    #[cfg(not(target_arch = "wasm32"))]
                     let id = format!("qa{}{}", suffix, std::process::id());
+                    #[cfg(target_arch = "wasm32")]
+                    let id = format!("qa{suffix}web");
                     self.settings.player_id = id.clone();
                     println!("mm queue as {id}");
                     self.mm_queue = Some(crate::relay::find_match_async(

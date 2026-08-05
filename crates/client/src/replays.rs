@@ -29,8 +29,8 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 
 fn timestamp() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let secs = crate::clock::SystemTime::now()
+        .duration_since(crate::clock::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0) as i64;
     let (y, mo, d) = civil_from_days(secs.div_euclid(86400));

@@ -253,11 +253,14 @@ pub struct Settings {
 
 /// 16 hex chars from OS entropy (client-side identity, never sim-side).
 fn fresh_player_id() -> String {
-    let mut t = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let mut t = crate::clock::SystemTime::now()
+        .duration_since(crate::clock::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(12345);
-    t ^= std::process::id() as u64 * 0x9E3779B97F4A7C15;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        t ^= std::process::id() as u64 * 0x9E3779B97F4A7C15;
+    }
     let mut s = String::new();
     for _ in 0..2 {
         t = t.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
