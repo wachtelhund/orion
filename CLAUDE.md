@@ -161,6 +161,23 @@ smoke (`orion-client --mp-auto host` / `--mp-auto join`) must stay green.
 In MP the client never pauses, forces speed 1.0, runs no bot, and the local
 player may be 1 (`App.human` — never hardcode player 0 in client code).
 
+## Web build (wasm)
+
+`web/build.sh` -> `web/dist`; serve with `web/serve.py` (no-cache — Chrome
+caches `_bg.wasm` brutally hard otherwise). Port lore lives in
+`web/README.md`. The sim compiles for wasm unchanged; client shims:
+`crate::clock` + `net::nettime` (web-time), cfg-gated `process::id`,
+localStorage settings, `relay_wasm.rs` (real WebSocket lobby MP driven by
+a 16ms pump; ranked/lobby-list still native-only). Two rules learned the
+hard way: **PROTOCOL_VERSION is CARGO_PKG_VERSION — rebuild `web/dist`
+AFTER the version bump** or browser vs native refuses with a version
+mismatch; and **hidden pages get no rAF and ~1Hz timers** — a
+user-event proxy nudged by a 250ms interval calls `App::background_step`
+so a backgrounded browser peer slows the match instead of freezing it.
+`--mp-auto` runs open a small quiet window (never fullscreen, no audio,
+no settings writes): fullscreen test windows get closed by the human at
+the desk, which reads as a mystery disconnect in the logs.
+
 ## Maps
 
 `map.rs` registry: `MAP_NAMES` + `by_name` — names are replay/net
