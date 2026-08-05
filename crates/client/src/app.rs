@@ -956,6 +956,9 @@ impl App {
     pub fn background_step(&mut self) {
         if !self.in_game || self.mp.is_none() || self.replay.is_some() {
             self.bg_last = None;
+            // Menu upkeep: a hidden multiplayer page keeps its lobby
+            // list fresh so it isn't stale the moment the tab returns.
+            self.poll_lobbies();
             return;
         }
         let now = Instant::now();
@@ -966,6 +969,31 @@ impl App {
             .min(0.5);
         self.bg_last = Some(now);
         self.mp_frame(dt);
+    }
+
+    /// Poll the public lobby directory while the multiplayer page is open.
+    fn poll_lobbies(&mut self) {
+        if self.page != MenuPage::Multiplayer
+            || self.settings.relay_url.is_empty()
+            || self.mp.is_some()
+        {
+            return;
+        }
+        if let Some(rx) = &self.lobby_fetch {
+            if let Ok(result) = rx.try_recv() {
+                if let Some(list) = result {
+                    self.lobby_list = list;
+                }
+                self.lobby_fetch = None;
+            }
+        } else if self
+            .lobby_fetch_at
+            .map_or(true, |t| t.elapsed().as_secs_f32() > 3.0)
+        {
+            self.lobby_fetch =
+                Some(crate::relay::fetch_lobbies_async(self.settings.relay_url.clone()));
+            self.lobby_fetch_at = Some(Instant::now());
+        }
     }
 
     /// Multiplayer frame: lockstep-driven stepping, menus never pause.
@@ -2978,27 +3006,7 @@ impl App {
         #[cfg(not(target_arch = "wasm32"))]
         self.poll_replay_net();
 
-        // Lobby browser: poll the directory while on the multiplayer page.
-        if self.page == MenuPage::Multiplayer
-            && !self.settings.relay_url.is_empty()
-            && self.mp.is_none()
-        {
-            if let Some(rx) = &self.lobby_fetch {
-                if let Ok(result) = rx.try_recv() {
-                    if let Some(list) = result {
-                        self.lobby_list = list;
-                    }
-                    self.lobby_fetch = None;
-                }
-            } else if self
-                .lobby_fetch_at
-                .map_or(true, |t| t.elapsed().as_secs_f32() > 3.0)
-            {
-                self.lobby_fetch =
-                    Some(crate::relay::fetch_lobbies_async(self.settings.relay_url.clone()));
-                self.lobby_fetch_at = Some(Instant::now());
-            }
-        }
+        self.poll_lobbies();
 
         // Pending host/join attempt resolved?
         if let Some(rx) = &self.mp_waiting {

@@ -335,7 +335,7 @@ fn drive(mut sess: Session) {
     cb.forget();
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Deserialize)]
 pub struct LobbyInfo {
     pub code: String,
     pub name: String,
@@ -344,9 +344,32 @@ pub struct LobbyInfo {
     pub age_s: u32,
 }
 
-pub fn fetch_lobbies_async(_base: String) -> Receiver<Option<Vec<LobbyInfo>>> {
+fn http_base(base: &str) -> String {
+    base.trim_end_matches('/')
+        .replacen("wss://", "https://", 1)
+        .replacen("ws://", "http://", 1)
+}
+
+/// Browser lobby list: window.fetch -> JSON, delivered through the same
+/// channel shape the native thread version uses.
+pub fn fetch_lobbies_async(base: String) -> Receiver<Option<Vec<LobbyInfo>>> {
     let (tx, rx) = channel();
-    let _ = tx.send(Some(Vec::new()));
+    let url = format!("{}/lobbies", http_base(&base));
+    wasm_bindgen_futures::spawn_local(async move {
+        let result: Option<Vec<LobbyInfo>> = async {
+            let win = web_sys::window()?;
+            let resp = wasm_bindgen_futures::JsFuture::from(win.fetch_with_str(&url))
+                .await
+                .ok()?;
+            let resp: web_sys::Response = resp.dyn_into().ok()?;
+            let text = wasm_bindgen_futures::JsFuture::from(resp.text().ok()?)
+                .await
+                .ok()?;
+            serde_json::from_str(&text.as_string()?).ok()
+        }
+        .await;
+        let _ = tx.send(result);
+    });
     rx
 }
 

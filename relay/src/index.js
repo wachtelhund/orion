@@ -115,7 +115,10 @@ export class Directory {
 
   json(body) {
     return new Response(body, {
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        "access-control-allow-origin": "*",
+      },
     });
   }
 
@@ -339,7 +342,10 @@ export class Matchmaker {
   json(obj, status = 200) {
     return new Response(JSON.stringify(obj), {
       status,
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        "access-control-allow-origin": "*",
+      },
     });
   }
 

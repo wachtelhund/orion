@@ -173,7 +173,12 @@ caches `_bg.wasm` brutally hard otherwise). Port lore lives in
 `web/README.md`. The sim compiles for wasm unchanged; client shims:
 `crate::clock` + `net::nettime` (web-time), cfg-gated `process::id`,
 localStorage settings, `relay_wasm.rs` (real WebSocket lobby MP driven by
-a 16ms pump; ranked/lobby-list still native-only). Two rules learned the
+a 16ms pump + fetch-based public lobby list; ranked still native-only —
+the relay serves JSON with CORS `*` for browser clients). `?page=mp`
+(also replays/difficulty) jumps straight to a menu page, which is how
+headless-Chrome screenshots verify web UI without scripted clicks:
+`chrome --headless=new --enable-unsafe-webgpu --virtual-time-budget=30000
+--screenshot=x.png "http://localhost:8765/index.html?page=mp"`. Two rules learned the
 hard way: **PROTOCOL_VERSION is CARGO_PKG_VERSION — rebuild `web/dist`
 AFTER the version bump** or browser vs native refuses with a version
 mismatch; and **hidden pages get no rAF and ~1Hz timers** — a
@@ -272,6 +277,7 @@ of all versions.
    budget (all races — turtling on the multi-base map), so the balance
    example's thornwood rows are mostly stalls. Normal-difficulty soak
    games finish fine.
-5. Web build parity: ranked queue, lobby browser and replay sharing are
-   desktop-only; a hidden browser tab plays in slow motion by design
-   (background keep-alive) rather than stalling the peer.
+5. Web build parity: ranked queue and replay sharing are desktop-only
+   (the lobby browser works in the browser since v0.19.0); a hidden
+   browser tab plays in slow motion by design (background keep-alive)
+   rather than stalling the peer.

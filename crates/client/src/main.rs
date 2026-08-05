@@ -194,6 +194,20 @@ impl Shell {
                         app.resize(w, h);
                     }
                     web_sys::console::log_1(&"orion: surface forced 1440x900".into());
+                    // ?page=mp|replays|difficulty jumps straight to a menu
+                    // page — lets headless-Chrome screenshots verify pages
+                    // without scripted clicks.
+                    if let Ok(search) = web_win.location().search() {
+                        if let Some(app) = self.app.as_mut() {
+                            if search.contains("page=mp") {
+                                app.page = crate::menu::MenuPage::Multiplayer;
+                            } else if search.contains("page=replays") {
+                                app.page = crate::menu::MenuPage::Replays;
+                            } else if search.contains("page=difficulty") {
+                                app.page = crate::menu::MenuPage::Difficulty;
+                            }
+                        }
+                    }
                     if let Some(win) = &self.window {
                         win.request_redraw();
                     }
