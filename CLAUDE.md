@@ -277,7 +277,8 @@ of all versions.
    budget (all races — turtling on the multi-base map), so the balance
    example's thornwood rows are mostly stalls. Normal-difficulty soak
    games finish fine.
-5. Web build parity: ranked queue and replay sharing are desktop-only
-   (the lobby browser works in the browser since v0.19.0); a hidden
-   browser tab plays in slow motion by design (background keep-alive)
-   rather than stalling the peer.
+5. Web build parity: the ranked queue and replay UPLOAD are
+   desktop-only (the browser lists/joins lobbies since v0.19.0 and
+   fetches/plays shared replays since v0.20.0 — `?replay=CODE` links
+   work); a hidden browser tab plays in slow motion by design
+   (background keep-alive) rather than stalling the peer.
