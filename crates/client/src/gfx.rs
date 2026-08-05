@@ -51,7 +51,7 @@ impl Gfx {
         pollster::block_on(Self::new_async(window))
     }
 
-    async fn new_async(window: Arc<Window>) -> Gfx {
+    pub async fn new_async(window: Arc<Window>) -> Gfx {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let surface = instance.create_surface(window).expect("create surface");

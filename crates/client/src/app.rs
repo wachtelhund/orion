@@ -3,7 +3,7 @@
 //! menu.rs.
 
 use std::collections::HashSet;
-use std::time::Instant;
+use crate::clock::Instant;
 
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -176,7 +176,7 @@ pub struct App {
     pub ack_flip: bool,
     /// Match-start freeze: countdown seconds remaining (5..=1), and the
     /// wall-clock moment the countdown began.
-    pub countdown: Option<(std::time::Instant, u32)>,
+    pub countdown: Option<(Instant, u32)>,
     /// Ladder page contents + pending fetch.
     pub ladder: Option<Vec<crate::relay::LadderRow>>,
     pub ladder_rx: Option<std::sync::mpsc::Receiver<Option<Vec<crate::relay::LadderRow>>>>,
@@ -651,7 +651,7 @@ impl App {
     /// headless automation).
     fn arm_countdown(&mut self) {
         if self.mp_auto.is_none() && self.script.is_none() && self.shot.is_none() {
-            self.countdown = Some((std::time::Instant::now(), 6));
+            self.countdown = Some((Instant::now(), 6));
         }
     }
 

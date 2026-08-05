@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Orion — browser demo</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #060608; overflow: hidden; }
+  canvas { display: block; margin: 0 auto; outline: none; }
+  #boot { color: #c9a227; font: 14px monospace; text-align: center; padding-top: 40vh; }
+</style>
+</head>
+<body>
+<div id="boot">LOADING ORION...</div>
+<script type="module">
+  import init from './dist/orion-client.js';
+  init().then(() => {
+    document.getElementById('boot')?.remove();
+  }).catch((e) => {
+    // winit exits main() via a control-flow exception by design.
+    if (`${e}`.includes('Using exceptions for control flow')) {
+      document.getElementById('boot')?.remove();
+      return;
+    }
+    document.getElementById('boot').textContent =
+      'FAILED TO START - THIS DEMO NEEDS A WEBGPU BROWSER (CHROME/EDGE). ' + e;
+  });
+</script>
+</body>
+</html>

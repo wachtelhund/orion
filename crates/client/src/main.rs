@@ -5,12 +5,23 @@ mod app;
 mod atlas;
 mod audio;
 mod config;
+/// Instant that works on wasm (std panics there).
+mod clock {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub use std::time::Instant;
+    #[cfg(target_arch = "wasm32")]
+    pub use web_time::Instant;
+}
 mod editor;
 mod font;
 mod gfx;
 mod hud;
 mod iso;
 mod menu;
+#[cfg(not(target_arch = "wasm32"))]
+mod relay;
+#[cfg(target_arch = "wasm32")]
+#[path = "relay_wasm.rs"]
 mod relay;
 mod replays;
 
@@ -45,6 +56,8 @@ struct Shell {
     map_arg: Option<String>,
     races_arg: Option<(u8, u8)>,
     stage: bool,
+    #[cfg(target_arch = "wasm32")]
+    pending_gfx: std::rc::Rc<std::cell::RefCell<Option<Gfx>>>,
 }
 
 impl ApplicationHandler for Shell {
@@ -61,7 +74,74 @@ impl ApplicationHandler for Shell {
                 )
                 .expect("create window"),
         );
-        let gfx = Gfx::new(window.clone());
+        // Web: the canvas winit made must join the DOM, and the wgpu
+        // adapter only resolves asynchronously — stash the Gfx when it
+        // lands and finish init from about_to_wait.
+        #[cfg(target_arch = "wasm32")]
+        {
+            use winit::platform::web::WindowExtWebSys;
+            let canvas = window.canvas().expect("canvas");
+            // Give the surface real pixels — a 0x0 canvas renders nothing.
+            canvas.set_width(1440);
+            canvas.set_height(900);
+            let doc = web_sys::window().unwrap().document().unwrap();
+            let body = doc.body().unwrap();
+            let _ = body.append_child(&canvas);
+            // Winit must agree with the canvas about the surface size —
+            // without this its inner_size stays 0x0 and wgpu draws nothing.
+            let _ = window.request_inner_size(LogicalSize::new(1440.0, 900.0));
+            web_sys::console::log_1(&"orion: canvas attached".into());
+            let cell = self.pending_gfx.clone();
+            let win2 = window.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                web_sys::console::log_1(&"orion: requesting adapter".into());
+                let gfx = Gfx::new_async(win2).await;
+                web_sys::console::log_1(&"orion: gfx ready".into());
+                *cell.borrow_mut() = Some(gfx);
+            });
+            self.window = Some(window);
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let gfx = Gfx::new(window.clone());
+            self.finish_init(gfx, window);
+        }
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        self.poll_pending_gfx();
+        self.window_event_inner(event_loop, event);
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        self.poll_pending_gfx();
+        if let Some(w) = &self.window {
+            w.request_redraw();
+        }
+    }
+}
+
+impl Shell {
+    /// Web: adopt the async-created Gfx once it resolves.
+    fn poll_pending_gfx(&mut self) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if self.app.is_none() {
+                let gfx = self.pending_gfx.borrow_mut().take();
+                if let (Some(gfx), Some(window)) = (gfx, self.window.clone()) {
+                    web_sys::console::log_1(&"orion: init complete".into());
+                    self.finish_init(gfx, window);
+                }
+                // Keep the event loop breathing until init lands.
+                if let Some(w) = &self.window {
+                    w.request_redraw();
+                }
+            }
+        }
+    }
+
+    fn finish_init(&mut self, gfx: Gfx, window: Arc<Window>) {
         let sf = window.scale_factor() as f32;
         let mut app = App::new(gfx, self.smoke, self.shot.clone(), sf);
         app.shot_focus = self.shot_focus;
@@ -121,7 +201,7 @@ impl ApplicationHandler for Shell {
         self.window = Some(window);
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+    fn window_event_inner(&mut self, event_loop: &ActiveEventLoop, event: WindowEvent) {
         let Some(app) = self.app.as_mut() else { return };
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
@@ -150,16 +230,12 @@ impl ApplicationHandler for Shell {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(w) = &self.window {
-            w.request_redraw();
-        }
-    }
 }
 
 fn main() {
     env_logger::init();
     // rustls 0.23 needs a process-wide crypto provider before any TLS use.
+    #[cfg(not(target_arch = "wasm32"))]
     let _ = rustls::crypto::ring::default_provider().install_default();
     let args: Vec<String> = std::env::args().collect();
     let smoke = args.iter().any(|a| a == "--smoke");
