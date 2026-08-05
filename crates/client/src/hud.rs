@@ -1194,6 +1194,24 @@ impl App {
             [0.5, 0.5, 0.5, 0.8],
             &format!("{:02}:{:02}  FPS {:.0}", secs / 60, secs % 60, self.fps),
         );
+        // MP connection readout under the clock: live RTT, negotiated
+        // pipeline depth, stall rate. Turns "feels laggy" into numbers.
+        if let Some(mp) = &self.mp {
+            let stalls = mp.stalls_per_min();
+            let color = if stalls > 30 || mp.rtt_ms > 300 {
+                [1.0, 0.5, 0.35, 0.9]
+            } else {
+                [0.5, 0.55, 0.5, 0.8]
+            };
+            self.gfx.text(
+                out,
+                10.0 * ui,
+                24.0 * ui,
+                self.ts(1.0),
+                color,
+                &format!("PING {}MS  PIPE {}  STALLS {}/MIN", mp.rtt_ms, mp.delay, stalls),
+            );
+        }
     }
 
     fn draw_banner(&self, out: &mut Vec<Inst>) {

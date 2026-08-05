@@ -261,6 +261,12 @@ pub struct Lockstep {
     pub local_player: u8,
     /// Negotiated pipeline depth in ticks.
     pub delay: u32,
+    /// Live RTT estimate from in-game ping/pong (ms).
+    pub rtt_ms: u32,
+    ping_sent: Option<(u32, std::time::Instant)>,
+    /// Tick stamps of recent step->stall transitions (last minute kept).
+    stall_ticks: std::collections::VecDeque<u32>,
+    was_waiting: bool,
     local: BTreeMap<u32, Vec<Command>>,
     remote: BTreeMap<u32, Vec<Command>>,
     my_checksums: BTreeMap<u32, u64>,
@@ -276,6 +282,10 @@ impl Lockstep {
             net,
             local_player,
             delay,
+            rtt_ms: 0,
+            ping_sent: None,
+            stall_ticks: std::collections::VecDeque::new(),
+            was_waiting: false,
             local: BTreeMap::new(),
             remote: BTreeMap::new(),
             my_checksums: BTreeMap::new(),
@@ -290,6 +300,17 @@ impl Lockstep {
     fn pump(&mut self) {
         loop {
             match self.net.rx.try_recv() {
+                Ok(Msg::Ping { k }) => {
+                    let _ = self.net.send(&Msg::Pong { k });
+                }
+                Ok(Msg::Pong { k }) => {
+                    if let Some((sk, at)) = self.ping_sent {
+                        if sk == k {
+                            self.rtt_ms = at.elapsed().as_millis() as u32;
+                            self.ping_sent = None;
+                        }
+                    }
+                }
                 Ok(Msg::Cmds { tick, cmds, checksum }) => {
                     self.remote.insert(tick, cmds);
                     if let Some((t, sum)) = checksum {
@@ -319,6 +340,11 @@ impl Lockstep {
             return false;
         }
         let t = state.tick;
+        // Live RTT probe every ~2s.
+        if t % 48 == 0 && self.ping_sent.is_none() {
+            let _ = self.net.send(&Msg::Ping { k: t });
+            self.ping_sent = Some((t, std::time::Instant::now()));
+        }
         // Send local schedules up to t+delay; new input rides the last one.
         while self.sent_until <= t + self.delay {
             let tick = self.sent_until;
@@ -350,8 +376,17 @@ impl Lockstep {
         }
         // Step only with both halves of tick t present.
         let (Some(local), Some(remote)) = (self.local.get(&t), self.remote.get(&t)) else {
+            // Count step->stall transitions, windowed to the last minute.
+            if !self.was_waiting {
+                self.was_waiting = true;
+                self.stall_ticks.push_back(t);
+                while self.stall_ticks.front().is_some_and(|&s| s + 1440 < t) {
+                    self.stall_ticks.pop_front();
+                }
+            }
             return false;
         };
+        self.was_waiting = false;
         let (host, join) = if self.local_player == 0 {
             (local, remote)
         } else {
@@ -374,6 +409,11 @@ impl Lockstep {
         self.local.remove(&t);
         self.remote.remove(&t);
         true
+    }
+
+    /// Stalls in the last in-game minute.
+    pub fn stalls_per_min(&self) -> usize {
+        self.stall_ticks.len()
     }
 }
 
