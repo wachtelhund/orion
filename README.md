@@ -3,6 +3,7 @@
 A StarCraft-style RTS built from scratch in Rust. No game engine — a
 purpose-built deterministic simulation with a wgpu isometric renderer.
 Three asymmetric races, skirmish AI, and online multiplayer via lobby codes.
+Full version history with screenshots: [docs/wiki](docs/wiki/Home.md).
 All art and audio are procedurally generated at startup: zero asset files.
 
 ![Orion gameplay — observer camera following a battle on Thornwood](docs/media/orion.gif)
