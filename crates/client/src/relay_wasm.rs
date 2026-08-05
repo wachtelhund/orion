@@ -63,6 +63,10 @@ struct Session {
     opened: Rc<RefCell<bool>>,
     closed: Rc<RefCell<bool>>,
     started_at: f64,
+    /// Debug counters: pump calls, lines in, lines out.
+    n_pump: u32,
+    n_rx: u32,
+    n_tx: u32,
 }
 
 fn now_ms() -> f64 {
@@ -143,12 +147,29 @@ fn open_session(
         opened,
         closed,
         started_at: now_ms(),
+        n_pump: 0,
+        n_rx: 0,
+        n_tx: 0,
     })
 }
 
 /// One pump tick: flush outgoing, take incoming, advance the handshake.
 /// Returns false when the session is finished (stop the interval).
 fn pump(sess: &mut Session) -> bool {
+    sess.n_pump = sess.n_pump.wrapping_add(1);
+    if sess.n_pump % 120 == 0 {
+        let ph = match sess.phase {
+            Phase::HostWaitHello => "host-wait-hello",
+            Phase::HostWaitPong { .. } => "host-wait-pong",
+            Phase::JoinWaitStart => "join-wait-start",
+            Phase::JoinWaitGo { .. } => "join-wait-go",
+            Phase::Done => "done",
+        };
+        crate::weblog(&format!(
+            "pump hb: phase={ph} rx={} tx={} open={} closed={}",
+            sess.n_rx, sess.n_tx, *sess.opened.borrow(), *sess.closed.borrow()
+        ));
+    }
     if *sess.closed.borrow() {
         let _ = sess.result_tx.send(Err(io::Error::new(
             io::ErrorKind::ConnectionReset,
@@ -181,6 +202,7 @@ fn pump(sess: &mut Session) -> bool {
         }
     }
     let lines: Vec<String> = sess.raw_in.borrow_mut().drain(..).collect();
+    sess.n_rx = sess.n_rx.wrapping_add(lines.len() as u32);
     for line in lines {
         let Some(msg) = parse_msg(&line) else { continue };
         match &mut sess.phase {
@@ -283,6 +305,7 @@ fn pump(sess: &mut Session) -> bool {
     }
     // Flush game-side outgoing (Lockstep pushes into the Net sender).
     while let Ok(line) = sess.out_rx.try_recv() {
+        sess.n_tx = sess.n_tx.wrapping_add(1);
         let _ = sess.ws.send_with_str(&line);
     }
     true

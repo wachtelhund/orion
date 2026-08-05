@@ -14,6 +14,14 @@ mod clock {
     #[cfg(target_arch = "wasm32")]
     pub use web_time::{Instant, SystemTime, UNIX_EPOCH};
 }
+
+/// Debug line that reaches the browser console on wasm, stderr natively.
+pub fn weblog(s: &str) {
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::log_1(&s.into());
+    #[cfg(not(target_arch = "wasm32"))]
+    eprintln!("{s}");
+}
 mod editor;
 mod font;
 mod gfx;
@@ -69,12 +77,16 @@ impl ApplicationHandler for Shell {
         if self.app.is_some() || self.window.is_some() {
             return;
         }
+        // Automated MP runs live in a small corner window: a fullscreen
+        // window popping over the desktop gets closed by the human, which
+        // reads as a mystery disconnect in the logs.
+        let (win_w, win_h) = if self.mp_auto.is_some() { (480.0, 300.0) } else { (1440.0, 900.0) };
         let window = Arc::new(
             event_loop
                 .create_window(
                     Window::default_attributes()
-                        .with_title("Orion")
-                        .with_inner_size(LogicalSize::new(1440.0, 900.0)),
+                        .with_title(if self.mp_auto.is_some() { "Orion MP test" } else { "Orion" })
+                        .with_inner_size(LogicalSize::new(win_w, win_h)),
                 )
                 .expect("create window"),
         );
@@ -122,6 +134,25 @@ impl ApplicationHandler for Shell {
         self.poll_pending_gfx();
         if let Some(w) = &self.window {
             w.request_redraw();
+        }
+    }
+
+    /// Wakeups from the wasm keep-alive interval: when the page is hidden
+    /// (rAF stopped), keep a multiplayer match stepping so the peer sees a
+    /// slow game instead of a frozen one.
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _ev: ()) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.poll_pending_gfx();
+            let hidden = web_sys::window()
+                .and_then(|w| w.document())
+                .map(|d| d.hidden())
+                .unwrap_or(false);
+            if hidden {
+                if let Some(app) = self.app.as_mut() {
+                    app.background_step();
+                }
+            }
         }
     }
 }
@@ -222,14 +253,14 @@ impl Shell {
             || self.shot.is_some()
             || self.script.is_some()
             || self.menu_shot.is_some()
-            || self.replay_shot.is_some();
+            || self.replay_shot.is_some()
+            || self.mp_auto.is_some();
         if !headless {
             app.init_audio();
             app.persist_identity();
         }
-        // Persisted fullscreen preference (not in capture modes).
-        if app.settings.fullscreen && self.shot.is_none() && self.script.is_none() && !self.smoke
-        {
+        // Persisted fullscreen preference (not in capture/test modes).
+        if app.settings.fullscreen && !headless {
             window.set_fullscreen(Some(Fullscreen::Borderless(None)));
         }
         self.app = Some(app);
@@ -239,7 +270,14 @@ impl Shell {
     fn window_event_inner(&mut self, event_loop: &ActiveEventLoop, event: WindowEvent) {
         let Some(app) = self.app.as_mut() else { return };
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                // In automated runs a close means someone dismissed the test
+                // window — say so, or the exit reads as a transport bug.
+                if app.mp_auto.is_some() {
+                    eprintln!("mp-auto: window closed by user - aborting test");
+                }
+                event_loop.exit();
+            }
             WindowEvent::Resized(size) => app.resize(size.width, size.height),
             WindowEvent::RedrawRequested => {
                 app.frame();
@@ -270,6 +308,8 @@ impl Shell {
 fn main() {
     #[cfg(target_arch = "wasm32")]
     console_error_panic_hook::set_once();
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::log_1(&"orion: main() enter".into());
     env_logger::init();
     // rustls 0.23 needs a process-wide crypto provider before any TLS use.
     #[cfg(not(target_arch = "wasm32"))]
@@ -375,7 +415,7 @@ fn main() {
             let (page, path) = s.split_once(':')?;
             Some((page.to_string(), path.to_string()))
         });
-    let event_loop = EventLoop::new().expect("event loop");
+    let event_loop = EventLoop::with_user_event().build().expect("event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut shell = Shell {
         smoke,
@@ -400,7 +440,24 @@ fn main() {
     // still target our stack-borrowed shell — spawn_app takes ownership.
     #[cfg(target_arch = "wasm32")]
     {
+        use wasm_bindgen::JsCast;
         use winit::platform::web::EventLoopExtWebSys;
+        // Chrome stops requestAnimationFrame entirely for hidden pages, so a
+        // backgrounded tab would freeze its half of a lockstep match. Proxy
+        // wakeups ride postMessage, which keeps firing (throttled) while
+        // hidden — a slow interval nudges the shell so multiplayer keeps
+        // stepping at reduced rate instead of stalling the peer.
+        let proxy = event_loop.create_proxy();
+        let nudge = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+            let _ = proxy.send_event(());
+        });
+        if let Some(w) = web_sys::window() {
+            let _ = w.set_interval_with_callback_and_timeout_and_arguments_0(
+                nudge.as_ref().unchecked_ref(),
+                250,
+            );
+        }
+        nudge.forget();
         event_loop.spawn_app(shell);
     }
     #[cfg(not(target_arch = "wasm32"))]

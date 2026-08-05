@@ -235,6 +235,10 @@ pub struct App {
     pub mode: Mode,
     pub reveal_all: bool,
     pub fps: f32,
+    /// Frame counter for throttled debug heartbeats.
+    pub dbg_frames: u32,
+    /// Clock for hidden-page background stepping (web multiplayer).
+    bg_last: Option<Instant>,
     pub frame_t: Instant,
 
     // Render-side caches (never touch sim state).
@@ -418,6 +422,8 @@ impl App {
             mode: Mode::Normal,
             reveal_all: false,
             fps: 60.0,
+            dbg_frames: 0,
+            bg_last: None,
             frame_t: Instant::now(),
             facings: Vec::new(),
             headings: Vec::new(),
@@ -661,6 +667,10 @@ impl App {
     }
 
     pub fn start_mp_game(&mut self, started: Started) {
+        crate::weblog(&format!(
+            "orion: start_mp_game local={} delay={}",
+            started.local_player, started.input_delay
+        ));
         self.mp_lobby_code = None;
         self.replay = None;
         self.record_replay = true;
@@ -835,9 +845,40 @@ impl App {
         }
     }
 
+    /// Keep a lockstep match alive without rendering — called while the
+    /// page is hidden in the browser and requestAnimationFrame is stopped.
+    /// Uses its own clock so time hidden isn't double-counted when the
+    /// normal frame path resumes.
+    pub fn background_step(&mut self) {
+        if !self.in_game || self.mp.is_none() || self.replay.is_some() {
+            self.bg_last = None;
+            return;
+        }
+        let now = Instant::now();
+        let dt = self
+            .bg_last
+            .map(|t| (now - t).as_secs_f64())
+            .unwrap_or(0.25)
+            .min(0.5);
+        self.bg_last = Some(now);
+        self.mp_frame(dt);
+    }
+
     /// Multiplayer frame: lockstep-driven stepping, menus never pause.
     fn mp_frame(&mut self, dt: f64) {
         self.camera_input(dt);
+        self.dbg_frames = self.dbg_frames.wrapping_add(1);
+        if self.dbg_frames % 120 == 0
+            && (self.mp_auto.is_some() || cfg!(target_arch = "wasm32"))
+        {
+            crate::weblog(&format!(
+                "mp hb: tick={} cd={:?} acc={:.3} stalls={}",
+                self.state.tick,
+                self.countdown.as_ref().map(|(t0, n)| (t0.elapsed().as_secs_f32(), *n)),
+                self.acc,
+                self.mp.as_ref().map_or(0, |m| m.stalls_per_min()),
+            ));
+        }
         if self.countdown_active() {
             self.acc = 0.0;
         } else if self.state.winner.is_none() {
