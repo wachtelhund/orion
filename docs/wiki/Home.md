@@ -12,6 +12,7 @@ looks in game.
 
 | Version | Highlights |
 |---|---|
+| [v0.16.0](v0.16.0.md) | Browser multiplayer: code lobbies + cross-play with desktop through the live relay, localStorage settings, hidden-tab keep-alive |
 | [v0.15.0](v0.15.0.md) | Smooth unit turning, idle-worker alert chip, per-ability cast sounds; v0.15.1: THE GAME RUNS IN THE BROWSER (WebGPU, ~70 FPS) |
 | [v0.14.0](v0.14.0.md) | Visual map editor with auto-mirrored painting, custom maps in the SP picker |
 | [v0.13.0](v0.13.0.md) | Heroes: Marshal Kade, Broodmother Sszrak, Magnus Vex — two abilities each, bot support, deterministic zones/summons |
