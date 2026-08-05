@@ -10,3 +10,6 @@ ron = "0.8"
 
 [[example]]
 name = "stress"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-time = "1"

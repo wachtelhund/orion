@@ -292,14 +292,38 @@ fn path() -> Option<std::path::PathBuf> {
 
 impl Settings {
     pub fn load() -> Settings {
-        let Some(p) = path() else { return Settings::default() };
-        std::fs::read_to_string(p)
-            .ok()
-            .and_then(|s| ron::from_str(&s).ok())
-            .unwrap_or_default()
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Browser: settings live in localStorage.
+            return web_sys::window()
+                .and_then(|w| w.local_storage().ok().flatten())
+                .and_then(|st| st.get_item("orion-settings").ok().flatten())
+                .and_then(|s| ron::from_str(&s).ok())
+                .unwrap_or_default();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let Some(p) = path() else { return Settings::default() };
+            std::fs::read_to_string(p)
+                .ok()
+                .and_then(|s| ron::from_str(&s).ok())
+                .unwrap_or_default()
+        }
     }
 
     pub fn save(&self) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(st) =
+                web_sys::window().and_then(|w| w.local_storage().ok().flatten())
+            {
+                if let Ok(s) = ron::ser::to_string(self) {
+                    let _ = st.set_item("orion-settings", &s);
+                }
+            }
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(p) = path() {
             if let Ok(s) = ron::ser::to_string_pretty(self, Default::default()) {
                 let _ = std::fs::write(p, s);

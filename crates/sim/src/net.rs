@@ -14,6 +14,14 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 
+/// Instant that works on wasm (std's panics there).
+mod nettime {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub use std::time::{Instant, SystemTime, UNIX_EPOCH};
+    #[cfg(target_arch = "wasm32")]
+    pub use web_time::{Instant, SystemTime, UNIX_EPOCH};
+}
+
 use serde::{Deserialize, Serialize};
 
 use crate::state::Command;
@@ -54,6 +62,12 @@ pub struct Net {
 }
 
 impl Net {
+    /// Assemble a Net from raw channel ends — for transports that pump
+    /// I/O themselves (the browser WebSocket driver).
+    pub fn from_parts(out: Sender<String>, rx: Receiver<Msg>) -> Net {
+        Net { out, rx }
+    }
+
     /// Build a Net from raw line channels (used by the relay transport):
     /// whatever pumps `rx` and drains the returned receiver owns the wire.
     pub fn from_channels(out: Sender<String>, rx: Receiver<Msg>) -> Net {
@@ -150,7 +164,7 @@ pub fn host_handshake(
     net.send(&Msg::Start { seed, host_race: my_race, join_race, map: map.to_string() });
     // RTT probe: one round trip through whatever transport (and relay hop)
     // this session uses, so the input delay matches reality.
-    let t0 = std::time::Instant::now();
+    let t0 = nettime::Instant::now();
     net.send(&Msg::Ping { k: 1 });
     let rtt = loop {
         match net.rx.recv() {
@@ -215,8 +229,8 @@ pub fn join_handshake(mut net: Net, my_race: u8) -> std::io::Result<Started> {
 
 /// Fresh seed for a hosted match (pre-game choice, not sim-side).
 pub fn fresh_seed() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    nettime::SystemTime::now()
+        .duration_since(nettime::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0xC0FFEE)
 }
@@ -263,7 +277,7 @@ pub struct Lockstep {
     pub delay: u32,
     /// Live RTT estimate from in-game ping/pong (ms).
     pub rtt_ms: u32,
-    ping_sent: Option<(u32, std::time::Instant)>,
+    ping_sent: Option<(u32, nettime::Instant)>,
     /// Tick stamps of recent step->stall transitions (last minute kept).
     stall_ticks: std::collections::VecDeque<u32>,
     was_waiting: bool,
@@ -343,7 +357,7 @@ impl Lockstep {
         // Live RTT probe every ~2s.
         if t % 48 == 0 && self.ping_sent.is_none() {
             let _ = self.net.send(&Msg::Ping { k: t });
-            self.ping_sent = Some((t, std::time::Instant::now()));
+            self.ping_sent = Some((t, nettime::Instant::now()));
         }
         // Send local schedules up to t+delay; new input rides the last one.
         while self.sent_until <= t + self.delay {
