@@ -77,10 +77,12 @@ export class Vault {
     const m = url.pathname.match(/^\/replay\/([A-Z0-9]{4,8})$/);
     if (m && request.method === "GET") {
       const v = await this.state.storage.get("r:" + m[1]);
+      // Browser clients read these directly — CORS applies.
+      const cors = { "access-control-allow-origin": "*" };
       if (!v) {
-        return new Response("no replay with that code", { status: 404 });
+        return new Response("no replay with that code", { status: 404, headers: cors });
       }
-      return new Response(v.data, { status: 200 });
+      return new Response(v.data, { status: 200, headers: cors });
     }
     return new Response("bad request", { status: 400 });
   }

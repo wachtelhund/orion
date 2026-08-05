@@ -290,7 +290,7 @@ impl App {
                 if rows.is_empty() {
                     rows.push(("NO REPLAYS YET - PLAY A GAME".into(), MenuAction::Back));
                 }
-                // Sharing runs over the relay — desktop builds only.
+                // Uploading needs local files — desktop builds only.
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     let share = if self.replay_share_mode {
@@ -299,11 +299,13 @@ impl App {
                         "SHARE A REPLAY - GET A CODE".to_string()
                     };
                     rows.push((share, MenuAction::ToggleReplayShare));
-                    rows.push((
-                        format!("FETCH CODE: {}_", self.replay_code),
-                        MenuAction::FetchReplayCode,
-                    ));
                 }
+                // Fetching by code works everywhere; the browser plays the
+                // replay directly instead of saving a file.
+                rows.push((
+                    format!("FETCH CODE: {}_", self.replay_code),
+                    MenuAction::FetchReplayCode,
+                ));
                 rows.push(("BACK".into(), MenuAction::Back));
                 stack(rows, h * 0.30);
             }

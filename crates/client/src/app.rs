@@ -776,7 +776,13 @@ impl App {
             self.mp_error = Some("cannot read replay".into());
             return;
         };
-        let replay = match orion_sim::replay::Replay::from_ron(&src) {
+        self.start_replay_src(&src);
+    }
+
+    /// Start playback from replay RON already in memory (file on native,
+    /// fetched by code in the browser).
+    pub fn start_replay_src(&mut self, src: &str) {
+        let replay = match orion_sim::replay::Replay::from_ron(src) {
             Ok(r) => r,
             Err(e) => {
                 self.mp_error = Some(format!("bad replay: {e}"));
@@ -839,25 +845,23 @@ impl App {
         }
     }
 
-    /// Download the replay behind `replay_code` into the local list.
+    /// Download the replay behind `replay_code`: into the local list on
+    /// desktop, straight into playback in the browser (no filesystem).
     pub fn fetch_shared_replay(&mut self) {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let code = self.replay_code.trim().to_uppercase();
-            if code.is_empty() || self.replay_fetch_rx.is_some() {
-                return;
-            }
-            self.replay_status = Some(format!("FETCHING {code}..."));
-            self.replay_fetch_rx = Some(crate::relay::fetch_replay_async(
-                self.settings.relay_url.clone(),
-                code,
-            ));
+        let code = self.replay_code.trim().to_uppercase();
+        if code.is_empty() || self.replay_fetch_rx.is_some() {
+            return;
         }
+        self.replay_status = Some(format!("FETCHING {code}..."));
+        self.replay_fetch_rx = Some(crate::relay::fetch_replay_async(
+            self.settings.relay_url.clone(),
+            code,
+        ));
     }
 
     /// Poll the async share/fetch results (menu frame).
-    #[cfg(not(target_arch = "wasm32"))]
     fn poll_replay_net(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(rx) = &self.replay_share_rx {
             if let Ok(res) = rx.try_recv() {
                 self.replay_status = Some(match res {
@@ -871,26 +875,38 @@ impl App {
             if let Ok(res) = rx.try_recv() {
                 match res {
                     Ok(ron) => {
-                        let code = self.replay_code.trim().to_uppercase();
                         if orion_sim::replay::Replay::from_ron(&ron).is_err() {
                             self.replay_status =
                                 Some("FETCH FAILED: NOT A VALID REPLAY".into());
                         } else {
-                            let dir = crate::replays::dir();
-                            let _ = std::fs::create_dir_all(&dir);
-                            let path = dir.join(format!("shared-{code}.ron"));
-                            match std::fs::write(&path, &ron) {
-                                Ok(()) => {
-                                    self.replay_files =
-                                        crate::replays::list(&self.state.data.race_names);
-                                    self.replay_status =
-                                        Some(format!("{code} FETCHED - IT IS IN THE LIST"));
-                                    self.replay_code.clear();
+                            #[cfg(not(target_arch = "wasm32"))]
+                            {
+                                let code = self.replay_code.trim().to_uppercase();
+                                let dir = crate::replays::dir();
+                                let _ = std::fs::create_dir_all(&dir);
+                                let path = dir.join(format!("shared-{code}.ron"));
+                                match std::fs::write(&path, &ron) {
+                                    Ok(()) => {
+                                        self.replay_files = crate::replays::list(
+                                            &self.state.data.race_names,
+                                        );
+                                        self.replay_status = Some(format!(
+                                            "{code} FETCHED - IT IS IN THE LIST"
+                                        ));
+                                        self.replay_code.clear();
+                                    }
+                                    Err(e) => {
+                                        self.replay_status =
+                                            Some(format!("SAVE FAILED: {e}").to_uppercase())
+                                    }
                                 }
-                                Err(e) => {
-                                    self.replay_status =
-                                        Some(format!("SAVE FAILED: {e}").to_uppercase())
-                                }
+                            }
+                            // No filesystem in the browser — play it now.
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                self.replay_status = None;
+                                self.replay_code.clear();
+                                self.start_replay_src(&ron);
                             }
                         }
                     }
@@ -3003,7 +3019,6 @@ impl App {
             }
         }
 
-        #[cfg(not(target_arch = "wasm32"))]
         self.poll_replay_net();
 
         self.poll_lobbies();

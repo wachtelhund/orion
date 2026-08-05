@@ -350,6 +350,48 @@ fn http_base(base: &str) -> String {
         .replacen("ws://", "http://", 1)
 }
 
+/// Download a shared replay by code — browser fetch, same channel shape
+/// as the native thread version.
+pub fn fetch_replay_async(base: String, code: String) -> Receiver<io::Result<String>> {
+    let (tx, rx) = channel();
+    let url = format!("{}/replay/{}", http_base(&base), code.to_uppercase());
+    wasm_bindgen_futures::spawn_local(async move {
+        let result: io::Result<String> = async {
+            let win = web_sys::window()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "no window"))?;
+            let resp = wasm_bindgen_futures::JsFuture::from(win.fetch_with_str(&url))
+                .await
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "fetch failed"))?;
+            let resp: web_sys::Response = resp
+                .dyn_into()
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "bad response"))?;
+            if resp.status() == 404 {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "no replay with that code",
+                ));
+            }
+            if !resp.ok() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("relay error {}", resp.status()),
+                ));
+            }
+            let text = wasm_bindgen_futures::JsFuture::from(
+                resp.text()
+                    .map_err(|_| io::Error::new(io::ErrorKind::Other, "no body"))?,
+            )
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "read failed"))?;
+            text.as_string()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "not text"))
+        }
+        .await;
+        let _ = tx.send(result);
+    });
+    rx
+}
+
 /// Browser lobby list: window.fetch -> JSON, delivered through the same
 /// channel shape the native thread version uses.
 pub fn fetch_lobbies_async(base: String) -> Receiver<Option<Vec<LobbyInfo>>> {

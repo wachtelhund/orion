@@ -206,6 +206,19 @@ impl Shell {
                             } else if search.contains("page=difficulty") {
                                 app.page = crate::menu::MenuPage::Difficulty;
                             }
+                            // ?replay=CODE: fetch a shared replay and play
+                            // it — a game you can link to.
+                            if let Some(k) = search.find("replay=") {
+                                let code: String = search[k + 7..]
+                                    .chars()
+                                    .take_while(|c| c.is_ascii_alphanumeric())
+                                    .collect();
+                                if !code.is_empty() {
+                                    app.replay_code = code;
+                                    app.page = crate::menu::MenuPage::Replays;
+                                    app.fetch_shared_replay();
+                                }
+                            }
                         }
                     }
                     if let Some(win) = &self.window {
