@@ -214,8 +214,9 @@ pub enum SimEvent {
     /// `from` hit `to` (both entity indices, valid at emission time).
     Attack { from: u32, to: u32 },
     Death { pos: FxVec2, owner: u8, kind: EntityKind, def: u16 },
-    /// A Plasma Storm landed here.
-    Cast { pos: FxVec2 },
+    /// A cast landed here. kind: 0 storm, 1 barrage, 2 corrosive,
+    /// 3 magnetic well, 4 heal, 5 burst, 6 summon.
+    Cast { pos: FxVec2, kind: u8 },
     /// A unit finished training.
     Ready { pos: FxVec2, owner: u8 },
     /// A building finished construction.

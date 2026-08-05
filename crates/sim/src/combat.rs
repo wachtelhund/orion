@@ -148,7 +148,7 @@ impl State {
                                 owner,
                                 kind: 0,
                             });
-                            self.events.push(crate::state::SimEvent::Cast { pos: target });
+                            self.events.push(crate::state::SimEvent::Cast { pos: target, kind: 0 });
                         }
                         self.finish_order(i);
                     } else {

@@ -136,6 +136,12 @@ impl App {
     }
 
     /// Left edge of the command-card block (strip layout stops here).
+    /// Idle-worker alert chip (top-left, under the clock/net lines).
+    pub(crate) fn idle_badge_rect(&self) -> (f32, f32, f32, f32) {
+        let ui = self.ui();
+        (10.0 * ui, 40.0 * ui, 86.0 * ui, 24.0 * ui)
+    }
+
     pub(crate) fn card_block_x(&self) -> f32 {
         let ui = self.ui();
         self.cam.screen_w - 4.0 * (64.0 * ui) - 22.0 * ui
@@ -1214,6 +1220,26 @@ impl App {
             [0.5, 0.5, 0.5, 0.8],
             &format!("{:02}:{:02}  FPS {:.0}", secs / 60, secs % 60, self.fps),
         );
+        // Idle-worker badge: appears when workers stand around; click (or
+        // F1) jumps to one. Reads as a small alert chip under the clock.
+        let idle = (0..self.state.entities.len()).filter(|&i| {
+            let e = &self.state.entities[i];
+            e.alive
+                && e.owner == self.human
+                && e.kind == EntityKind::Unit
+                && self.state.data.units[e.def as usize].harvester
+                && matches!(e.order, orion_sim::Order::Idle)
+        }).count();
+        if idle > 0 && self.in_game {
+            let (bx, by, bw2, bh2) = self.idle_badge_rect();
+            let pulse = 0.75 + 0.25 * (self.state.tick as f32 * 0.2).sin();
+            self.gfx.quad(out, bx, by, bw2, bh2, [0.08, 0.1, 0.16, 0.9]);
+            self.gfx.quad(out, bx, by, bw2, 2.0 * ui, [0.95 * pulse, 0.7 * pulse, 0.2, 1.0]);
+            let r = book.unit(0, self.human as usize, 2, 0);
+            self.gfx.sprite(out, r, bx + 12.0 * ui, by + bh2 * 0.55, r.w as f32 / r.scale * 0.7 * ui, r.h as f32 / r.scale * 0.7 * ui, WHITE);
+            let ts = self.ts(1.3);
+            self.gfx.text(out, bx + 24.0 * ui, by + 7.0 * ui, ts, [1.0, 0.85, 0.4, 1.0], &format!("IDLE {idle}"));
+        }
         // MP connection readout under the clock: live RTT, negotiated
         // pipeline depth, stall rate. Turns "feels laggy" into numbers.
         if let Some(mp) = &self.mp {

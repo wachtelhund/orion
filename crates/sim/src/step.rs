@@ -524,7 +524,7 @@ impl State {
                         t.hp = (t.hp + amount).min(cap);
                     }
                 }
-                self.events.push(crate::state::SimEvent::Cast { pos });
+                self.events.push(crate::state::SimEvent::Cast { pos, kind: 4 });
             }
             crate::hero::AbilityKind::Burst { damage, radius } => {
                 let r_sq = (radius.0 as i64) * (radius.0 as i64);
@@ -541,7 +541,7 @@ impl State {
                     }
                 }
                 self.apply_damage(&burst);
-                self.events.push(crate::state::SimEvent::Cast { pos });
+                self.events.push(crate::state::SimEvent::Cast { pos, kind: 5 });
             }
             crate::hero::AbilityKind::Summon { unit_tag, count, ttl } => {
                 if let Some(def) =
@@ -556,13 +556,13 @@ impl State {
                         let id = self.spawn_unit(owner, def as u16, self.map.clamp_pos(pos + off));
                         self.entities[id.idx as usize].decay = ttl;
                     }
-                    self.events.push(crate::state::SimEvent::Cast { pos });
+                    self.events.push(crate::state::SimEvent::Cast { pos, kind: 6 });
                 }
             }
             crate::hero::AbilityKind::Zone { kind, duration } => {
                 let zp = at.unwrap_or(pos);
                 self.storms.push(crate::state::Storm { pos: zp, ticks_left: duration, owner, kind });
-                self.events.push(crate::state::SimEvent::Cast { pos: zp });
+                self.events.push(crate::state::SimEvent::Cast { pos: zp, kind });
             }
         }
     }

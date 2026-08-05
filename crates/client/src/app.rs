@@ -239,6 +239,9 @@ pub struct App {
 
     // Render-side caches (never touch sim state).
     pub facings: Vec<u8>,
+    /// Continuous screen-space heading per entity (radians) — the drawn
+    /// 8-way facing quantizes this, so turns sweep instead of snapping.
+    headings: Vec<f32>,
     /// Seconds of attack-recoil animation left, per entity index.
     pub recoil: Vec<f32>,
     pub effects: Vec<Effect>,
@@ -417,6 +420,7 @@ impl App {
             fps: 60.0,
             frame_t: Instant::now(),
             facings: Vec::new(),
+            headings: Vec::new(),
             recoil: Vec::new(),
             effects: Vec::new(),
             unit_type,
@@ -636,6 +640,7 @@ impl App {
         self.mode = Mode::Normal;
         self.effects.clear();
         self.facings.clear();
+        self.headings.clear();
         self.subgroup_offset = 0;
         self.acc = 0.0;
         self.in_game = true;
@@ -671,6 +676,7 @@ impl App {
         self.mode = Mode::Normal;
         self.effects.clear();
         self.facings.clear();
+        self.headings.clear();
         self.subgroup_offset = 0;
         self.acc = 0.0;
         self.in_game = true;
@@ -771,6 +777,7 @@ impl App {
         self.mode = Mode::Normal;
         self.effects.clear();
         self.facings.clear();
+        self.headings.clear();
         self.subgroup_offset = 0;
         self.acc = 0.0;
         self.in_game = true;
@@ -1397,6 +1404,16 @@ impl App {
             return;
         }
         if down {
+            // Idle-worker chip.
+            let (bx, by, bw, bh) = self.idle_badge_rect();
+            if self.mouse.0 >= bx
+                && self.mouse.0 <= bx + bw
+                && self.mouse.1 >= by
+                && self.mouse.1 <= by + bh
+            {
+                self.run_action(crate::config::Action::IdleWorker);
+                return;
+            }
             // Restart shortcut on the end-game banner.
             if self.state.winner.is_some() {
                 return;
@@ -2072,6 +2089,8 @@ impl App {
             }
         }
         self.facings.resize(self.state.entities.len(), 2);
+        self.headings
+            .resize(self.state.entities.len(), std::f32::consts::FRAC_PI_2);
         self.recoil.resize(self.state.entities.len(), 0.0);
         for i in 0..self.state.entities.len() {
             let e = &self.state.entities[i];
@@ -2082,8 +2101,29 @@ impl App {
             let dy = e.pos.y.to_f32() - e.prev_pos.y.to_f32();
             if dx * dx + dy * dy > 1e-6 {
                 let (ix, iy) = ((dx - dy) * iso::TILE_HALF_W, (dx + dy) * iso::TILE_HALF_H);
-                let ang = iy.atan2(ix);
-                let sector = ((ang / std::f32::consts::FRAC_PI_4).round() as i32).rem_euclid(8);
+                let target = iy.atan2(ix);
+                // Sweep toward the new heading: heavier chassis turn slower.
+                let d = &self.state.data.units[e.def as usize];
+                let rate = if d.radius.to_f32() > 0.5 {
+                    0.28
+                } else if d.fly {
+                    0.5
+                } else {
+                    0.65
+                };
+                let cur = self.headings[i];
+                let mut diff = target - cur;
+                while diff > std::f32::consts::PI {
+                    diff -= std::f32::consts::TAU;
+                }
+                while diff < -std::f32::consts::PI {
+                    diff += std::f32::consts::TAU;
+                }
+                let step = diff.clamp(-rate, rate);
+                let ang = cur + step;
+                self.headings[i] = ang;
+                let sector =
+                    ((ang / std::f32::consts::FRAC_PI_4).round() as i32).rem_euclid(8);
                 self.facings[i] = sector as u8;
             }
         }
@@ -2231,8 +2271,16 @@ impl App {
                         self.sfx(Sfx::ResearchDone);
                     }
                 }
-                SimEvent::Cast { pos } => {
-                    self.sfx(Sfx::Storm);
+                SimEvent::Cast { pos, kind } => {
+                    self.sfx(match kind {
+                        1 => Sfx::Cannon,
+                        2 => Sfx::Spit,
+                        3 => Sfx::Rail,
+                        4 => Sfx::BuildDone,
+                        5 => Sfx::Zap,
+                        6 => Sfx::Spit,
+                        _ => Sfx::Storm,
+                    });
                     let (x, y) = (pos.x.to_f32(), pos.y.to_f32());
                     self.effects.push(Effect {
                         kind: EffKind::Ring,
