@@ -136,8 +136,13 @@ leaks, economy stalls), shadow-determinism runs, and per-game metrics CSV.
 `small_soak_is_clean` keeps a CI-sized version in `cargo test`. Workflow for
 any gameplay change: run `soak -- 32` before and after; a violation or a
 win-rate cliff is the signal. The `balance` example is the quick matchup
-summary. Client-side verification stays `--script` / `--shot` /
-`--mp-auto`.
+summary (`ORION_BALANCE_MAP=x` filters to one map). When a matchup is
+lopsided, split combat from macro before touching numbers: `combat_lab`
+pits equal-cost clumps on open ground (unit stats verdict — mind its
+A-seat bias, compare swapped pairs), `probe_race r0 r1 seed` prints a
+30s macro timeline (banked resources, army/building mix — this is how
+Ferron's gas-hoarding leak was found). Client-side verification stays
+`--script` / `--shot` / `--mp-auto`.
 
 ## Multiplayer
 

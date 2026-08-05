@@ -547,13 +547,22 @@ impl State {
                 if let Some(def) =
                     self.data.units.iter().position(|u| u.tag == unit_tag)
                 {
+                    // Integer ring offsets, in half-tiles. No float trig:
+                    // libm sin/cos differ across platforms in the last ulp,
+                    // and a browser peer must never desync a native one.
+                    const RING: [(i32, i32); 8] =
+                        [(3, 0), (0, 3), (-3, 0), (0, -3), (2, 2), (-2, 2), (-2, -2), (2, -2)];
                     for k in 0..count {
-                        let a = crate::fixed::Fx::from_ratio(628 * k as i32, 100 * count as i32);
+                        let (ox, oy) = RING[k as usize % RING.len()];
                         let off = crate::fixed::FxVec2::new(
-                            crate::fixed::Fx::from_ratio((a.to_f32().cos() * 96.0) as i32, 64),
-                            crate::fixed::Fx::from_ratio((a.to_f32().sin() * 96.0) as i32, 64),
+                            crate::fixed::Fx::from_ratio(ox, 2),
+                            crate::fixed::Fx::from_ratio(oy, 2),
                         );
-                        let id = self.spawn_unit(owner, def as u16, self.map.clamp_pos(pos + off));
+                        // Summons must land on open ground — a broodling
+                        // dropped into a cliff or a tree wedges there for
+                        // its whole lifetime (caught by the soak QA).
+                        let sp = self.walkable_near(self.map.clamp_pos(pos + off), pos);
+                        let id = self.spawn_unit(owner, def as u16, sp);
                         self.entities[id.idx as usize].decay = ttl;
                     }
                     self.events.push(crate::state::SimEvent::Cast { pos, kind: 6 });
@@ -565,6 +574,37 @@ impl State {
                 self.events.push(crate::state::SimEvent::Cast { pos: zp, kind });
             }
         }
+    }
+
+    /// The wanted position if its tile is open ground, else the center of
+    /// the nearest open tile (deterministic ring scan), else `fallback`.
+    pub(crate) fn walkable_near(
+        &self,
+        want: crate::fixed::FxVec2,
+        fallback: crate::fixed::FxVec2,
+    ) -> crate::fixed::FxVec2 {
+        let open = |x: i32, y: i32| {
+            self.map.in_bounds(x, y)
+                && self.map.walkable(x, y)
+                && !self.blocked[self.map.idx(x, y)]
+        };
+        let t = crate::map::TilePos::of(want);
+        if open(t.x, t.y) {
+            return want;
+        }
+        for r in 1..=4i32 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs().max(dy.abs()) != r {
+                        continue; // ring only, fixed scan order
+                    }
+                    if open(t.x + dx, t.y + dy) {
+                        return crate::map::TilePos::new(t.x + dx, t.y + dy).center();
+                    }
+                }
+            }
+        }
+        fallback
     }
 
     /// Summoned units burn down their lifetime.

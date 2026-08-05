@@ -51,6 +51,8 @@ struct Params {
     retreat_score: i64,
     /// Ranged units focus-fire the weakest target in range.
     focus_fire: bool,
+    /// Build the research lab and buy weapon/armor upgrades from surplus.
+    use_research: bool,
 }
 
 impl Difficulty {
@@ -73,6 +75,7 @@ impl Difficulty {
                 attack_score: 0,
                 retreat_score: 0,
                 focus_fire: false,
+                use_research: false,
             },
             Difficulty::Normal => Params {
                 think_interval: 12,
@@ -91,6 +94,7 @@ impl Difficulty {
                 attack_score: 95, // optimistic: pushes near-even fights
                 retreat_score: 45,
                 focus_fire: true,
+                use_research: true,
             },
             Difficulty::Hard => Params {
                 think_interval: 6,
@@ -109,6 +113,7 @@ impl Difficulty {
                 attack_score: 110, // picks winning fights
                 retreat_score: 60,
                 focus_fire: true,
+                use_research: true,
             },
         }
     }
@@ -282,12 +287,21 @@ impl Bot {
             })
             .min_by_key(|(_, b)| b.cost_minerals + b.cost_gas)
             .map(|(i, _)| i as DefId);
+        // Research lab: whichever building can buy upgrades. May coincide
+        // with the tier-1 producer (Ferron's refit does both jobs).
+        let lab_def = s
+            .data
+            .buildings
+            .iter()
+            .position(|b| b.race == race && !b.researches.is_empty())
+            .map(|i| i as DefId);
 
         // ---- census ----
         let mut workers: Vec<u32> = Vec::new();
         let mut idle_workers: Vec<u32> = Vec::new();
         let mut mineral_workers: Vec<u32> = Vec::new();
         let mut gas_workers = 0usize;
+        let mut gas_worker_ids: Vec<u32> = Vec::new();
         let mut army: Vec<EntityId> = Vec::new();
         let mut army_supply = 0u32;
         let mut siegers: Vec<u32> = Vec::new();
@@ -303,9 +317,19 @@ impl Bot {
         let mut condenser: Option<u32> = None;
         let mut constructing = 0u32;
         let mut building_worker_busy = false;
+        let mut lab_exists = false;
+        let mut idle_lab: Option<u32> = None;
         for (i, e) in s.entities.iter().enumerate() {
             if !e.alive || e.owner != p {
                 continue;
+            }
+            if e.kind == EntityKind::Building
+                && !s.data.buildings[e.def as usize].researches.is_empty()
+            {
+                lab_exists = true;
+                if e.construction.is_none() && e.research.is_none() && idle_lab.is_none() {
+                    idle_lab = Some(i as u32);
+                }
             }
             match e.kind {
                 EntityKind::Unit => {
@@ -320,6 +344,7 @@ impl Bot {
                                     .is_some_and(|r| r.kind == EntityKind::Building);
                                 if gas {
                                     gas_workers += 1;
+                                    gas_worker_ids.push(i as u32);
                                 } else {
                                     mineral_workers.push(i as u32);
                                 }
@@ -498,9 +523,24 @@ impl Bot {
             }
         }
 
-        // ---- staff the condenser from the mineral line ----
+        // ---- staff the extractor to demand, not to a fixed quota ----
+        // A gas worker is a mineral worker you gave up. Races whose army is
+        // mineral-heavy (measured: Ferron banking 1300+ gas at 50 minerals
+        // while fielding half of VC's army) must pull workers back off gas
+        // when nothing spends it, and restaff once the bank drains.
         if let Some(c) = condenser {
-            if gas_workers < prm.gas_workers {
+            let overflowing = gas >= 400 && gas >= minerals * 3;
+            if overflowing && !gas_worker_ids.is_empty() {
+                if let Some(&w) = gas_worker_ids.first() {
+                    if let Some(res) = nearest_mineral(s, s.entities[w as usize].pos) {
+                        cmds.push(Command::Gather {
+                            units: vec![s.id_of(w)],
+                            resource: res,
+                            queued: false,
+                        });
+                    }
+                }
+            } else if !overflowing && gas_workers < prm.gas_workers {
                 if let Some(&w) = mineral_workers.first() {
                     cmds.push(Command::Gather {
                         units: vec![s.id_of(w)],
@@ -531,6 +571,12 @@ impl Bot {
             && !barracks.is_empty()
             && condenser.is_some()
             && workers.len() >= 12;
+        let want_lab = prm.use_research
+            && lab_def.is_some()
+            && !lab_exists
+            && condenser.is_some()
+            && army_supply >= 10
+            && workers.len() >= 12;
         let depot_cost = s.data.buildings[depot_def as usize].cost_minerals;
         let cond_cost = s.data.buildings[condenser_def as usize].cost_minerals;
         let rax_cost = s.data.buildings[barracks_def as usize].cost_minerals;
@@ -554,6 +600,44 @@ impl Bot {
                 let f = &s.data.buildings[fd as usize];
                 if minerals >= f.cost_minerals + 50 && gas >= f.cost_gas {
                     self.order_build(s, &workers, fd, &mut cmds);
+                }
+            } else if want_lab {
+                let ld = lab_def.unwrap();
+                let l = &s.data.buildings[ld as usize];
+                if minerals >= l.cost_minerals + 50 && gas >= l.cost_gas {
+                    self.order_build(s, &workers, ld, &mut cmds);
+                }
+            }
+        }
+
+        // ---- research: turn surplus into permanent weapon/armor levels.
+        // Cheapest first (weapons+1 / armor+1 before the +2 tiers); one
+        // lab only so two labs can't both start the same upgrade.
+        if prm.use_research {
+            if let Some(lb) = idle_lab {
+                let mut order: Vec<u8> =
+                    s.data.buildings[s.entities[lb as usize].def as usize].researches.clone();
+                order.sort_by_key(|&r| {
+                    let rd = &s.data.research[r as usize];
+                    (rd.cost_minerals + rd.cost_gas, r)
+                });
+                for r in order {
+                    let rd = &s.data.research[r as usize];
+                    if s.players[p as usize].research_done[r as usize] {
+                        continue;
+                    }
+                    if let Some(pre) = rd.requires {
+                        if !s.players[p as usize].research_done[pre as usize] {
+                            continue;
+                        }
+                    }
+                    // Only from genuine surplus — units come first.
+                    if minerals >= rd.cost_minerals + prm.mineral_buffer + 60
+                        && gas >= rd.cost_gas + 50
+                    {
+                        cmds.push(Command::Research { building: s.id_of(lb), research: r });
+                    }
+                    break;
                 }
             }
         }
