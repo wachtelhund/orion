@@ -14,6 +14,10 @@ class_name = "Directory"
 name = "MATCHMAKER"
 class_name = "Matchmaker"
 
+[[durable_objects.bindings]]
+name = "VAULT"
+class_name = "Vault"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Lobby"]
@@ -25,6 +29,10 @@ new_sqlite_classes = ["Directory"]
 [[migrations]]
 tag = "v3"
 new_sqlite_classes = ["Matchmaker"]
+
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["Vault"]
 
 # Per-IP rate limits, enforced at the edge before any Durable Object is
 # touched. These are per-colo rather than globally consistent — enough to make

@@ -21,6 +21,71 @@ const MSG_RATE_PER_S = 120;
 const MSG_BURST = 300;
 const MAX_CONN_BYTES = 128 * 1024 * 1024;
 
+// Shared replays, keyed by 5-letter code. Size-capped uploads, oldest
+// entries evicted past a count cap, 30-day TTL — a courtesy locker, not
+// permanent storage.
+const REPLAY_MAX_BYTES = 120 * 1024; // DO storage values cap at 128 KiB
+const REPLAY_MAX_COUNT = 300;
+const REPLAY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // no I/O: unambiguous
+
+export class Vault {
+  constructor(state) {
+    this.state = state;
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (request.method === "POST" && url.pathname === "/replay") {
+      const body = await request.text();
+      if (body.length > REPLAY_MAX_BYTES) {
+        return new Response("replay too large to share", { status: 413 });
+      }
+      if (!body.startsWith("(")) {
+        return new Response("not a replay", { status: 400 });
+      }
+      // Prune expired + evict oldest past the cap.
+      const now = Date.now();
+      const all = await this.state.storage.list({ prefix: "r:" });
+      let oldestKey = null;
+      let oldestAt = Infinity;
+      let live = 0;
+      for (const [k, v] of all) {
+        if (now - v.at > REPLAY_TTL_MS) {
+          await this.state.storage.delete(k);
+          continue;
+        }
+        live++;
+        if (v.at < oldestAt) {
+          oldestAt = v.at;
+          oldestKey = k;
+        }
+      }
+      if (live >= REPLAY_MAX_COUNT && oldestKey) {
+        await this.state.storage.delete(oldestKey);
+      }
+      let code;
+      do {
+        code = Array.from(
+          { length: 5 },
+          () => CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)]
+        ).join("");
+      } while (await this.state.storage.get("r:" + code));
+      await this.state.storage.put("r:" + code, { at: now, data: body });
+      return new Response(code, { status: 200 });
+    }
+    const m = url.pathname.match(/^\/replay\/([A-Z0-9]{4,8})$/);
+    if (m && request.method === "GET") {
+      const v = await this.state.storage.get("r:" + m[1]);
+      if (!v) {
+        return new Response("no replay with that code", { status: 404 });
+      }
+      return new Response(v.data, { status: 200 });
+    }
+    return new Response("bad request", { status: 400 });
+  }
+}
+
 export class Directory {
   constructor(state) {
     this.state = state;
@@ -575,6 +640,12 @@ export default {
       if (await rateLimited(env.LIST_LIMITER, ip)) return tooMany();
       const id = env.MATCHMAKER.idFromName("matchmaker");
       return env.MATCHMAKER.get(id).fetch(request);
+    }
+    // Replay sharing: upload gets a code, download by code.
+    if (url.pathname === "/replay" || url.pathname.startsWith("/replay/")) {
+      if (await rateLimited(env.LIST_LIMITER, ip)) return tooMany();
+      const id = env.VAULT.idFromName("vault");
+      return env.VAULT.get(id).fetch(request);
     }
     // RTT probe for the latency half of matchmaking. Answered at the edge —
     // measuring it must not cost a DO hop.

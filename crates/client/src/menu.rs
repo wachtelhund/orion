@@ -55,6 +55,8 @@ enum MenuAction {
     DeclineUpdate,
     OpenReplays,
     PlayReplay(usize),
+    ToggleReplayShare,
+    FetchReplayCode,
     OpenUpdate,
     Rebind(Action),
 }
@@ -287,6 +289,20 @@ impl App {
                     .collect();
                 if rows.is_empty() {
                     rows.push(("NO REPLAYS YET - PLAY A GAME".into(), MenuAction::Back));
+                }
+                // Sharing runs over the relay — desktop builds only.
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let share = if self.replay_share_mode {
+                        "SHARING: CLICK A REPLAY ABOVE".to_string()
+                    } else {
+                        "SHARE A REPLAY - GET A CODE".to_string()
+                    };
+                    rows.push((share, MenuAction::ToggleReplayShare));
+                    rows.push((
+                        format!("FETCH CODE: {}_", self.replay_code),
+                        MenuAction::FetchReplayCode,
+                    ));
                 }
                 rows.push(("BACK".into(), MenuAction::Back));
                 stack(rows, h * 0.30);
@@ -553,6 +569,13 @@ impl App {
                 let l = err.to_uppercase();
                 let lw = self.gfx.text_width(ts, &l);
                 self.gfx.text(out, cx - lw * 0.5, h * 0.21, ts, [1.0, 0.5, 0.4, 1.0], &l);
+            }
+            if let Some(st) = &self.replay_status {
+                let ts = self.ts(1.5);
+                let ok = !st.contains("FAILED");
+                let color = if ok { gold } else { [1.0, 0.5, 0.4, 1.0] };
+                let lw = self.gfx.text_width(ts, st);
+                self.gfx.text(out, cx - lw * 0.5, h * 0.245, ts, color, st);
             }
         }
         if self.page == MenuPage::Multiplayer {
@@ -996,7 +1019,20 @@ impl App {
                     crate::relay::open_url(url);
                 }
             }
+            MenuAction::ToggleReplayShare => {
+                self.replay_share_mode = !self.replay_share_mode;
+                if self.replay_share_mode {
+                    self.replay_status = None;
+                }
+            }
+            MenuAction::FetchReplayCode => {
+                self.fetch_shared_replay();
+            }
             MenuAction::PlayReplay(k) => {
+                if self.replay_share_mode {
+                    self.share_replay(k);
+                    return;
+                }
                 if let Some((_, path)) = self.replay_files.get(k) {
                     let path = path.clone();
                     self.start_replay(&path);

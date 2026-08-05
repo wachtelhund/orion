@@ -157,6 +157,14 @@ pub struct App {
     pub code_input: String,
     /// True while the name field has focus (typing edits the player name).
     pub name_focus: bool,
+    /// Replay sharing: armed = clicking a replay uploads it for a code.
+    pub replay_share_mode: bool,
+    /// Code being typed on the replays page (fetch a shared replay).
+    pub replay_code: String,
+    /// Status line for the replays page (codes, errors).
+    pub replay_status: Option<String>,
+    pub replay_share_rx: Option<std::sync::mpsc::Receiver<std::io::Result<String>>>,
+    pub replay_fetch_rx: Option<std::sync::mpsc::Receiver<std::io::Result<String>>>,
     /// Set while hosting through the relay: show this code to the opponent.
     pub mp_lobby_code: Option<String>,
     pub mp_private: bool,
@@ -371,6 +379,11 @@ impl App {
             mp_error: None,
             code_input: String::new(),
             name_focus: false,
+            replay_share_mode: false,
+            replay_code: String::new(),
+            replay_status: None,
+            replay_share_rx: None,
+            replay_fetch_rx: None,
             mp_lobby_code: None,
             mp_private: false,
             lobby_list: Vec::new(),
@@ -803,6 +816,93 @@ impl App {
     }
 
     /// Auto-save the current game's replay once (game end or quit).
+    /// Upload replay `k` from the list to the relay vault (native only).
+    pub fn share_replay(&mut self, k: usize) {
+        self.replay_share_mode = false;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let Some((_, path)) = self.replay_files.get(k) else { return };
+            match std::fs::read_to_string(path) {
+                Ok(ron) => {
+                    self.replay_status = Some("UPLOADING...".into());
+                    self.replay_share_rx = Some(crate::relay::share_replay_async(
+                        self.settings.relay_url.clone(),
+                        ron,
+                    ));
+                }
+                Err(e) => self.replay_status = Some(format!("READ FAILED: {e}")),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = k;
+        }
+    }
+
+    /// Download the replay behind `replay_code` into the local list.
+    pub fn fetch_shared_replay(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let code = self.replay_code.trim().to_uppercase();
+            if code.is_empty() || self.replay_fetch_rx.is_some() {
+                return;
+            }
+            self.replay_status = Some(format!("FETCHING {code}..."));
+            self.replay_fetch_rx = Some(crate::relay::fetch_replay_async(
+                self.settings.relay_url.clone(),
+                code,
+            ));
+        }
+    }
+
+    /// Poll the async share/fetch results (menu frame).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn poll_replay_net(&mut self) {
+        if let Some(rx) = &self.replay_share_rx {
+            if let Ok(res) = rx.try_recv() {
+                self.replay_status = Some(match res {
+                    Ok(code) => format!("REPLAY CODE: {} - SHARE IT", code.trim()),
+                    Err(e) => format!("SHARE FAILED: {e}").to_uppercase(),
+                });
+                self.replay_share_rx = None;
+            }
+        }
+        if let Some(rx) = &self.replay_fetch_rx {
+            if let Ok(res) = rx.try_recv() {
+                match res {
+                    Ok(ron) => {
+                        let code = self.replay_code.trim().to_uppercase();
+                        if orion_sim::replay::Replay::from_ron(&ron).is_err() {
+                            self.replay_status =
+                                Some("FETCH FAILED: NOT A VALID REPLAY".into());
+                        } else {
+                            let dir = crate::replays::dir();
+                            let _ = std::fs::create_dir_all(&dir);
+                            let path = dir.join(format!("shared-{code}.ron"));
+                            match std::fs::write(&path, &ron) {
+                                Ok(()) => {
+                                    self.replay_files =
+                                        crate::replays::list(&self.state.data.race_names);
+                                    self.replay_status =
+                                        Some(format!("{code} FETCHED - IT IS IN THE LIST"));
+                                    self.replay_code.clear();
+                                }
+                                Err(e) => {
+                                    self.replay_status =
+                                        Some(format!("SAVE FAILED: {e}").to_uppercase())
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.replay_status = Some(format!("FETCH FAILED: {e}").to_uppercase())
+                    }
+                }
+                self.replay_fetch_rx = None;
+            }
+        }
+    }
+
     pub fn save_replay(&mut self) {
         if !self.record_replay || self.state.tick < 24 * 20 {
             return;
@@ -1005,6 +1105,33 @@ impl App {
                                 }
                             } else if ch.is_ascii_alphanumeric() && self.code_input.len() < 8 {
                                 self.code_input.push(ch.to_ascii_uppercase());
+                                used = true;
+                            }
+                        }
+                        if used {
+                            return;
+                        }
+                    }
+                }
+                // Fetch-code entry on the replays page.
+                if self.page == MenuPage::Replays
+                    && event.state == ElementState::Pressed
+                {
+                    if event.physical_key == PhysicalKey::Code(KeyCode::Backspace) {
+                        self.replay_code.pop();
+                        return;
+                    }
+                    if event.physical_key == PhysicalKey::Code(KeyCode::Enter)
+                        && !self.replay_code.trim().is_empty()
+                    {
+                        self.fetch_shared_replay();
+                        return;
+                    }
+                    if let Some(text) = &event.text {
+                        let mut used = false;
+                        for ch in text.chars() {
+                            if ch.is_ascii_alphanumeric() && self.replay_code.len() < 8 {
+                                self.replay_code.push(ch.to_ascii_uppercase());
                                 used = true;
                             }
                         }
@@ -2444,6 +2571,14 @@ impl App {
                     self.page = MenuPage::None;
                 }
                 "mp" => self.page = MenuPage::Multiplayer,
+                "replays" => {
+                    self.replay_files =
+                        crate::replays::list(&self.state.data.race_names);
+                    self.replay_code = "KRCAP".into();
+                    self.replay_status =
+                        Some("REPLAY CODE: KRCAP - SHARE IT".into());
+                    self.page = MenuPage::Replays;
+                }
                 "ladder" => {
                     // Blocking fetch so the capture shows real rows.
                     if let Ok(Some(rows)) = crate::relay::fetch_ladder_async(
@@ -2839,6 +2974,9 @@ impl App {
                 return;
             }
         }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        self.poll_replay_net();
 
         // Lobby browser: poll the directory while on the multiplayer page.
         if self.page == MenuPage::Multiplayer

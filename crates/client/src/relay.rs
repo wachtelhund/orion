@@ -131,6 +131,47 @@ pub fn fetch_lobbies_async(base: String) -> Receiver<Option<Vec<LobbyInfo>>> {
     rx
 }
 
+/// Upload a replay to the relay vault; the answer is its share code.
+pub fn share_replay_async(base: String, ron: String) -> Receiver<io::Result<String>> {
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let url = format!("{}/replay", http_base(&base));
+        let result = ureq::post(&url)
+            .timeout(std::time::Duration::from_secs(15))
+            .send_string(&ron)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+            .and_then(|r| {
+                r.into_string()
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+            });
+        let _ = tx.send(result);
+    });
+    rx
+}
+
+/// Download a shared replay by code; the answer is the replay RON.
+pub fn fetch_replay_async(base: String, code: String) -> Receiver<io::Result<String>> {
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let url = format!("{}/replay/{}", http_base(&base), code.to_uppercase());
+        let result = ureq::get(&url)
+            .timeout(std::time::Duration::from_secs(15))
+            .call()
+            .map_err(|e| match e {
+                ureq::Error::Status(404, _) => {
+                    io::Error::new(io::ErrorKind::NotFound, "no replay with that code")
+                }
+                other => io::Error::new(io::ErrorKind::Other, other.to_string()),
+            })
+            .and_then(|r| {
+                r.into_string()
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+            });
+        let _ = tx.send(result);
+    });
+    rx
+}
+
 /// Host a private (unlisted) lobby with a known code — used by --mp-auto
 /// smoke tests. Returns the code immediately; the Started arrives on the
 /// receiver when an opponent joins.
