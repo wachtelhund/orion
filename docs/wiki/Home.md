@@ -12,6 +12,7 @@ looks in game.
 
 | Version | Highlights |
 |---|---|
+| [v0.17.0](v0.17.0.md) | Causeway: 4th map around a contested land bridge with breachable rock ramps; live map-preview thumbnails in the SP/MP pickers |
 | [v0.16.0](v0.16.0.md) | Browser multiplayer: code lobbies + cross-play with desktop through the live relay, localStorage settings, hidden-tab keep-alive |
 | [v0.15.0](v0.15.0.md) | Smooth unit turning, idle-worker alert chip, per-ability cast sounds; v0.15.1: THE GAME RUNS IN THE BROWSER (WebGPU, ~70 FPS) |
 | [v0.14.0](v0.14.0.md) | Visual map editor with auto-mirrored painting, custom maps in the SP picker |
