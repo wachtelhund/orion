@@ -12,6 +12,7 @@ looks in game.
 
 | Version | Highlights |
 |---|---|
+| [v0.18.0](v0.18.0.md) | Replay sharing by code: upload a replay to the relay, hand out a 5-letter code, it lands in the other player's list |
 | [v0.17.0](v0.17.0.md) | Causeway: 4th map around a contested land bridge with breachable rock ramps; live map-preview thumbnails in the SP/MP pickers; v0.17.1: demand-driven bot gas, bots research upgrades, summon spawn safety |
 | [v0.16.0](v0.16.0.md) | Browser multiplayer: code lobbies + cross-play with desktop through the live relay, localStorage settings, hidden-tab keep-alive |
 | [v0.15.0](v0.15.0.md) | Smooth unit turning, idle-worker alert chip, per-ability cast sounds; v0.15.1: THE GAME RUNS IN THE BROWSER (WebGPU, ~70 FPS) |
