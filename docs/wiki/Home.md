@@ -12,7 +12,7 @@ looks in game.
 
 | Version | Highlights |
 |---|---|
-| [v0.20.0](v0.20.0.md) | Replay links: the browser fetches shared replays by code — ?replay=CODE plays a shared game straight from a URL |
+| [v0.20.0](v0.20.0.md) | Replay links: ?replay=CODE plays a shared game from a URL; v0.20.1: browser brightness/sound/disconnect fixes from the first real web playtest |
 | [v0.19.0](v0.19.0.md) | Browser build lists and joins public lobbies (CORS + wasm fetch); headless-Chrome page hooks for web UI verification |
 | [v0.18.0](v0.18.0.md) | Replay sharing by code: upload a replay to the relay, hand out a 5-letter code, it lands in the other player's list |
 | [v0.17.0](v0.17.0.md) | Causeway: 4th map around a contested land bridge with breachable rock ramps; live map-preview thumbnails in the SP/MP pickers; v0.17.1: demand-driven bot gas, bots research upgrades, summon spawn safety |
