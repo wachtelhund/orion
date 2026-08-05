@@ -221,7 +221,10 @@ on every push/PR, and builds all three platforms. `release.yml` triggers on
 the GitHub release. Linux builds need `libasound2-dev` (rodio/ALSA) — that
 is the only system dependency.
 
-**Every minor and major version gets a GitHub wiki page** (the wiki is the
+**Every minor and major version gets a wiki page** (mirrored into
+`docs/wiki/` in the main repo — the GitHub wiki feature doesn't render
+on private free-plan repos, so docs/wiki is what the user actually
+sees; push BOTH) (the wiki is the
 `orion.wiki.git` repo next to the main one). Each page covers: what's new
 and changed (features AND balance diffs, explained — not just a commit
 list), plus in-game screenshots of the new content (`--shot`/`--menu-shot`

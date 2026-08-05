@@ -28,6 +28,7 @@ enum MenuAction {
     OpenMultiplayer,
     OpenSettings,
     SettingsTab(u8),
+    OpenEditor,
     Back,
     Resume,
     QuitToMenu,
@@ -114,6 +115,7 @@ impl App {
                             MenuAction::OpenMultiplayer,
                         ),
                         ("REPLAYS".into(), MenuAction::OpenReplays),
+                        ("MAP EDITOR".into(), MenuAction::OpenEditor),
                         ("SETTINGS".into(), MenuAction::OpenSettings),
                         ("QUIT".into(), MenuAction::QuitApp),
                     ],
@@ -138,7 +140,10 @@ impl App {
                         (
                             format!(
                                 "MAP: {}",
-                                orion_sim::map::MAP_NAMES[self.map_choice].to_uppercase()
+                                {
+                                    let names = crate::app::all_map_names();
+                                    names[self.map_choice % names.len()].to_uppercase()
+                                }
                             ),
                             MenuAction::CycleMap,
                         ),
@@ -188,7 +193,10 @@ impl App {
                         (
                             format!(
                                 "MAP: {}",
-                                orion_sim::map::MAP_NAMES[self.map_choice].to_uppercase()
+                                {
+                                    let names = crate::app::all_map_names();
+                                    names[self.map_choice % names.len()].to_uppercase()
+                                }
                             ),
                             MenuAction::CycleMap,
                         ),
@@ -712,6 +720,12 @@ impl App {
             MenuAction::SettingsTab(t) => {
                 self.settings_tab = t;
             }
+            MenuAction::OpenEditor => {
+                self.editor = Some(crate::editor::Editor::new());
+                self.rebuild_editor_preview();
+                self.page = MenuPage::None;
+                self.in_game = false;
+            }
             MenuAction::OpenSettings => {
                 self.page = MenuPage::Settings { from_game: self.in_game };
             }
@@ -777,6 +791,17 @@ impl App {
             }
             MenuAction::CreateLobby { private } => {
                 self.mp_error = None;
+                // Custom maps are local files — the joiner wouldn't have
+                // them. Online play sticks to the shipped pool.
+                {
+                    let names = crate::app::all_map_names();
+                    let chosen = &names[self.map_choice % names.len()];
+                    if !orion_sim::map::MAP_NAMES.contains(&chosen.as_str()) {
+                        self.mp_error =
+                            Some("custom maps are single-player only (for now)".into());
+                        return;
+                    }
+                }
                 self.settings.save(); // persist the name
                 self.mp_private = private;
                 let (code, rx) = crate::relay::host_relay_async_full(
@@ -785,7 +810,7 @@ impl App {
                     self.chosen_race,
                     &self.settings.player_name,
                     private,
-                    orion_sim::map::MAP_NAMES[self.map_choice],
+                    &crate::app::all_map_names()[self.map_choice % crate::app::all_map_names().len()],
                 );
                 self.mp_lobby_code = Some(code);
                 self.mp_waiting = Some(rx);
@@ -829,7 +854,7 @@ impl App {
                 self.mp_lobby_code = None;
             }
             MenuAction::CycleMap => {
-                self.map_choice = (self.map_choice + 1) % orion_sim::map::MAP_NAMES.len();
+                self.map_choice = (self.map_choice + 1) % crate::app::all_map_names().len();
             }
             MenuAction::CycleRace => {
                 let n = self.state.data.race_names.len() as u8;

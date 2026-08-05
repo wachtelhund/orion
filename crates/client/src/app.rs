@@ -190,6 +190,9 @@ pub struct App {
     pub chosen_race: u8,
     /// Active settings tab: 0 general, 1 hotkeys.
     pub settings_tab: u8,
+    /// Map editor session (replaces the game view while Some).
+    pub editor: Option<crate::editor::Editor>,
+    editor_dragging: bool,
     pub enemy_race_choice: u8,
     /// Menu map pick (index into map::MAP_NAMES) + the map of the RUNNING
     /// game (MP joiners play the host's choice, whatever their menu says).
@@ -391,6 +394,8 @@ impl App {
             game_map: "meridian".into(),
             chosen_race: 0,
             settings_tab: 0,
+            editor: None,
+            editor_dragging: false,
             enemy_race_choice: 2,
             page: if headless { MenuPage::None } else { MenuPage::MainRoot },
             rebinding: None,
@@ -616,7 +621,8 @@ impl App {
             }
             r => r,
         };
-        self.game_map = orion_sim::map::MAP_NAMES[self.map_choice].to_string();
+        let names = all_map_names();
+        self.game_map = names[self.map_choice % names.len()].clone();
         self.state = new_game_with(self.chosen_race, enemy, &self.game_map);
         let style = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -971,6 +977,9 @@ impl App {
     }
 
     fn key_pressed(&mut self, code: KeyCode) {
+        if self.editor.is_some() && self.page == MenuPage::None && self.editor_key(code) {
+            return;
+        }
         // Rebind capture takes everything except Escape.
         if let Some(action) = self.rebinding {
             if code != KeyCode::Escape && crate::config::BINDABLE_KEYS.contains(&code) {
@@ -1370,6 +1379,13 @@ impl App {
     }
 
     fn left_button(&mut self, down: bool) {
+        if self.editor.is_some() && self.page == MenuPage::None {
+            if down {
+                self.editor_click();
+            }
+            self.editor_dragging = down;
+            return;
+        }
         if self.page != MenuPage::None {
             if down {
                 self.sfx(Sfx::Click);
@@ -2288,6 +2304,20 @@ impl App {
     }
 
     pub fn frame(&mut self) {
+        if self.editor.is_some() {
+            let now = Instant::now();
+            let dt = (now - self.last).as_secs_f64().min(0.25);
+            self.last = now;
+            let fdt = (now - self.frame_t).as_secs_f32().max(1e-4);
+            self.frame_t = now;
+            self.fps = self.fps * 0.95 + (1.0 / fdt) * 0.05;
+            self.camera_input(dt);
+            if self.editor_dragging {
+                self.editor_paint_at_mouse();
+            }
+            self.render();
+            return;
+        }
         if let Some((page, path)) = self.menu_shot.clone() {
             match page.as_str() {
                 "settings" => self.page = MenuPage::Settings { from_game: false },
@@ -2296,6 +2326,30 @@ impl App {
                     self.page = MenuPage::Settings { from_game: false };
                 }
                 "difficulty" => self.page = MenuPage::Difficulty,
+                "editor" => {
+                    self.editor = Some(crate::editor::Editor::new());
+                    // Sketch strokes so the capture shows a worked canvas.
+                    if let Some(ed) = &mut self.editor {
+                        ed.tool = crate::editor::Tool::High;
+                        ed.brush = 3;
+                        for k in 0..7 {
+                            ed.paint(24 + k * 2, 30 - k);
+                        }
+                        ed.tool = crate::editor::Tool::Tree;
+                        ed.brush = 2;
+                        ed.paint(36, 44);
+                        ed.paint(40, 47);
+                        ed.tool = crate::editor::Tool::Mineral;
+                        for k in 0..4 {
+                            ed.paint(14 + k, 10);
+                        }
+                        ed.tool = crate::editor::Tool::Geyser;
+                        ed.paint(20, 6);
+                        ed.tool = crate::editor::Tool::High;
+                    }
+                    self.rebuild_editor_preview();
+                    self.page = MenuPage::None;
+                }
                 "mp" => self.page = MenuPage::Multiplayer,
                 "ladder" => {
                     // Blocking fetch so the capture shows real rows.
@@ -3247,6 +3301,137 @@ impl App {
         self.shot_focus = Some((c.0 as f32, c.1 as f32));
     }
 
+    /// Rebuild the preview State from the edited map: resources and
+    /// destructibles spawn as entities, starting units/buildings are
+    /// purged so the canvas shows terrain + features only.
+    pub(crate) fn rebuild_editor_preview(&mut self) {
+        let Some(ed) = &self.editor else { return };
+        let mut st = State::new_with_races(
+            GameData::load_default(),
+            ed.map.clone(),
+            0xED17,
+            &[0, 0],
+        );
+        for i in 0..st.entities.len() {
+            let e = &st.entities[i];
+            if e.alive && e.kind != EntityKind::Resource {
+                st.kill(i as u32);
+            }
+        }
+        self.state = st;
+        self.reveal_all = true;
+        // Frame the whole map.
+        let (cx, cy) = crate::iso::world_to_iso(
+            ed.map.width as f32 * 0.5,
+            ed.map.height as f32 * 0.5,
+        );
+        self.cam.cx = cx;
+        self.cam.cy = cy;
+    }
+
+    /// Editor tool palette rows: (x, y, w, h, tool index) — shared by draw
+    /// and hit-testing.
+    pub(crate) fn editor_palette(&self) -> Vec<(f32, f32, f32, f32, usize)> {
+        let ui = self.ui();
+        (0..crate::editor::TOOLS.len())
+            .map(|k| {
+                (
+                    10.0 * ui,
+                    60.0 * ui + k as f32 * 30.0 * ui,
+                    92.0 * ui,
+                    26.0 * ui,
+                    k,
+                )
+            })
+            .collect()
+    }
+
+    /// A click while the editor is open: palette first, else paint.
+    pub(crate) fn editor_click(&mut self) {
+        let (mx, my) = self.mouse;
+        for (x, y, w, h, k) in self.editor_palette() {
+            if mx >= x && mx <= x + w && my >= y && my <= y + h {
+                if let Some(ed) = &mut self.editor {
+                    ed.tool = crate::editor::TOOLS[k].0;
+                    ed.status = crate::editor::TOOLS[k].2.into();
+                }
+                return;
+            }
+        }
+        self.editor_paint_at_mouse();
+    }
+
+    pub(crate) fn editor_paint_at_mouse(&mut self) {
+        let (wx, wy) = self.cam.screen_to_world(self.mouse.0, self.mouse.1);
+        let (tx, ty) = (wx.floor() as i32, wy.floor() as i32);
+        if let Some(ed) = &mut self.editor {
+            ed.paint(tx, ty);
+        }
+        self.rebuild_editor_preview();
+    }
+
+    /// Editor key handling. Returns true when the key was consumed.
+    pub(crate) fn editor_key(&mut self, code: KeyCode) -> bool {
+        let Some(ed) = &mut self.editor else { return false };
+        match code {
+            KeyCode::BracketRight => {
+                ed.brush = (ed.brush + 1).min(4);
+                ed.status = format!("BRUSH {}", ed.brush);
+            }
+            KeyCode::BracketLeft => {
+                ed.brush = (ed.brush - 1).max(1);
+                ed.status = format!("BRUSH {}", ed.brush);
+            }
+            KeyCode::KeyS => {
+                // Save under the next free custom slot.
+                let names = crate::editor::custom_map_names();
+                let mut n = 1;
+                while names.contains(&format!("custom{n}")) {
+                    n += 1;
+                }
+                let name = format!("custom{n}");
+                match ed.validate().and_then(|_| ed.save(&name)) {
+                    Ok(()) => ed.status = format!("SAVED AS {name} - IN THE MAP PICKER NOW"),
+                    Err(e) => ed.status = e,
+                }
+            }
+            KeyCode::KeyP => {
+                match ed.validate() {
+                    Ok(()) => {
+                        let _ = ed.save("autosave");
+                        let map = ed.map.clone();
+                        self.editor = None;
+                        self.reveal_all = false;
+                        self.state = State::new_with_races(
+                            GameData::load_default(),
+                            map,
+                            0xED17_F00D,
+                            &[self.chosen_race, 1],
+                        );
+                        self.bot = Bot::with_style(
+                            1,
+                            orion_sim::ai::Difficulty::Normal,
+                            0xED17,
+                        );
+                        self.human = 0;
+                        self.in_game = true;
+                        self.page = MenuPage::None;
+                        self.arm_countdown();
+                    }
+                    Err(e) => ed.status = e,
+                }
+            }
+            KeyCode::Escape => {
+                let _ = ed.save("autosave");
+                self.editor = None;
+                self.reveal_all = false;
+                self.page = MenuPage::MainRoot;
+            }
+            _ => return false,
+        }
+        true
+    }
+
     fn nearest_mineral_to_start(&self) -> Option<EntityId> {
         let start = self.state.map.starts[self.human as usize].center();
         let mut best: Option<(i64, u32)> = None;
@@ -3279,9 +3464,77 @@ impl App {
         // Everything above lives in the world; glow adds on top of it,
         // and the console/menus draw over both.
         let world_n = out.len();
-        self.draw_hud(&mut out);
+        if self.editor.is_some() {
+            self.draw_editor_ui(&mut out);
+        } else {
+            self.draw_hud(&mut out);
+        }
         self.draw_menu(&mut out);
         self.gfx.render(&out, world_n, &glow);
+    }
+
+    /// Editor chrome: tool palette, brush/status footer, markers for
+    /// starts and expansions, hovered-tile cursor.
+    fn draw_editor_ui(&mut self, out: &mut Vec<Inst>) {
+        let Some(ed) = &self.editor else { return };
+        let ui = self.ui();
+        let book = &self.gfx.book;
+        let w = self.cam.screen_w;
+        let h = self.cam.screen_h;
+        let white = [0.92, 0.92, 0.88, 1.0];
+        let gold = [0.95, 0.78, 0.25, 1.0];
+        let dim = [0.62, 0.62, 0.6, 1.0];
+        // Start + expansion markers.
+        let zoom = self.cam.zoom;
+        for (k, st) in ed.map.starts.iter().enumerate() {
+            let (sx, sy) = self.cam.world_to_screen(st.x as f32 + 0.5, st.y as f32 + 0.5);
+            let tc = TEAM_COLORS[k.min(1)];
+            self.gfx.sprite(out, book.diamond_outline, sx, sy, 96.0 * zoom, 48.0 * zoom, [tc[0], tc[1], tc[2], 0.9]);
+            let ts = self.ts(1.4);
+            self.gfx.text(out, sx - 8.0 * ui, sy - 5.0 * ui, ts, [tc[0], tc[1], tc[2], 1.0], &format!("P{}", k + 1));
+        }
+        for e in &ed.map.expansions {
+            let (sx, sy) = self.cam.world_to_screen(e.x as f32 + 1.5, e.y as f32 + 1.5);
+            self.gfx.sprite(out, book.diamond_outline, sx, sy, 96.0 * zoom, 48.0 * zoom, [0.9, 0.85, 0.4, 0.6]);
+        }
+        // Hovered tile cursor sized to the brush.
+        let (wx, wy) = self.cam.screen_to_world(self.mouse.0, self.mouse.1);
+        let (tx, ty) = (wx.floor(), wy.floor());
+        let b = ed.brush as f32;
+        let (cx, cy) = self.cam.world_to_screen(tx + 0.5, ty + 0.5);
+        self.gfx.sprite(
+            out,
+            book.diamond_outline,
+            cx,
+            cy,
+            (b * 2.0 - 1.0) * 32.0 * zoom,
+            (b * 2.0 - 1.0) * 16.0 * zoom,
+            [0.4, 1.0, 0.4, 0.8],
+        );
+        // Title bar.
+        self.gfx.sprite(out, book.chrome_panel, w * 0.5, 16.0 * ui, w, 32.0 * ui, [1.0, 1.0, 1.0, 0.97]);
+        self.gfx.text(out, 12.0 * ui, 9.0 * ui, self.ts(2.0), gold, "MAP EDITOR");
+        let hint = "LMB PAINT   [ ] BRUSH   S SAVE   P PLAY-TEST   ESC BACK";
+        let hw = self.gfx.text_width(self.ts(1.1), hint);
+        self.gfx.text(out, w - hw - 12.0 * ui, 12.0 * ui, self.ts(1.1), dim, hint);
+        // Palette.
+        for (x, y, bw, bh, k) in self.editor_palette() {
+            let (tool, label, _) = crate::editor::TOOLS[k];
+            let active = ed.tool == tool;
+            let plate = if active { book.menu_plate_hi } else { book.menu_plate };
+            self.gfx.sprite(out, plate, x + bw * 0.5, y + bh * 0.5, bw, bh, [1.0, 1.0, 1.0, 1.0]);
+            let ts = self.ts(1.2);
+            let lw = self.gfx.text_width(ts, label);
+            let tc = if active { gold } else { white };
+            self.gfx.text(out, x + (bw - lw) * 0.5, y + bh * 0.5 - ts * 3.5, ts, tc, label);
+        }
+        // Status footer.
+        self.gfx.sprite(out, book.chrome_panel, w * 0.5, h - 16.0 * ui, w, 32.0 * ui, [1.0, 1.0, 1.0, 0.97]);
+        let ts = self.ts(1.3);
+        self.gfx.text(out, 12.0 * ui, h - 22.0 * ui, ts, white, &ed.status);
+        let bs = format!("BRUSH {}   MINERALS {}   TREES {}", ed.brush, ed.map.minerals.len(), ed.map.trees.len());
+        let bw2 = self.gfx.text_width(ts, &bs);
+        self.gfx.text(out, w - bw2 - 12.0 * ui, h - 22.0 * ui, ts, dim, &bs);
     }
 
     pub(crate) fn visible(&self, t: TilePos) -> bool {
@@ -4220,7 +4473,17 @@ pub fn new_game() -> State {
 }
 
 fn map_or_meridian(name: &str) -> orion_sim::map::Map {
-    orion_sim::map::by_name(name).unwrap_or_else(meridian)
+    orion_sim::map::by_name(name)
+        .or_else(|| crate::editor::load_custom(name))
+        .unwrap_or_else(meridian)
+}
+
+/// Built-in map names plus saved custom maps (picker order).
+pub fn all_map_names() -> Vec<String> {
+    let mut v: Vec<String> =
+        orion_sim::map::MAP_NAMES.iter().map(|s| s.to_string()).collect();
+    v.extend(crate::editor::custom_map_names().into_iter().filter(|n| n != "autosave"));
+    v
 }
 
 pub fn new_game_with(race0: u8, race1: u8, map: &str) -> State {

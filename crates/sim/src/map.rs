@@ -36,7 +36,7 @@ impl TilePos {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Map {
     pub width: i32,
     pub height: i32,

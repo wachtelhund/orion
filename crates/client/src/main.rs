@@ -5,6 +5,7 @@ mod app;
 mod atlas;
 mod audio;
 mod config;
+mod editor;
 mod font;
 mod gfx;
 mod hud;
