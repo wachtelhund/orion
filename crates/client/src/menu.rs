@@ -4,7 +4,7 @@
 
 use orion_sim::ai::Difficulty;
 
-use crate::app::App;
+use crate::app::{App, GAS_COLOR, MINERAL_COLOR, TEAM_COLORS};
 use crate::config::{Action, ALL_ACTIONS};
 use crate::gfx::Inst;
 
@@ -495,6 +495,18 @@ impl App {
                 let s = 6.0 * ui;
                 self.gfx.sprite(out, book.rivet, rx, ry, s, s, [1.0, 1.0, 1.0, 1.0]);
             }
+            // Map preview beside the picker wherever a MAP row exists.
+            let has_map_row = self.page == MenuPage::Difficulty
+                || (self.page == MenuPage::Multiplayer
+                    && self.mp_waiting.is_none()
+                    && self.mm_queue.is_none());
+            if has_map_row {
+                let ts = 170.0 * ui;
+                let tx = px + pw + 24.0 * ui;
+                if tx + ts + 12.0 * ui < w {
+                    self.draw_map_thumb(out, tx, py + head.max(26.0 * ui), ts);
+                }
+            }
         }
 
         // Title on its winged plate.
@@ -649,6 +661,107 @@ impl App {
 
     /// Gold frame reachable from menu drawing (hud.rs has the twin used by
     /// the console; this one lives here to keep menu.rs self-contained).
+    /// Terrain thumbnail of the currently selected map, drawn beside the
+    /// picker panel: minimap palette + resources + start markers, so map
+    /// choice isn't blind.
+    fn draw_map_thumb(&self, out: &mut Vec<Inst>, x: f32, y: f32, size: f32) {
+        use orion_sim::map::TileKind;
+        let names = crate::app::all_map_names();
+        if names.is_empty() {
+            return;
+        }
+        let name = names[self.map_choice % names.len()].clone();
+        {
+            let mut cache = self.thumb_cache.borrow_mut();
+            let stale = cache.as_ref().map_or(true, |(n, _)| *n != name);
+            if stale {
+                let map = orion_sim::map::by_name(&name)
+                    .or_else(|| crate::editor::load_custom(&name));
+                match map {
+                    Some(m) => *cache = Some((name.clone(), m)),
+                    None => return,
+                }
+            }
+        }
+        let cache = self.thumb_cache.borrow();
+        let Some((_, map)) = cache.as_ref() else { return };
+        let ui = self.ui();
+        let scale = size / map.width.max(map.height) as f32;
+        self.gfx.quad(out, x, y, size, size, [0.02, 0.02, 0.03, 1.0]);
+        self.gold_frame_menu(out, x, y, size, size);
+        for ty in 0..map.height {
+            for tx in 0..map.width {
+                let c = match map.kind_at(tx, ty) {
+                    TileKind::Blocked => [0.11, 0.10, 0.11],
+                    TileKind::Ramp => [0.29, 0.27, 0.23],
+                    TileKind::Ground => {
+                        if map.elev_at(tx, ty) > 0 {
+                            [0.32, 0.31, 0.28]
+                        } else {
+                            [0.21, 0.19, 0.17]
+                        }
+                    }
+                };
+                self.gfx.quad(
+                    out,
+                    x + tx as f32 * scale,
+                    y + ty as f32 * scale,
+                    scale + 0.5,
+                    scale + 0.5,
+                    [c[0], c[1], c[2], 1.0],
+                );
+            }
+        }
+        let dot = |out: &mut Vec<Inst>, tx: i32, ty: i32, s: f32, c: [f32; 4]| {
+            self.gfx.quad(
+                out,
+                x + tx as f32 * scale - s * 0.5 + scale * 0.5,
+                y + ty as f32 * scale - s * 0.5 + scale * 0.5,
+                s,
+                s,
+                c,
+            );
+        };
+        for t in &map.trees {
+            dot(out, t.x, t.y, scale.max(1.5), [0.16, 0.30, 0.18, 1.0]);
+        }
+        for r in &map.rocks {
+            dot(out, r.x, r.y, scale.max(1.5), [0.42, 0.40, 0.38, 1.0]);
+        }
+        for (m, _) in &map.minerals {
+            dot(out, m.x, m.y, (scale * 1.2).max(2.0), [
+                MINERAL_COLOR[0],
+                MINERAL_COLOR[1],
+                MINERAL_COLOR[2],
+                1.0,
+            ]);
+        }
+        for (g, _) in &map.geysers {
+            dot(out, g.x, g.y, (scale * 1.6).max(2.5), [
+                GAS_COLOR[0],
+                GAS_COLOR[1],
+                GAS_COLOR[2],
+                1.0,
+            ]);
+        }
+        for (k, st) in map.starts.iter().enumerate() {
+            let c = TEAM_COLORS[k % 2];
+            dot(out, st.x, st.y, (scale * 2.4).max(4.0), [c[0], c[1], c[2], 1.0]);
+        }
+        // Name plate under the thumb.
+        let ts = self.ts(1.3);
+        let label = names[self.map_choice % names.len()].to_uppercase();
+        let lw = self.gfx.text_width(ts, &label);
+        self.gfx.text(
+            out,
+            x + (size - lw) * 0.5,
+            y + size + 8.0 * ui,
+            ts,
+            [0.66, 0.7, 0.76, 1.0],
+            &label,
+        );
+    }
+
     fn gold_frame_menu(&self, out: &mut Vec<Inst>, x: f32, y: f32, w: f32, h: f32) {
         let ui = self.ui();
         let book = &self.gfx.book;

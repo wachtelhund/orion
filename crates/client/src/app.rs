@@ -239,6 +239,9 @@ pub struct App {
     pub dbg_frames: u32,
     /// Clock for hidden-page background stepping (web multiplayer).
     bg_last: Option<Instant>,
+    /// Menu map-preview cache: (map name, loaded map). RefCell because
+    /// draw_menu is &self and loading a map per frame would be wasteful.
+    pub(crate) thumb_cache: std::cell::RefCell<Option<(String, orion_sim::map::Map)>>,
     pub frame_t: Instant,
 
     // Render-side caches (never touch sim state).
@@ -424,6 +427,7 @@ impl App {
             fps: 60.0,
             dbg_frames: 0,
             bg_last: None,
+            thumb_cache: std::cell::RefCell::new(None),
             frame_t: Instant::now(),
             facings: Vec::new(),
             headings: Vec::new(),

@@ -114,13 +114,14 @@ impl Map {
 
 /// All shipping maps, in menu order. Names are the replay/net identifiers —
 /// never rename one that shipped.
-pub const MAP_NAMES: &[&str] = &["meridian", "caverns", "thornwood"];
+pub const MAP_NAMES: &[&str] = &["meridian", "caverns", "thornwood", "causeway"];
 
 pub fn by_name(name: &str) -> Option<Map> {
     match name {
         "meridian" => Some(meridian()),
         "caverns" => Some(caverns()),
         "thornwood" => Some(thornwood()),
+        "causeway" => Some(causeway()),
         _ => None,
     }
 }
@@ -570,6 +571,187 @@ pub fn thornwood() -> Map {
                 // Rule: would placing here create ANY 2x2 fully-occupied
                 // fully-occupied square among the four squares touching
                 // this tile?
+                let makes_block = |set: &Vec<i32>, tx: i32, ty: i32| {
+                    let at = |ax: i32, ay: i32| {
+                        (ax == tx && ay == ty) || set.contains(&(ay * w + ax))
+                    };
+                    (0..4).any(|q| {
+                        let (ox, oy) = [(0, 0), (-1, 0), (0, -1), (-1, -1)][q];
+                        at(tx + ox, ty + oy)
+                            && at(tx + ox + 1, ty + oy)
+                            && at(tx + ox, ty + oy + 1)
+                            && at(tx + ox + 1, ty + oy + 1)
+                    })
+                };
+                if makes_block(&occupied, x, y) || makes_block(&occupied, mx, my) {
+                    continue;
+                }
+                occupied.push(y * w + x);
+                occupied.push(my * w + mx);
+                map.trees.push(TilePos::new(x, y));
+                map.trees.push(TilePos::new(mx, my));
+            }
+        }
+    }
+
+    map
+}
+
+/// "Causeway", 88x88: a raised land bridge spans the middle of the map,
+/// carrying two contested expansions. Mains sit on NW/SE cliff plateaus,
+/// naturals against the low west/east walls. Each causeway third has an
+/// open ramp on one flank and a rock-sealed breach ramp on the other, so
+/// the defender's easy side is the attacker's breach side and vice versa.
+/// Wide low-ground flanks with ambush groves circle the whole bridge.
+/// 180°-rotation symmetric by construction.
+pub fn causeway() -> Map {
+    let w = 88;
+    let h = 88;
+    let mut map = Map {
+        width: w,
+        height: h,
+        kind: vec![TileKind::Ground; (w * h) as usize],
+        elev: vec![0u8; (w * h) as usize],
+        starts: vec![TilePos::new(13, 13), TilePos::new(w - 14, h - 14)],
+        minerals: Vec::new(),
+        geysers: Vec::new(),
+        expansions: Vec::new(),
+        trees: Vec::new(),
+        rocks: Vec::new(),
+    };
+    for x in 0..w {
+        for y in 0..h {
+            if x == 0 || y == 0 || x == w - 1 || y == h - 1 {
+                map.kind[(y * w + x) as usize] = TileKind::Blocked;
+            }
+        }
+    }
+
+    // Rectangular plateau with a 1-tile cliff ring (same scheme as
+    // thornwood, generalized to non-square footprints).
+    let plateau = |map: &mut Map, ox: i32, oy: i32, sx: i32, sy: i32| {
+        for x in ox..ox + sx {
+            for y in oy..oy + sy {
+                if map.in_bounds(x, y) {
+                    let i = map.idx(x, y);
+                    map.elev[i] = 1;
+                }
+            }
+        }
+        for x in ox - 1..=ox + sx {
+            for y in oy - 1..=oy + sy {
+                let inside = x >= ox && x < ox + sx && y >= oy && y < oy + sy;
+                if !inside && map.in_bounds(x, y) {
+                    let i = map.idx(x, y);
+                    map.kind[i] = TileKind::Blocked;
+                    map.elev[i] = 1;
+                }
+            }
+        }
+    };
+    // Mains: NW + SE 24x24.
+    plateau(&mut map, 2, 2, 24, 24);
+    plateau(&mut map, w - 26, h - 26, 24, 24);
+    // The causeway: one 40x12 strip dead center — self-symmetric
+    // ((24,38)..(63,49) maps onto itself under 180° rotation).
+    plateau(&mut map, 24, 38, 40, 12);
+
+    let ramp = |map: &mut Map, tiles: &[(i32, i32)]| {
+        for &(x, y) in tiles {
+            let i = map.idx(x, y);
+            map.kind[i] = TileKind::Ramp;
+            map.elev[i] = 0;
+            let (mx, my) = (map.width - 1 - x, map.height - 1 - y);
+            let j = map.idx(mx, my);
+            map.kind[j] = TileKind::Ramp;
+            map.elev[j] = 0;
+        }
+    };
+    // Main exits: east face of the NW ring (mirror = west face of SE).
+    ramp(&mut map, &[(26, 20), (26, 21), (26, 22), (26, 23)]);
+    // Causeway end ramps: west face (mirror = east face).
+    ramp(&mut map, &[(23, 41), (23, 42), (23, 43), (23, 44)]);
+    // Open flank ramps: north face near the west third (mirror = south
+    // face near the east third).
+    ramp(&mut map, &[(32, 37), (33, 37), (34, 37), (35, 37)]);
+
+    // Breach ramps: north face near the EAST third, sealed by rocks —
+    // knock the rocks down to attack that third from its blind side
+    // (mirror seals the west third's south face).
+    ramp(&mut map, &[(56, 37), (57, 37), (58, 37)]);
+    let rocks = |map: &mut Map, tiles: &[(i32, i32)]| {
+        for &(x, y) in tiles {
+            map.rocks.push(TilePos::new(x, y));
+            map.rocks
+                .push(TilePos::new(map.width - 1 - x, map.height - 1 - y));
+        }
+    };
+    rocks(&mut map, &[(56, 37), (57, 37), (58, 37)]);
+
+    let patches = |map: &mut Map, line: &[(i32, i32)], amount: i32| {
+        for &(x, y) in line {
+            map.minerals.push((TilePos::new(x, y), amount));
+            map.minerals
+                .push((TilePos::new(map.width - 1 - x, map.height - 1 - y), amount));
+        }
+    };
+    let geysers = |map: &mut Map, origins: &[(i32, i32)], amount: i32| {
+        for &(x, y) in origins {
+            map.geysers.push((TilePos::new(x, y), amount));
+            map.geysers
+                .push((TilePos::new(map.width - 2 - x, map.height - 2 - y), amount));
+        }
+    };
+
+    // Main line: arc into the NW corner, on the plateau.
+    patches(
+        &mut map,
+        &[(7, 5), (9, 4), (5, 7), (4, 9), (4, 11), (4, 13), (4, 15), (5, 17)],
+        1250,
+    );
+    geysers(&mut map, &[(16, 3)], 2500);
+
+    // Natural: low ground against the west wall, south of the main.
+    patches(&mut map, &[(2, 31), (2, 33), (2, 35), (2, 37), (3, 39), (4, 41)], 1000);
+    geysers(&mut map, &[(8, 38)], 2500);
+    map.expansions.push(TilePos::new(7, 32));
+    map.expansions.push(TilePos::new(w - 3 - 7, h - 3 - 32));
+
+    // Contested thirds: ON the causeway, one leaning each way.
+    patches(&mut map, &[(27, 39), (29, 39), (31, 39), (33, 39), (35, 39), (27, 41)], 1000);
+    geysers(&mut map, &[(34, 42)], 2500);
+    map.expansions.push(TilePos::new(29, 42));
+    map.expansions.push(TilePos::new(w - 3 - 29, h - 3 - 42));
+
+    // Ambush groves on the open flanks (same organic-blob scheme as
+    // thornwood: radial density falloff, no solid 2x2 blocks).
+    let groves: [(i32, i32, i32, i32); 2] = [
+        (46, 20, 9, 6),  // north flank woods (mirror = south flank)
+        (68, 28, 6, 5),  // pocket at the SE main's north approach
+    ];
+    let mut occupied: Vec<i32> = Vec::new();
+    for &(cx, cy, rx, ry) in &groves {
+        for y in cy - ry..=cy + ry {
+            for x in cx - rx..=cx + rx {
+                if !map.in_bounds(x, y) {
+                    continue;
+                }
+                if map.kind[(y * w + x) as usize] != TileKind::Ground
+                    || map.elev[(y * w + x) as usize] != 0
+                {
+                    continue;
+                }
+                let dx = (x - cx) * 100 / rx.max(1);
+                let dy = (y - cy) * 100 / ry.max(1);
+                let d = dx * dx + dy * dy;
+                if d > 10000 {
+                    continue;
+                }
+                let density = 85 - d * 70 / 10000;
+                if (atlas_free_hash(x, y) % 100) as i32 >= density {
+                    continue;
+                }
+                let (mx, my) = (w - 1 - x, h - 1 - y);
                 let makes_block = |set: &Vec<i32>, tx: i32, ty: i32| {
                     let at = |ax: i32, ay: i32| {
                         (ax == tx && ay == ty) || set.contains(&(ay * w + ax))
