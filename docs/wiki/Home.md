@@ -12,7 +12,7 @@ looks in game.
 
 | Version | Highlights |
 |---|---|
-| [v0.15.0](v0.15.0.md) | Smooth unit turning, idle-worker alert chip, per-ability cast sounds, experimental WASM port |
+| [v0.15.0](v0.15.0.md) | Smooth unit turning, idle-worker alert chip, per-ability cast sounds; v0.15.1: THE GAME RUNS IN THE BROWSER (WebGPU, ~70 FPS) |
 | [v0.14.0](v0.14.0.md) | Visual map editor with auto-mirrored painting, custom maps in the SP picker |
 | [v0.13.0](v0.13.0.md) | Heroes: Marshal Kade, Broodmother Sszrak, Magnus Vex — two abilities each, bot support, deterministic zones/summons |
 | [v0.12.0](v0.12.0.md) | AI ability micro + kiting + mop-up sweep (Thornwood stall fixed), Ferron mass rebuild, MP connection readout |
