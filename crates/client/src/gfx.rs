@@ -42,6 +42,9 @@ pub struct Gfx {
     glow_buf: wgpu::Buffer,
     glow_cap: usize,
     pub book: SpriteBook,
+    /// Format frames are rendered through — the sRGB variant of the
+    /// surface format when the surface itself can't be sRGB (WebGPU).
+    view_format: wgpu::TextureFormat,
     /// When set, the next rendered frame is written to this path as PPM.
     pub capture: Option<String>,
 }
@@ -71,6 +74,29 @@ impl Gfx {
         let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .expect("surface config");
+        // The shader writes linear values and relies on an sRGB surface to
+        // encode them. Browsers hand out the non-sRGB variant first, which
+        // displayed linear values raw — the whole game rendered too dark.
+        let caps = surface.get_capabilities(&adapter);
+        let srgb = config.format.add_srgb_suffix();
+        let view_format = if caps.formats.contains(&srgb) {
+            // Straightforward: an sRGB swapchain format exists (native).
+            config.format = srgb;
+            srgb
+        } else if config.format != srgb {
+            // WebGPU canvases only accept non-sRGB formats directly; the
+            // sRGB encode goes through a view format instead. Without this
+            // the shader's linear output displayed raw — far too dark.
+            config.view_formats = vec![srgb];
+            srgb
+        } else {
+            config.format
+        };
+        #[cfg(target_arch = "wasm32")]
+        crate::weblog(&format!(
+            "orion: surface {:?} via view {:?}",
+            config.format, view_format
+        ));
         config.present_mode = wgpu::PresentMode::AutoVsync;
         config.usage |= wgpu::TextureUsages::COPY_SRC; // frame capture
         surface.configure(&device, &config);
@@ -203,7 +229,7 @@ impl Gfx {
                 entry_point: Some("fs"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
+                    format: view_format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -253,7 +279,7 @@ impl Gfx {
                 entry_point: Some("fs"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
+                    format: view_format,
                     blend: Some(additive),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -297,6 +323,7 @@ impl Gfx {
             glow_buf,
             glow_cap,
             book,
+            view_format,
             capture: None,
         }
     }
@@ -349,7 +376,10 @@ impl Gfx {
                 return;
             }
         };
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.view_format),
+            ..Default::default()
+        });
         let mut encoder = self.device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

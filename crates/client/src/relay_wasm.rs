@@ -49,8 +49,8 @@ enum Phase {
 
 struct Session {
     ws: WebSocket,
-    out_rx: Receiver<String>,
-    in_tx: Sender<Msg>,
+    out_rx: Option<Receiver<String>>,
+    in_tx: Option<Sender<Msg>>,
     /// Messages that arrive during the handshake but belong to the game
     /// (early Cmds from a fast peer) — replayed into in_tx on completion.
     phase: Phase,
@@ -135,8 +135,8 @@ fn open_session(
     let (in_tx, in_rx) = channel::<Msg>();
     Ok(Session {
         ws,
-        out_rx,
-        in_tx,
+        out_rx: Some(out_rx),
+        in_tx: Some(in_tx),
         phase: if host { Phase::HostWaitHello } else { Phase::JoinWaitStart },
         my_race,
         seed,
@@ -299,14 +299,18 @@ fn pump(sess: &mut Session) -> bool {
             },
             Phase::Done => {
                 // In-game: forward straight to the Lockstep receiver.
-                let _ = sess.in_tx.send(msg);
+                if let Some(tx) = &sess.in_tx {
+                    let _ = tx.send(msg);
+                }
             }
         }
     }
     // Flush game-side outgoing (Lockstep pushes into the Net sender).
-    while let Ok(line) = sess.out_rx.try_recv() {
-        sess.n_tx = sess.n_tx.wrapping_add(1);
-        let _ = sess.ws.send_with_str(&line);
+    if let Some(rx) = &sess.out_rx {
+        while let Ok(line) = rx.try_recv() {
+            sess.n_tx = sess.n_tx.wrapping_add(1);
+            let _ = sess.ws.send_with_str(&line);
+        }
     }
     true
 }
@@ -318,6 +322,13 @@ fn drive(mut sess: Session) {
     let h2 = handle.clone();
     let cb = Closure::<dyn FnMut()>::new(move || {
         if !pump(&mut sess) {
+            // The closure itself is leaked (forget below), so the game's
+            // channel ends must be dropped EXPLICITLY — the Lockstep only
+            // notices a dead peer when its receiver disconnects. Without
+            // this, an opponent leaving froze the match forever.
+            sess.in_tx = None;
+            sess.out_rx = None;
+            let _ = sess.ws.close();
             if let Some(id) = h2.borrow_mut().take() {
                 if let Some(w) = web_sys::window() {
                     w.clear_interval_with_handle(id);

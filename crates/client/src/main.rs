@@ -219,6 +219,35 @@ impl Shell {
                                     app.fetch_shared_replay();
                                 }
                             }
+                            // ?host=CODE / ?join=CODE: start a private
+                            // lobby directly — headless MP testing.
+                            let grab = |tag: &str| -> Option<String> {
+                                search.find(tag).map(|k| {
+                                    search[k + tag.len()..]
+                                        .chars()
+                                        .take_while(|c| c.is_ascii_alphanumeric())
+                                        .collect()
+                                })
+                            };
+                            if let Some(code) = grab("host=").filter(|c| !c.is_empty()) {
+                                let (shown, rx) = crate::relay::host_relay_async_with_code(
+                                    app.settings.relay_url.clone(),
+                                    code,
+                                    app.chosen_race,
+                                );
+                                app.mp_lobby_code = Some(shown);
+                                app.mp_waiting = Some(rx);
+                                app.page = crate::menu::MenuPage::Multiplayer;
+                            } else if let Some(code) =
+                                grab("join=").filter(|c| !c.is_empty())
+                            {
+                                app.mp_waiting = Some(crate::relay::join_relay_async(
+                                    app.settings.relay_url.clone(),
+                                    code,
+                                    1,
+                                ));
+                                app.page = crate::menu::MenuPage::Multiplayer;
+                            }
                         }
                     }
                     if let Some(win) = &self.window {
@@ -283,6 +312,9 @@ impl Shell {
             || self.replay_shot.is_some()
             || self.mp_auto.is_some();
         if !headless {
+            // Browsers refuse audio before a user gesture — the web build
+            // initializes on the first click instead (handle_event).
+            #[cfg(not(target_arch = "wasm32"))]
             app.init_audio();
             app.persist_identity();
         }

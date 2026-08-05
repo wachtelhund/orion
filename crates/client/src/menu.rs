@@ -119,6 +119,8 @@ impl App {
                         ("REPLAYS".into(), MenuAction::OpenReplays),
                         ("MAP EDITOR".into(), MenuAction::OpenEditor),
                         ("SETTINGS".into(), MenuAction::OpenSettings),
+                        // No process to quit in a browser tab.
+                        #[cfg(not(target_arch = "wasm32"))]
                         ("QUIT".into(), MenuAction::QuitApp),
                     ],
                     h * 0.40,
@@ -184,8 +186,16 @@ impl App {
                         }
                         None => "FIND MATCH".to_string(),
                     };
+                    // Ranked play needs the desktop build (threads + queue
+                    // socket) — say so instead of dangling dead buttons.
+                    #[cfg(target_arch = "wasm32")]
+                    let (find, find_act) =
+                        ("RANKED: DESKTOP BUILD ONLY".to_string(), MenuAction::Noop);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let find_act = MenuAction::FindMatch;
                     let mut rows = vec![
-                        (find, MenuAction::FindMatch),
+                        (find, find_act),
+                        #[cfg(not(target_arch = "wasm32"))]
                         ("LADDER".into(), MenuAction::OpenLadder),
                         (
                             format!("NAME: {}{}", self.settings.player_name, name_marker),
@@ -315,6 +325,7 @@ impl App {
                         ("RESUME".into(), MenuAction::Resume),
                         ("SETTINGS".into(), MenuAction::OpenSettings),
                         ("QUIT TO MENU".into(), MenuAction::QuitToMenu),
+                        #[cfg(not(target_arch = "wasm32"))]
                         ("QUIT GAME".into(), MenuAction::QuitApp),
                     ],
                     h * 0.38,

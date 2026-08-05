@@ -469,6 +469,12 @@ impl App {
     /// Init audio (skipped in headless capture modes).
     pub fn init_audio(&mut self) {
         self.audio = Audio::new(self.settings.music_volume, self.settings.sfx_volume);
+        #[cfg(target_arch = "wasm32")]
+        crate::weblog(if self.audio.is_some() {
+            "orion: audio ready"
+        } else {
+            "orion: audio unavailable"
+        });
     }
 
     pub(crate) fn sfx(&self, s: Sfx) {
@@ -1020,11 +1026,12 @@ impl App {
             && (self.mp_auto.is_some() || cfg!(target_arch = "wasm32"))
         {
             crate::weblog(&format!(
-                "mp hb: tick={} cd={:?} acc={:.3} stalls={}",
+                "mp hb: tick={} cd={:?} acc={:.3} stalls={} disc={}",
                 self.state.tick,
                 self.countdown.as_ref().map(|(t0, n)| (t0.elapsed().as_secs_f32(), *n)),
                 self.acc,
                 self.mp.as_ref().map_or(0, |m| m.stalls_per_min()),
+                self.mp.as_ref().map_or(false, |m| m.disconnected),
             ));
         }
         if self.countdown_active() {
@@ -1096,6 +1103,13 @@ impl App {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
+                // Browsers only allow audio started inside a user gesture:
+                // the web build synthesizes and opens the device on the
+                // first click instead of at boot.
+                #[cfg(target_arch = "wasm32")]
+                if *state == ElementState::Pressed && self.audio.is_none() {
+                    self.init_audio();
+                }
                 let down = *state == ElementState::Pressed;
                 match button {
                     MouseButton::Left => self.left_button(down),
