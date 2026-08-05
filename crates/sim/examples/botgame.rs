@@ -1,15 +1,24 @@
 //! Headless bot-vs-bot game with a status printout — dev tool for watching
 //! the macro loop work. cargo run -p orion-sim --example botgame
 
-use orion_sim::ai::Bot;
-use orion_sim::map::meridian;
+use orion_sim::ai::{Bot, Difficulty};
+use orion_sim::map::by_name;
 use orion_sim::{EntityKind, GameData, State};
 
 fn main() {
-    let mut s = State::new(GameData::load_default(), meridian(), 7);
-    let mut bots = [Bot::new(0), Bot::new(1)];
+    // botgame [map] [minutes] [seed] — Hard bots when a map is named.
+    let mut args = std::env::args().skip(1);
+    let map_name = args.next().unwrap_or_else(|| "meridian".into());
+    let minutes: u32 = args.next().and_then(|a| a.parse().ok()).unwrap_or(10);
+    let seed: u64 = args.next().and_then(|a| a.parse().ok()).unwrap_or(7);
+    let map = by_name(&map_name).expect("unknown map");
+    let mut s = State::new(GameData::load_default(), map, seed);
+    let mut bots = [
+        Bot::with_style(0, Difficulty::Hard, seed ^ 5),
+        Bot::with_style(1, Difficulty::Hard, seed ^ 77),
+    ];
 
-    for tick in 0..24 * 60 * 10 {
+    for tick in 0..24 * 60 * minutes {
         let mut cmds = Vec::new();
         for bot in &mut bots {
             cmds.extend(bot.think(&s));
@@ -23,8 +32,8 @@ fn main() {
             return;
         }
     }
-    println!("no winner after 10 minutes");
-    print_status(&s, 24 * 60 * 10);
+    println!("no winner after {minutes} minutes");
+    print_status(&s, 24 * 60 * minutes);
 }
 
 fn print_status(s: &State, tick: u32) {

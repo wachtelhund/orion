@@ -1181,7 +1181,8 @@ impl Bot {
             return enemy_start.center();
         }
         let hq_pos = hq.map(|i| s.entities[i as usize].pos);
-        self.memory
+        if let Some(pos) = self
+            .memory
             .iter()
             .filter(|(_, sg)| sg.building)
             .min_by_key(|(c, sg)| {
@@ -1191,7 +1192,25 @@ impl Bot {
                 (d, *c)
             })
             .map(|(_, sg)| sg.pos)
-            .unwrap_or_else(|| enemy_start.center())
+        {
+            return pos;
+        }
+        // Nothing remembered: mop-up sweep. The last enemy building can be
+        // a hidden pylon in a corner — rotate the army through the enemy
+        // start, every expansion site, and the map corners until vision
+        // finds it (a razed start used to soak every re-push forever).
+        let mut sweep: Vec<FxVec2> = vec![enemy_start.center()];
+        for e in &s.map.expansions {
+            sweep.push(FxVec2::new(
+                crate::Fx::from_int(e.x + 1),
+                crate::Fx::from_int(e.y + 1),
+            ));
+        }
+        let (w, h) = (s.map.width, s.map.height);
+        for (cx, cy) in [(6, 6), (w - 7, 6), (6, h - 7), (w - 7, h - 7)] {
+            sweep.push(FxVec2::new(crate::Fx::from_int(cx), crate::Fx::from_int(cy)));
+        }
+        sweep[(s.tick / (24 * 20)) as usize % sweep.len()]
     }
 
     /// The ramp chokepoint guarding home — centroid of ramp tiles near the
