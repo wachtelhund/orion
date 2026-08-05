@@ -294,6 +294,8 @@ impl Bot {
         let mut casters: Vec<u32> = Vec::new();
         let mut shields: Vec<u32> = Vec::new();
         let mut burrowers: Vec<u32> = Vec::new();
+        let mut hero_unit: Option<u32> = None;
+        let mut has_hero = false;
         let mut hq: Option<u32> = None;
         let mut deposits = 0usize;
         let mut barracks: Vec<u32> = Vec::new();
@@ -339,6 +341,10 @@ impl Bot {
                         }
                         if d.burrow {
                             burrowers.push(i as u32);
+                        }
+                        if d.hero {
+                            hero_unit = Some(i as u32);
+                            has_hero = true;
                         }
                     }
                 }
@@ -569,6 +575,7 @@ impl Bot {
                 for &u in &s.data.buildings[e.def as usize].trains {
                     let d = &s.data.units[u as usize];
                     if d.energy_max > 0
+                        && !d.hero
                         && s.requirement_met(p, d.requires)
                         && min_left >= d.cost_minerals
                         && gas_left >= d.cost_gas
@@ -577,6 +584,30 @@ impl Bot {
                         gas_left -= d.cost_gas;
                         cmds.push(Command::Train { building: s.id_of(b), unit: u });
                         break 'caster;
+                    }
+                }
+            }
+        }
+
+        // ---- hero: one per game, once the mid-game economy can carry it ----
+        if !has_hero
+            && s.tick > 24 * 60 * 7
+            && min_left >= 300
+            && gas_left >= 150
+            && prm.use_squads
+        {
+            'hero: for &b in barracks.iter().chain(forge.iter()) {
+                let e = &s.entities[b as usize];
+                if e.queue.len() >= 2 {
+                    continue;
+                }
+                for &u in &s.data.buildings[e.def as usize].trains {
+                    let d = &s.data.units[u as usize];
+                    if d.hero && s.requirement_met(p, d.requires) {
+                        min_left -= d.cost_minerals;
+                        gas_left -= d.cost_gas;
+                        cmds.push(Command::Train { building: s.id_of(b), unit: u });
+                        break 'hero;
                     }
                 }
             }
@@ -1021,6 +1052,90 @@ impl Bot {
                     target: s.map.clamp_pos(away),
                     queued: false,
                 });
+            }
+        }
+
+        // Hero abilities: aim the zone ability at the biggest clump in
+        // reach; fire the instant ability on the trigger it wants.
+        if let Some(hidx) = hero_unit {
+            let e = &s.entities[hidx as usize];
+            let tag = s.data.units[e.def as usize].tag.clone();
+            let idle_enough = !matches!(e.order, Order::CastAbility { .. });
+            if idle_enough {
+                let (zone_slot, inst_slot) = match tag.as_str() {
+                    "marshal" => (Some(0u8), Some(1u8)),
+                    "broodmother" => (Some(1), Some(0)),
+                    "magnus" => (Some(0), Some(1)),
+                    _ => (None, None),
+                };
+                // Zone: >=3 enemy units clumped within reach.
+                if let Some(slot) = zone_slot {
+                    if let Some(spec) = crate::hero::ability(&tag, slot) {
+                        if e.energy >= spec.cost {
+                            let reach2 = spec.cast_range + Fx::from_int(3);
+                            let reach2_sq = (reach2.0 as i64) * (reach2.0 as i64);
+                            let zone_sq = (Fx::from_int(3).0 as i64).pow(2);
+                            let mut best: Option<(usize, i64, FxVec2)> = None;
+                            for &(pos, is_unit) in &visible_enemies {
+                                if !is_unit || dist_sq_raw(e.pos, pos) > reach2_sq {
+                                    continue;
+                                }
+                                let n = visible_enemies
+                                    .iter()
+                                    .filter(|&&(q, u)| u && dist_sq_raw(pos, q) <= zone_sq)
+                                    .count();
+                                let d = dist_sq_raw(e.pos, pos);
+                                if n >= 3
+                                    && best.map_or(true, |(bn, bd, _)| (n, std::cmp::Reverse(d)) > (bn, std::cmp::Reverse(bd)))
+                                {
+                                    best = Some((n, d, pos));
+                                }
+                            }
+                            if let Some((_, _, target)) = best {
+                                cmds.push(Command::UseAbility {
+                                    caster: s.id_of(hidx),
+                                    slot,
+                                    target,
+                                });
+                            }
+                        }
+                    }
+                }
+                // Instant: enemies (or wounded allies for the marshal) close.
+                if let Some(slot) = inst_slot {
+                    if let Some(spec) = crate::hero::ability(&tag, slot) {
+                        if e.energy >= spec.cost {
+                            let near_sq = (Fx::from_int(4).0 as i64).pow(2);
+                            let fire = match tag.as_str() {
+                                "marshal" => s
+                                    .entities
+                                    .iter()
+                                    .filter(|o| {
+                                        o.alive
+                                            && o.owner == p
+                                            && o.kind == EntityKind::Unit
+                                            && o.hp * 2 < s.data.units[o.def as usize].hp
+                                            && dist_sq_raw(o.pos, e.pos)
+                                                <= (Fx::from_int(5).0 as i64).pow(2)
+                                    })
+                                    .count()
+                                    >= 3,
+                                _ => visible_enemies
+                                    .iter()
+                                    .filter(|&&(q, u)| u && dist_sq_raw(e.pos, q) <= near_sq)
+                                    .count()
+                                    >= if tag == "magnus" { 3 } else { 2 },
+                            };
+                            if fire {
+                                cmds.push(Command::UseAbility {
+                                    caster: s.id_of(hidx),
+                                    slot,
+                                    target: e.pos,
+                                });
+                            }
+                        }
+                    }
+                }
             }
         }
 

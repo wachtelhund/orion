@@ -511,7 +511,7 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
 
     // Units: [type][team][facing][frame].
     let mut units = Vec::new();
-    for unit_type in 0..22 {
+    for unit_type in 0..26 {
         for team in 0..2 {
             for facing in 0..N_FACINGS {
                 for frame in 0..N_FRAMES {
@@ -537,7 +537,11 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
                         18 => paint_mauler(facing, frame, TEAMS[team]),
                         19 => paint_lodestone(facing, frame, TEAMS[team]),
                         20 => paint_kestrel(facing, frame, TEAMS[team]),
-                        _ => paint_resonant(facing, frame, TEAMS[team]),
+                        21 => paint_resonant(facing, frame, TEAMS[team]),
+                        22 => paint_marshal(facing, frame, TEAMS[team]),
+                        23 => paint_broodmother(facing, frame, TEAMS[team]),
+                        24 => paint_magnus(facing, frame, TEAMS[team]),
+                        _ => paint_broodling(facing, frame, TEAMS[team]),
                     };
                     units.push(p.place_s(&c, SS));
                 }
@@ -547,7 +551,7 @@ pub fn build() -> (Vec<u8>, SpriteBook) {
 
     // Bust portraits: [unit_type][team].
     let mut portraits = Vec::new();
-    for unit_type in 0..22 {
+    for unit_type in 0..26 {
         for team in 0..2 {
             portraits.push(p.place_s(&paint_portrait(unit_type, TEAMS[team]), 1.6));
         }
@@ -3584,6 +3588,206 @@ fn paint_relay(team: [u8; 3]) -> Canvas {
     c
 }
 
+// ----------------------------------------------------------- hero units ----
+
+/// Marshal Kade: caped VC commander with twin banners. 120x128.
+fn paint_marshal(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(120, 128);
+    let (dx, dy) = facing_vec(f);
+    let cx = 60.0;
+    let cy = 70.0;
+    let lift = if frame == 0 { 0.0 } else { 3.0 };
+    // Cape flowing opposite the facing.
+    c.poly(&[
+        (cx - 14.0, cy - 22.0),
+        (cx + 14.0, cy - 22.0),
+        (cx + 20.0 - dx * 10.0, cy + 34.0),
+        (cx - 20.0 - dx * 10.0, cy + 34.0),
+    ], rgba([30, 36, 58]));
+    c.line(cx - 12.0 - dx * 8.0, cy + 30.0, cx + 16.0 - dx * 10.0, cy + 32.0, 2.0, rgba([48, 56, 86]));
+    // Banner poles with team pennants.
+    for side in [-1.0f32, 1.0] {
+        let px = cx + side * 16.0;
+        c.line(px, cy - 20.0, px + side * 4.0, cy - 58.0, 2.2, rgba([90, 96, 108]));
+        c.poly(&[
+            (px + side * 4.0, cy - 58.0),
+            (px + side * 18.0, cy - 52.0),
+            (px + side * 4.0, cy - 46.0),
+        ], rgba(team));
+        c.glow(px + side * 10.0, cy - 52.0, 6.0, team, 0.4);
+    }
+    // Legs: heavy greaves.
+    plate(&mut c, &[(cx - 16.0, cy + 22.0 + lift), (cx - 4.0, cy + 22.0 + lift), (cx - 6.0, cy + 46.0 - lift * 0.5), (cx - 16.0, cy + 46.0 - lift * 0.5)], GUNMETAL_DARK, 1.0);
+    plate(&mut c, &[(cx + 4.0, cy + 24.0 - lift), (cx + 16.0, cy + 24.0 - lift), (cx + 16.0, cy + 48.0 + lift * 0.3), (cx + 6.0, cy + 48.0 + lift * 0.3)], GUNMETAL_DARK, 0.9);
+    c.rect((cx - 18.0) as i32, (cy + 44.0) as i32, 16, 8, rgba([30, 32, 38]));
+    c.rect((cx + 4.0) as i32, (cy + 46.0) as i32, 16, 8, rgba([28, 30, 36]));
+    // Torso: gilded command armor.
+    plate(&mut c, &[(cx - 22.0, cy - 20.0), (cx + 22.0, cy - 20.0), (cx + 18.0, cy + 24.0), (cx - 18.0, cy + 24.0)], GUNMETAL, 1.05);
+    c.poly(&[(cx - 16.0 + dx * 4.0, cy - 16.0), (cx + dx * 8.0, cy - 22.0 + dy * 3.0), (cx + dx * 8.0, cy + 8.0), (cx - 12.0 + dx * 4.0, cy + 14.0)], rgba(scale_rgb(GUNMETAL, 1.2)));
+    // Gold trim + core.
+    c.line(cx - 18.0, cy - 18.0, cx + 18.0, cy - 18.0, 2.0, rgba([201, 162, 39]));
+    c.glow(cx + dx * 6.0, cy - 2.0, 9.0, team, 0.8);
+    c.rect((cx + dx * 6.0 - 3.0) as i32, (cy - 8.0) as i32, 6, 12, rgba(scale_rgb(team, 1.3)));
+    // Massive pauldrons with gold edge.
+    plate(&mut c, &[(cx - 36.0, cy - 28.0), (cx - 10.0, cy - 32.0), (cx - 8.0, cy - 16.0), (cx - 32.0, cy - 12.0)], STEEL_LIT, 0.98);
+    plate(&mut c, &[(cx + 10.0, cy - 32.0), (cx + 36.0, cy - 28.0), (cx + 32.0, cy - 12.0), (cx + 8.0, cy - 16.0)], GUNMETAL, 0.9);
+    c.line(cx - 34.0, cy - 26.0, cx - 12.0, cy - 30.0, 2.5, rgba([201, 162, 39]));
+    c.line(cx + 12.0, cy - 30.0, cx + 34.0, cy - 26.0, 2.5, rgba([201, 162, 39]));
+    // Commander helm with crest.
+    plate(&mut c, &[(cx - 8.0, cy - 44.0), (cx + 8.0, cy - 44.0), (cx + 10.0, cy - 30.0), (cx - 10.0, cy - 30.0)], scale_rgb(GUNMETAL, 1.15), 1.0);
+    c.poly(&[(cx - 2.0, cy - 58.0), (cx + 2.0, cy - 58.0), (cx + 4.0, cy - 42.0), (cx - 4.0, cy - 42.0)], rgba([201, 162, 39]));
+    if dy > -0.5 {
+        let vx = cx + dx * 4.0;
+        c.line(vx - 5.0, cy - 36.0, vx + 5.0, cy - 36.0, 2.4, rgba(VISOR));
+        c.glow(vx, cy - 36.0, 7.0, VISOR, 0.7);
+    }
+    // Heavy gun arm.
+    let gx = cx + dx * 30.0;
+    let gy = cy + dy * 12.0 - 2.0;
+    c.line(cx + dx * 14.0, cy - 4.0, gx, gy, 6.5, rgba(GUNMETAL_DARK));
+    c.line(gx - dx * 4.0, gy - dy * 2.0, gx, gy, 8.0, rgba(STEEL_LIT));
+    c.glow(gx, gy, 5.0, team, 0.6);
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.3);
+    c
+}
+
+/// Broodmother Sszrak: crowned brood queen. 144x128.
+fn paint_broodmother(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(144, 128);
+    let (dx, dy) = facing_vec(f);
+    let cx = 72.0;
+    let cy = 72.0;
+    let step = if frame == 0 { 4.0 } else { -4.0 };
+    // Eight legs.
+    for k in 0..4 {
+        let off = -27.0 + k as f32 * 18.0;
+        let l = if k % 2 == 0 { step } else { -step };
+        kleg(&mut c, cx + off, cy + 6.0, cx + off - 12.0, cy + 22.0 - l * 0.3, cx + off - 15.0 + l, cy + 42.0, 4.0);
+        kleg(&mut c, cx + off, cy + 6.0, cx + off + 12.0, cy + 24.0 + l * 0.3, cx + off + 15.0 - l, cy + 44.0, 4.0);
+    }
+    // Swollen egg abdomen behind: membrane with glowing eggs showing.
+    c.dome(cx - dx * 22.0, cy + 2.0, 32.0, 24.0, MEMBRANE);
+    for k in 0..5 {
+        let h = hash2(k, f as i32, 611);
+        let ex = cx - dx * 22.0 - 20.0 + (h % 40) as f32;
+        let ey = cy - 8.0 + ((h >> 8) % 22) as f32;
+        c.dome(ex, ey, 5.0, 6.0, scale_rgb(MEMBRANE, 1.15));
+        c.glow(ex, ey + 2.0, 5.0, KYTH_GLOW, 0.5);
+    }
+    // Main carapace, tiered + scalloped.
+    c.dome(cx + dx * 4.0, cy - 8.0, 30.0, 22.0, CHITIN);
+    scallop(&mut c, cx + dx * 4.0, cy - 4.0, 26.0, 32.0);
+    c.dome(cx + dx * 8.0, cy - 20.0, 20.0, 13.0, CHITIN_LIGHT);
+    scallop(&mut c, cx + dx * 8.0, cy - 17.0, 17.0, 22.0);
+    // Spine crown: tall team-tinted rack.
+    for k in 0..5 {
+        let sx = cx - 16.0 + k as f32 * 8.0;
+        let h = 14.0 + ((k as i32 - 2).abs() as f32) * -3.0 + 10.0;
+        c.poly(&[(sx - 2.5, cy - 30.0), (sx, cy - 30.0 - h), (sx + 2.5, cy - 30.0)], rgba(team));
+        c.glow(sx, cy - 32.0 - h, 4.0, team, 0.4);
+    }
+    // Head with crowned plates + eye cluster.
+    c.dome(cx + dx * 22.0, cy - 6.0 + dy * 8.0, 12.0, 9.0, CHITIN_LIGHT);
+    if dy > -0.5 {
+        let ex = cx + dx * 26.0;
+        let ey = cy - 8.0 + dy * 9.0;
+        for (ox, oy) in [(-3.0f32, 0.0f32), (0.0, -2.0), (3.0, 0.0)] {
+            c.set((ex + ox) as i32, (ey + oy) as i32, rgba(KYTH_GLOW));
+        }
+        c.glow(ex, ey, 7.0, KYTH_GLOW, 0.7);
+    }
+    // Scythe fore-claws.
+    for side in [-1.0f32, 1.0] {
+        let px = cx + dx * 30.0 - dy * side * 16.0;
+        let py = cy + dy * 16.0 + dx * side * 10.0;
+        c.poly(&[
+            (px - 3.0, py - 5.0),
+            (px + dx * 20.0 + 2.0, py + dy * 12.0 - 4.0),
+            (px + dx * 16.0, py + dy * 10.0 + 3.0),
+            (px, py + 2.0),
+        ], rgba(CHITIN_LIGHT));
+        c.line(px + dx * 4.0, py, px + dx * 18.0, py + dy * 10.0, 1.8, rgba(team));
+    }
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.3);
+    c
+}
+
+/// Magnus Vex: coil titan with a magnet hammer. 132x136.
+fn paint_magnus(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(132, 136);
+    let (dx, dy) = facing_vec(f);
+    let cx = 66.0;
+    let cy = 76.0;
+    let lift = if frame == 0 { 0.0 } else { 3.0 };
+    // Massive legs.
+    fer_leg(&mut c, cx - 12.0, cy + 12.0, cx - 20.0, cy + 30.0, cx - 14.0 + lift, cy + 52.0, 6.0);
+    fer_leg(&mut c, cx + 12.0, cy + 12.0, cx + 20.0, cy + 30.0, cx + 14.0 - lift, cy + 52.0, 6.0);
+    // Torso: tiered rusted plates with a gold-violet core.
+    plate(&mut c, &[(cx - 26.0, cy - 18.0), (cx + 26.0, cy - 18.0), (cx + 22.0, cy + 16.0), (cx - 22.0, cy + 16.0)], RUST, 1.0);
+    plate(&mut c, &[(cx - 20.0, cy - 34.0), (cx + 20.0, cy - 34.0), (cx + 24.0, cy - 16.0), (cx - 24.0, cy - 16.0)], [124, 90, 62], 1.0);
+    rust_wear(&mut c, (cx - 22.0) as i32, (cy - 30.0) as i32, 44, 42, 881);
+    c.glow(cx + dx * 6.0, cy - 6.0, 10.0, COIL, 0.85);
+    c.rect((cx + dx * 6.0 - 4.0) as i32, (cy - 12.0) as i32, 8, 12, rgba(scale_rgb(COIL, 1.3)));
+    // Shoulder coil stacks: rings that pulse.
+    for side in [-1.0f32, 1.0] {
+        let px = cx + side * 30.0;
+        plate(&mut c, &[(px - 8.0, cy - 40.0), (px + 8.0, cy - 40.0), (px + 10.0, cy - 16.0), (px - 10.0, cy - 16.0)], SCRAP, 1.0);
+        for k in 0..3 {
+            let ry = cy - 38.0 + k as f32 * 7.0;
+            c.ellipse(px, ry, 9.0, 3.0, rgba(scale_rgb(COIL, 0.8)));
+        }
+        let pu = if frame == 0 { 0.4 } else { 0.7 };
+        c.glow(px, cy - 28.0, 12.0, COIL, pu);
+    }
+    // Helm: sealed mask with a coil halo.
+    plate(&mut c, &[(cx - 9.0, cy - 52.0), (cx + 9.0, cy - 52.0), (cx + 11.0, cy - 36.0), (cx - 11.0, cy - 36.0)], SCRAP, 1.05);
+    c.ellipse(cx, cy - 56.0, 14.0, 4.5, rgba(scale_rgb(COIL, 0.75)));
+    c.glow(cx, cy - 56.0, 14.0, COIL, 0.5);
+    if dy > -0.5 {
+        c.line(cx + dx * 4.0 - 4.0, cy - 44.0, cx + dx * 4.0 + 4.0, cy - 44.0, 2.2, rgba(COIL));
+    }
+    // Magnet hammer: thick haft + massive disc head.
+    let hx = cx + dx * 34.0;
+    let hy = cy + dy * 14.0 + 2.0;
+    c.line(cx + dx * 14.0, cy - 2.0, hx, hy, 5.5, rgba([58, 50, 44]));
+    c.dome(hx + dx * 4.0, hy + dy * 2.0, 12.0, 8.0, [64, 60, 68]);
+    c.ellipse(hx + dx * 4.0, hy + dy * 2.0, 7.0, 4.0, rgba(scale_rgb(COIL, 0.9)));
+    c.glow(hx + dx * 4.0, hy + dy * 2.0, 11.0, COIL, 0.7);
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.28);
+    c
+}
+
+/// Broodling: disposable summoned swarmling. 64x56.
+fn paint_broodling(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
+    let mut c = Canvas::new(64, 56);
+    let (dx, dy) = facing_vec(f);
+    let cx = 32.0;
+    let cy = 30.0;
+    let step = if frame == 0 { 3.0 } else { -3.0 };
+    kleg(&mut c, cx - 4.0, cy + 2.0, cx - 12.0 + step, cy + 8.0, cx - 15.0 + step, cy + 18.0, 2.0);
+    kleg(&mut c, cx + 4.0, cy + 2.0, cx + 12.0 - step, cy + 8.0, cx + 15.0 - step, cy + 18.0, 2.0);
+    c.poly(&[
+        (cx - dx * 12.0 - dy * 5.0, cy - dy * 6.0 + dx * 3.0),
+        (cx + dx * 10.0, cy + dy * 5.0 - 5.0),
+        (cx + dx * 14.0, cy + dy * 7.0),
+        (cx + dx * 10.0, cy + dy * 5.0 + 4.0),
+        (cx - dx * 12.0 + dy * 5.0, cy - dy * 6.0 - dx * 3.0),
+    ], rgba(CHITIN));
+    c.line(cx + dx * 10.0, cy + dy * 5.0, cx + dx * 16.0, cy + dy * 8.0 - 1.0, 1.4, rgba(team));
+    if dy > -0.5 {
+        c.set((cx + dx * 8.0) as i32, (cy + dy * 4.0 - 2.0) as i32, rgba(KYTH_GLOW));
+        c.glow(cx + dx * 8.0, cy + dy * 4.0 - 2.0, 4.0, KYTH_GLOW, 0.6);
+    }
+    // Decay shimmer: they're temporary and look it.
+    c.glow(cx, cy, 10.0, KYTH_GLOW, 0.25);
+    c.outline_t(OUTLINE, 2);
+    c.rim(OUTLINE, 1.25);
+    c
+}
+
 // ------------------------------------------------------------- portraits ----
 //
 // Console bust portraits: head-and-shoulders closeups on a dark scanlined
@@ -3897,6 +4101,43 @@ fn paint_portrait(unit_type: usize, team: [u8; 3]) -> Canvas {
                 c.glow(88.0, ry, rr, COIL, 0.35);
             }
             rust_wear(&mut c, 62, 60, 52, 40, 201);
+        }
+        // Marshal: scarred commander, gold-trimmed crest helm.
+        22 => {
+            vc_shoulders(&mut c, team);
+            let y = vc_helm(&mut c, scale_rgb(GUNMETAL, 1.1));
+            c.poly(&[(84.0, 40.0), (92.0, 40.0), (94.0, 8.0), (82.0, 8.0)], rgba([201, 162, 39]));
+            c.line(56.0, 24.0, 120.0, 24.0, 3.0, rgba([201, 162, 39]));
+            vc_visor(&mut c, y, VISOR, 26.0);
+            c.line(70.0, 96.0, 82.0, 104.0, 2.0, rgba([70, 74, 84]));
+        }
+        // Broodmother: crowned queen with an eye cluster.
+        23 => {
+            kyth_head(&mut c, 46.0, 40.0);
+            for k in 0..5 {
+                let x = 56.0 + k as f32 * 16.0;
+                let hh = 22.0 + ((k as i32 - 2).abs() as f32) * -4.0 + 8.0;
+                c.poly(&[(x - 4.0, 42.0), (x, 42.0 - hh), (x + 4.0, 42.0)], rgba(team));
+                c.glow(x, 40.0 - hh, 5.0, team, 0.4);
+            }
+            kyth_eyes(&mut c, 5, 74.0, 48.0);
+            c.dome(88.0, 118.0, 40.0, 18.0, MEMBRANE);
+            c.glow(88.0, 120.0, 20.0, KYTH_GLOW, 0.4);
+        }
+        // Magnus: sealed mask under a coil halo.
+        24 => {
+            fer_shoulders(&mut c, team);
+            plate(&mut c, &[(64.0, 48.0), (112.0, 48.0), (116.0, 100.0), (60.0, 100.0)], SCRAP, 1.05);
+            c.rect(70, 70, 36, 6, rgba(COIL));
+            c.glow(88.0, 73.0, 16.0, COIL, 0.7);
+            c.ellipse(88.0, 36.0, 30.0, 9.0, rgba(scale_rgb(COIL, 0.8)));
+            c.glow(88.0, 36.0, 28.0, COIL, 0.5);
+            rust_wear(&mut c, 62, 50, 52, 48, 891);
+        }
+        // Broodling: reuse the skitter face.
+        25 => {
+            kyth_head(&mut c, 34.0, 42.0);
+            kyth_eyes(&mut c, 2, 70.0, 26.0);
         }
         // Skywing already 4; trooper default for anything unmapped.
         _ => {

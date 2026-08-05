@@ -287,7 +287,7 @@ fn content_systems_work() {
         pos: FxVec2::from_int(46, 41),
         ticks_left: orion_sim::STORM_DURATION,
         owner: 0,
-    });
+    kind: 0, });
     let hp_before: i32 = clump
         .iter()
         .filter_map(|id| s.get(*id).map(|e| e.hp))

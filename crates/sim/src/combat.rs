@@ -146,9 +146,23 @@ impl State {
                                 pos: target,
                                 ticks_left: crate::STORM_DURATION,
                                 owner,
+                                kind: 0,
                             });
                             self.events.push(crate::state::SimEvent::Cast { pos: target });
                         }
+                        self.finish_order(i);
+                    } else {
+                        self.scratch_vel[i] = self.follow_field(i, field, target);
+                    }
+                }
+                Order::CastAbility { slot, target, field } => {
+                    let pos = self.entities[i].pos;
+                    let tag = self.data.units[self.entities[i].def as usize].tag.clone();
+                    let range = crate::hero::ability(&tag, slot)
+                        .map(|a| a.cast_range)
+                        .unwrap_or(crate::fixed::Fx::ZERO);
+                    if dist_sq_raw(pos, target) <= (range.0 as i64) * (range.0 as i64) {
+                        self.fire_ability(i, slot, Some(target));
                         self.finish_order(i);
                     } else {
                         self.scratch_vel[i] = self.follow_field(i, field, target);

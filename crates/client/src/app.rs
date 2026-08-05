@@ -41,6 +41,8 @@ pub enum Mode {
     Placing(DefId),
     /// Click a target point for Plasma Storm.
     CastTarget,
+    /// Click a target point for a hero ability (slot).
+    AbilityTarget(u8),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -280,6 +282,10 @@ impl App {
                 "stormcaller" => 5,
                 "bulwark" => 13,
                 "burrower" => 15,
+                "marshal" => 22,
+                "broodmother" => 23,
+                "magnus" => 24,
+                "broodling" => 25,
                 "scrapper" => 16,
                 "arclight" => 17,
                 "mauler" => 18,
@@ -1073,6 +1079,16 @@ impl App {
             }
         }
 
+        // Hero ability hotkeys (F/G) — fixed keys, mutable context.
+        if self.selected_hero().is_some() {
+            if code == KeyCode::KeyF {
+                self.use_hero_ability(0);
+                return;
+            } else if code == KeyCode::KeyG {
+                self.use_hero_ability(1);
+                return;
+            }
+        }
         let Some(action) = self.action_for_context(code) else { return };
         self.run_action(action);
     }
@@ -1112,6 +1128,7 @@ impl App {
         if self.any_selected_caster() && self.settings.key_for(Action::CastStorm) == code {
             return Some(Action::CastStorm);
         }
+
         self.settings.action_for(code)
     }
 
@@ -1130,6 +1147,35 @@ impl App {
             let d = &self.state.data.units[e.def as usize];
             d.weapon_siege.is_some() || d.shield_aura.is_some()
         })
+    }
+
+    /// The selected hero (if any) — abilities key off it.
+    pub(crate) fn selected_hero(&self) -> Option<orion_sim::EntityId> {
+        self.own_selected_units().find(|id| {
+            let e = &self.state.entities[id.idx as usize];
+            self.state.data.units[e.def as usize].hero
+        })
+    }
+
+    /// Fire or arm hero ability `slot` for the selected hero.
+    pub(crate) fn use_hero_ability(&mut self, slot: u8) {
+        let Some(id) = self.selected_hero() else { return };
+        let e = &self.state.entities[id.idx as usize];
+        let tag = self.state.data.units[e.def as usize].tag.clone();
+        let Some(spec) = orion_sim::hero::ability(&tag, slot) else { return };
+        if e.energy < spec.cost {
+            self.deny("NOT ENOUGH ENERGY");
+            return;
+        }
+        if spec.cast_range.0 == 0 {
+            let target = e.pos;
+            self.pending.push((
+                self.human,
+                Command::UseAbility { caster: id, slot, target },
+            ));
+        } else {
+            self.mode = Mode::AbilityTarget(slot);
+        }
     }
 
     pub(crate) fn any_selected_burrow(&self) -> bool {
@@ -1358,6 +1404,17 @@ impl App {
                             },
                         ));
                         self.ping(wx, wy, 1);
+                        self.sfx(Sfx::AckAttack);
+                    }
+                    self.mode = Mode::Normal;
+                }
+                Mode::AbilityTarget(slot) => {
+                    let (wx, wy) = self.cam.screen_to_world(self.mouse.0, self.mouse.1);
+                    if let Some(caster) = self.selected_hero() {
+                        self.pending.push((
+                            self.human,
+                            Command::UseAbility { caster, slot, target: fx(wx, wy) },
+                        ));
                         self.sfx(Sfx::AckAttack);
                     }
                     self.mode = Mode::Normal;
@@ -2343,6 +2400,7 @@ impl App {
                         pos: orion_sim::FxVec2::from_int(bx + 6, by + 4),
                         ticks_left: 60,
                         owner: self.human,
+                        kind: 0,
                     });
                     s.step(&[]);
                     self.selection =
@@ -3148,6 +3206,13 @@ impl App {
         west.push(self.state.spawn_unit(0, ud("skywing"), FxVec2::from_int(c.0 - 8, c.1 + 4)));
         let caster = self.state.spawn_unit(0, ud("stormcaller"), FxVec2::from_int(c.0 - 9, c.1 - 5));
         self.state.entities[caster.idx as usize].energy = 200;
+        // Heroes, one per faction, energized for ability captures.
+        let mar = self.state.spawn_unit(0, ud("marshal"), FxVec2::from_int(c.0 - 12, c.1 + 2));
+        self.state.entities[mar.idx as usize].energy = 200;
+        let bm = self.state.spawn_unit(1, ud("broodmother"), FxVec2::from_int(c.0 + 12, c.1 + 1));
+        self.state.entities[bm.idx as usize].energy = 200;
+        let mag = self.state.spawn_unit(0, ud("magnus"), FxVec2::from_int(c.0 + 4, c.1 - 12));
+        self.state.entities[mag.idx as usize].energy = 200;
         // East: Kyth Assembly.
         let mut east = Vec::new();
         for k in 0..5 {
@@ -3173,6 +3238,9 @@ impl App {
             (1, Command::AttackMove { units: east, target, queued: false }),
             (0, Command::AttackMove { units: north, target, queued: false }),
             (0, Command::Cast { caster, target: FxVec2::from_int(c.0 + 6, c.1) }),
+            (0, Command::UseAbility { caster: mar, slot: 0, target: FxVec2::from_int(c.0 + 8, c.1 - 2) }),
+            (1, Command::UseAbility { caster: bm, slot: 0, target: FxVec2::from_int(c.0 + 12, c.1 + 1) }),
+            (0, Command::UseAbility { caster: mag, slot: 0, target: FxVec2::from_int(c.0 + 2, c.1 - 4) }),
         ];
         self.state.step(&cmds);
         // Park the capture camera on the brawl.
@@ -3667,19 +3735,36 @@ impl App {
     fn draw_air_effects(&self, out: &mut Vec<Inst>, glow: &mut Vec<Inst>) {
         let zoom = self.cam.zoom;
         let book = &self.gfx.book;
-        // Active Plasma Storms: crackling zone.
+        // Active zones: storms + hero abilities, tinted by kind.
         for s in &self.state.storms {
             let t = TilePos::of(s.pos);
             if !self.visible(t) && !self.reveal_all {
                 continue;
             }
             let (sx, sy) = self.world_to_screen_elev(s.pos.x.to_f32(), s.pos.y.to_f32());
-            let rad = orion_sim::STORM_RADIUS.to_f32() * 32.0 * zoom;
-            self.gfx.sprite(out, book.blast_ring, sx, sy, rad * 2.0, rad, [0.5, 0.9, 1.0, 0.35]);
+            let (zc, zr): ([f32; 3], f32) = match s.kind {
+                1 => ([1.0, 0.7, 0.3], 2.5),  // barrage
+                2 => ([0.55, 1.0, 0.35], 3.0), // corrosive
+                3 => ([0.72, 0.58, 1.0], 3.5), // magnetic well
+                _ => ([0.5, 0.9, 1.0], orion_sim::STORM_RADIUS.to_f32()),
+            };
+            let rad = zr * 32.0 * zoom;
+            self.gfx.sprite(out, book.blast_ring, sx, sy, rad * 2.0, rad, [zc[0], zc[1], zc[2], 0.35]);
             // Charged air: pulsing additive dome over the zone.
             let pulse = 0.10 + 0.05 * (self.state.tick as f32 * 0.35).sin();
-            self.gfx.sprite(glow, book.glow_soft, sx, sy, rad * 2.2, rad * 1.1, [0.45, 0.85, 1.0, pulse]);
-            for k in 0..7 {
+            self.gfx.sprite(glow, book.glow_soft, sx, sy, rad * 2.2, rad * 1.1, [zc[0], zc[1], zc[2], pulse]);
+            // Magnetic well: debris spiraling inward.
+            if s.kind == 3 {
+                for k in 0..6 {
+                    let a = k as f32 * 1.05 - self.state.tick as f32 * 0.14;
+                    let rr = rad * (0.25 + ((self.state.tick as f32 * 0.02 + k as f32 * 0.37) % 1.0) * 0.75);
+                    let px = sx + a.cos() * rr;
+                    let py = sy + a.sin() * rr * 0.5;
+                    self.gfx.sprite(glow, book.spark, px, py, 4.0 * zoom, 4.0 * zoom, [zc[0], zc[1], zc[2], 0.7]);
+                }
+            }
+            let bolts = if s.kind == 0 { 7 } else if s.kind == 1 { 4 } else { 0 };
+            for k in 0..bolts {
                 let h = crate::atlas::hash2(k, (self.state.tick / 2) as i32, 913);
                 let a = (h % 628) as f32 / 100.0;
                 let rr = ((h >> 8) % 100) as f32 / 100.0 * rad;
@@ -3692,10 +3777,10 @@ impl App {
                     bx + ((h >> 16) % 9) as f32 - 4.0,
                     by,
                     1.3 * zoom,
-                    [0.7, 0.95, 1.0, 0.85],
+                    [zc[0].max(0.7), zc[1], zc[2], 0.85],
                 );
-                self.gfx.sprite(out, book.spark, bx, by, 5.0 * zoom, 5.0 * zoom, [0.7, 0.95, 1.0, 0.9]);
-                self.gfx.sprite(glow, book.glow_soft, bx, by, 16.0 * zoom, 10.0 * zoom, [0.5, 0.9, 1.0, 0.5]);
+                self.gfx.sprite(out, book.spark, bx, by, 5.0 * zoom, 5.0 * zoom, [zc[0], zc[1], zc[2], 0.9]);
+                self.gfx.sprite(glow, book.glow_soft, bx, by, 16.0 * zoom, 10.0 * zoom, [zc[0], zc[1], zc[2], 0.5]);
             }
         }
         for e in &self.effects {

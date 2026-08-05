@@ -71,6 +71,9 @@ pub struct UnitRaw {
     /// Can burrow: hidden and untargetable underground, but cannot act.
     #[serde(default)]
     pub burrow: bool,
+    /// Hero: unique per player (one alive at a time), has abilities.
+    #[serde(default)]
+    pub hero: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -170,6 +173,7 @@ pub struct UnitDef {
     pub race: u8,
     pub shield_aura: Option<(Fx, i32)>,
     pub burrow: bool,
+    pub hero: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -269,6 +273,7 @@ impl GameData {
                     .shield_aura
                     .map(|(r, pct)| (Fx::from_f64_data(r), pct as i32)),
                 burrow: u.burrow,
+                hero: u.hero,
             })
             .collect();
 

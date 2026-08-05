@@ -20,6 +20,7 @@ pub(crate) enum CardAction {
     Research(u8),
     SiegeBtn,
     StormBtn,
+    AbilityBtn(u8),
     CancelMode,
     CancelConstructionBtn,
 }
@@ -877,7 +878,7 @@ impl App {
                     Self::tip_action("CANCEL", "CLOSE THE BUILD MENU."),
                 ));
             }
-            Mode::Placing(_) | Mode::AttackMove | Mode::CastTarget => {
+            Mode::Placing(_) | Mode::AttackMove | Mode::CastTarget | Mode::AbilityTarget(_) => {
                 list.push((
                     "ESC".into(),
                     "CANCEL".into(),
@@ -1034,6 +1035,24 @@ impl App {
                             ),
                         ));
                     }
+                    if let Some(id) = self.selected_hero() {
+                        let e = &self.state.entities[id.idx as usize];
+                        let tag = self.state.data.units[e.def as usize].tag.clone();
+                        for slot in 0..2u8 {
+                            if let Some(spec) = orion_sim::hero::ability(&tag, slot) {
+                                list.push((
+                                    if slot == 0 { "F".into() } else { "G".into() },
+                                    format!("{} {}E", spec.name, spec.cost),
+                                    CardIcon::Letter,
+                                    CardAction::AbilityBtn(slot),
+                                    Self::tip_action(
+                                        spec.name,
+                                        "HERO ABILITY. COSTS ENERGY; ZONES ARE AIMED WITH A CLICK.",
+                                    ),
+                                ));
+                            }
+                        }
+                    }
                     if self.any_selected_caster() {
                         list.push((
                             key_of(crate::config::Action::CastStorm),
@@ -1130,6 +1149,7 @@ impl App {
             Mode::AttackMove => Some("ATTACK MOVE: CLICK TARGET"),
             Mode::Placing(_) => Some("CLICK TO PLACE   SHIFT: CHAIN   ESC: CANCEL"),
             Mode::CastTarget => None, // handled below with the live cost
+            Mode::AbilityTarget(_) => Some("CLICK A TARGET POINT FOR THE ABILITY"),
             _ => None,
         };
         let storm_hint;
@@ -1387,6 +1407,7 @@ impl App {
                     }
                 }
                 CardAction::SiegeBtn => self.run_action(crate::config::Action::SiegeToggle),
+                CardAction::AbilityBtn(slot) => self.use_hero_ability(slot),
                 CardAction::StormBtn => self.run_action(crate::config::Action::CastStorm),
                 CardAction::CancelMode => self.mode = Mode::Normal,
                 CardAction::CancelConstructionBtn => {

@@ -33,6 +33,7 @@ impl State {
         self.tick_energy();
         let mut damage = self.tick_behavior(); // fills scratch_vel, returns hits
         self.tick_storms(&mut damage);
+        self.tick_decay();
         self.apply_damage(&damage);
         self.integrate_movement();
         self.update_fog();
@@ -126,6 +127,21 @@ impl State {
                 }
                 if !self.requirement_met(player, udef.requires) {
                     return;
+                }
+                // Heroes are unique: one alive (or queued) per player.
+                if udef.hero {
+                    let alive = self.entities.iter().any(|e| {
+                        e.alive
+                            && e.owner == player
+                            && e.kind == EntityKind::Unit
+                            && e.def == *unit
+                    });
+                    let queued = self.entities.iter().any(|e| {
+                        e.alive && e.owner == player && e.queue.contains(unit)
+                    });
+                    if alive || queued {
+                        return;
+                    }
                 }
                 let (used, provided) = self.supply(player);
                 if used + udef.supply > provided {
@@ -243,6 +259,26 @@ impl State {
                 let field =
                     self.fields.insert(compute_flow_field(&self.map, &self.blocked, tt));
                 self.issue_order(i, Order::Cast { target, field }, false);
+            }
+            Command::UseAbility { caster, slot, target } => {
+                let Some(i) = self.owned_unit(player, *caster) else { return };
+                let e = &self.entities[i];
+                let tag = self.data.units[e.def as usize].tag.clone();
+                let Some(spec) = crate::hero::ability(&tag, *slot) else { return };
+                if e.energy < spec.cost || e.burrowed {
+                    return;
+                }
+                if spec.cast_range.0 == 0 {
+                    // Instant, centered on the hero.
+                    self.fire_ability(i, *slot, None);
+                } else {
+                    let target = self.map.clamp_pos(*target);
+                    let tt = TilePos::of(target);
+                    let field = self
+                        .fields
+                        .insert(compute_flow_field(&self.map, &self.blocked, tt));
+                    self.issue_order(i, Order::CastAbility { slot: *slot, target, field }, false);
+                }
             }
             Command::Build { worker, building, site, queued } => {
                 let Some(i) = self.owned_unit(player, *worker) else { return };
@@ -462,25 +498,141 @@ impl State {
     /// Plasma Storms pulse damage in their radius every 8 ticks. A unit
     /// inside several storms takes ONE pulse, not one per storm — stacked
     /// storms would otherwise multiply damage past any counterplay.
+    /// Execute a hero ability from `i` (validated by the caller for cost).
+    /// `at` targets zone abilities; instant kinds center on the hero.
+    pub(crate) fn fire_ability(&mut self, i: usize, slot: u8, at: Option<crate::fixed::FxVec2>) {
+        let tag = self.data.units[self.entities[i].def as usize].tag.clone();
+        let Some(spec) = crate::hero::ability(&tag, slot) else { return };
+        if self.entities[i].energy < spec.cost {
+            return;
+        }
+        self.entities[i].energy -= spec.cost;
+        let pos = self.entities[i].pos;
+        let owner = self.entities[i].owner;
+        match spec.kind {
+            crate::hero::AbilityKind::Heal { amount, radius } => {
+                let r_sq = (radius.0 as i64) * (radius.0 as i64);
+                for j in 0..self.entities.len() {
+                    let t = &self.entities[j];
+                    if t.alive
+                        && t.owner == owner
+                        && t.kind == EntityKind::Unit
+                        && crate::fixed::dist_sq_raw(t.pos, pos) <= r_sq
+                    {
+                        let cap = self.data.units[t.def as usize].hp;
+                        let t = &mut self.entities[j];
+                        t.hp = (t.hp + amount).min(cap);
+                    }
+                }
+                self.events.push(crate::state::SimEvent::Cast { pos });
+            }
+            crate::hero::AbilityKind::Burst { damage, radius } => {
+                let r_sq = (radius.0 as i64) * (radius.0 as i64);
+                let mut burst: Vec<(u32, i32, bool)> = Vec::new();
+                for j in 0..self.entities.len() {
+                    let t = &self.entities[j];
+                    if t.alive
+                        && t.owner != owner
+                        && t.owner != crate::state::NEUTRAL
+                        && t.kind != EntityKind::Resource
+                        && crate::fixed::dist_sq_raw(t.pos, pos) <= r_sq
+                    {
+                        burst.push((j as u32, damage, true));
+                    }
+                }
+                self.apply_damage(&burst);
+                self.events.push(crate::state::SimEvent::Cast { pos });
+            }
+            crate::hero::AbilityKind::Summon { unit_tag, count, ttl } => {
+                if let Some(def) =
+                    self.data.units.iter().position(|u| u.tag == unit_tag)
+                {
+                    for k in 0..count {
+                        let a = crate::fixed::Fx::from_ratio(628 * k as i32, 100 * count as i32);
+                        let off = crate::fixed::FxVec2::new(
+                            crate::fixed::Fx::from_ratio((a.to_f32().cos() * 96.0) as i32, 64),
+                            crate::fixed::Fx::from_ratio((a.to_f32().sin() * 96.0) as i32, 64),
+                        );
+                        let id = self.spawn_unit(owner, def as u16, self.map.clamp_pos(pos + off));
+                        self.entities[id.idx as usize].decay = ttl;
+                    }
+                    self.events.push(crate::state::SimEvent::Cast { pos });
+                }
+            }
+            crate::hero::AbilityKind::Zone { kind, duration } => {
+                let zp = at.unwrap_or(pos);
+                self.storms.push(crate::state::Storm { pos: zp, ticks_left: duration, owner, kind });
+                self.events.push(crate::state::SimEvent::Cast { pos: zp });
+            }
+        }
+    }
+
+    /// Summoned units burn down their lifetime.
+    pub(crate) fn tick_decay(&mut self) {
+        for i in 0..self.entities.len() {
+            let e = &mut self.entities[i];
+            if e.alive && e.decay > 0 {
+                e.decay -= 1;
+                if e.decay == 0 {
+                    self.kill(i as u32);
+                }
+            }
+        }
+    }
+
     fn tick_storms(&mut self, hits: &mut Vec<(u32, i32, bool)>) {
-        let radius = crate::STORM_RADIUS;
-        let r_sq = (radius.0 as i64) * (radius.0 as i64);
+        // Per-kind zone stats: (radius, pulse damage, pulse period).
         // Pulses ride the global clock (not per-storm phase) so "one pulse
-        // per unit" holds across storms cast at different times.
-        let mut struck = vec![false; self.entities.len()];
-        let pulse_now = self.tick % 8 == 0;
+        // per unit per kind" holds across overlapping zones.
+        fn zone_stats(kind: u8) -> (crate::fixed::Fx, i32, u32) {
+            match kind {
+                1 => (crate::fixed::Fx::from_ratio(5, 2), 12, 12), // barrage
+                2 => (crate::fixed::Fx::from_int(3), 4, 8),        // corrosive
+                3 => (crate::fixed::Fx::from_ratio(7, 2), 2, 8),   // mag well
+                _ => (crate::STORM_RADIUS, crate::STORM_PULSE_DMG, 8),
+            }
+        }
+        let mut struck = vec![[false; 4]; self.entities.len()];
         for k in 0..self.storms.len() {
             self.storms[k].ticks_left -= 1;
-            if pulse_now {
-                let pos = self.storms[k].pos;
+            let kind = self.storms[k].kind;
+            let pos = self.storms[k].pos;
+            let (radius, dmg, period) = zone_stats(kind);
+            let r_sq = (radius.0 as i64) * (radius.0 as i64);
+            if self.tick % period == 0 {
                 for (i, e) in self.entities.iter().enumerate() {
                     if e.alive
-                        && !struck[i]
+                        && !struck[i][kind as usize]
                         && e.kind != EntityKind::Resource
                         && dist_sq_raw(pos, e.pos) <= r_sq
                     {
-                        struck[i] = true;
-                        hits.push((i as u32, crate::STORM_PULSE_DMG, true));
+                        struck[i][kind as usize] = true;
+                        hits.push((i as u32, dmg, true));
+                    }
+                }
+            }
+            // Magnetic well drags ground units toward its center.
+            if kind == 3 {
+                let pull = crate::fixed::Fx::from_ratio(3, 20);
+                for i in 0..self.entities.len() {
+                    let e = &self.entities[i];
+                    if !e.alive
+                        || e.kind != EntityKind::Unit
+                        || e.sieged
+                        || e.burrowed
+                        || self.data.units[e.def as usize].fly
+                    {
+                        continue;
+                    }
+                    let d_sq = dist_sq_raw(pos, e.pos);
+                    if d_sq > r_sq || d_sq == 0 {
+                        continue;
+                    }
+                    let to = pos - e.pos;
+                    let nudge = to.scaled_to(pull);
+                    let next = self.map.clamp_pos(e.pos + nudge);
+                    if self.map.walkable(TilePos::of(next).x, TilePos::of(next).y) {
+                        self.entities[i].pos = next;
                     }
                 }
             }

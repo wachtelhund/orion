@@ -64,6 +64,8 @@ pub enum Order {
     Build { def: DefId, site: TilePos, phase: BuildPhase, field: u32 },
     /// Walk into range of `target`, then unleash a Plasma Storm.
     Cast { target: FxVec2, field: u32 },
+    /// Walking to cast a hero ability (slot into the hero's kit).
+    CastAbility { slot: u8, target: FxVec2, field: u32 },
 }
 
 impl Order {
@@ -104,6 +106,8 @@ pub struct Entity {
     pub carry_gas: bool,
     /// Spellcaster energy points.
     pub energy: u16,
+    /// Remaining lifetime in ticks for summoned units (0 = permanent).
+    pub decay: u16,
     /// Siege-capable unit is deployed (immobile, uses weapon_siege).
     pub sieged: bool,
     /// Burrow-capable unit is underground: hidden, untargetable by direct
@@ -142,6 +146,7 @@ impl Entity {
             amount: 0,
             carry_gas: false,
             energy: 0,
+            decay: 0,
             sieged: false,
             burrowed: false,
             transform: 0,
@@ -196,6 +201,8 @@ pub enum Command {
     Burrow { units: Vec<EntityId> },
     /// Cast Plasma Storm at a point (caster walks into range first).
     Cast { caster: EntityId, target: FxVec2 },
+    /// Hero ability by slot (0/1); zone abilities walk into range first.
+    UseAbility { caster: EntityId, slot: u8, target: FxVec2 },
     Build { worker: EntityId, building: DefId, site: TilePos, queued: bool },
     SetRally { building: EntityId, target: FxVec2 },
 }
@@ -217,12 +224,15 @@ pub enum SimEvent {
     ResearchDone { owner: u8 },
 }
 
-/// An active Plasma Storm zone. Part of logical state (checksummed).
+/// An active area zone (storms + hero abilities). Part of logical state
+/// (checksummed). Kinds: 0 Plasma Storm, 1 Barrage, 2 Corrosive Cloud,
+/// 3 Magnetic Well.
 #[derive(Clone, Debug)]
 pub struct Storm {
     pub pos: FxVec2,
     pub ticks_left: u16,
     pub owner: u8,
+    pub kind: u8,
 }
 
 pub struct State {
@@ -790,6 +800,7 @@ impl State {
             mix(e.progress as u64);
             mix(e.order_queue.len() as u64);
             mix(e.energy as u64);
+            mix(e.decay as u64);
             mix(e.sieged as u64);
             mix(e.burrowed as u64);
         }
