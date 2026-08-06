@@ -289,8 +289,13 @@ of all versions.
 
 ## Known gaps / next milestones (see SPEC.md for full list)
 
-1. 2v2: lockstep generalizes to N players, but lobby/matchmaker/UI don't
-   yet.
+1. 2v2: sim foundations SHIPPED (Player.team, State::hostile/allied,
+   team victory, shared team vision — tests/teams.rs; 1v1 unchanged,
+   team == player index). Remaining: N-player Lockstep (Cmds needs a
+   player tag; step waits on ALL players), multi-peer relay Lobby DO
+   (currently exactly host+join), 4-slot lobby UI with team picks, a
+   4-start map (tests/teams.rs has a fixture pattern), bot ally
+   awareness. Recommended order: relay DO -> net.rs -> UI -> map.
 2. macOS builds are unsigned — Gatekeeper right-click-open. Needs an
    Apple Developer ID in CI. (The repo going public did not change
    this.)
