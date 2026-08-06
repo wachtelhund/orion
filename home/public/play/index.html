@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Play Orion in your browser</title>
+<meta name="description" content="Play Orion v0.19.0 in the browser — no install. Needs a WebGPU browser (Chrome or Edge).">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<!-- Styles are inline: this screen has to paint before anything else loads. -->
+<style>
+  :root {
+    --bg: #05070d; --gold: #d8b25c; --gold-bright: #f2d692;
+    --ink: #e7edf8; --muted: #8c99b2; --edge: #1e2c47;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
+  body { color: var(--ink); font: 16px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+  /* winit creates and appends its own canvas. */
+  canvas { display: block; margin: 0 auto; outline: none; }
+
+  #boot {
+    position: fixed; inset: 0; z-index: 10;
+    display: grid; place-items: center; padding: 1.5rem;
+    background: radial-gradient(80% 60% at 50% 40%, #0d1728 0%, var(--bg) 70%);
+    text-align: center;
+  }
+  #boot[hidden] { display: none; }
+
+  .back {
+    position: fixed; top: 1.25rem; left: 1.5rem;
+    font-family: var(--mono); font-size: .7rem; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--muted); text-decoration: none;
+  }
+  .back:hover { color: var(--gold); }
+
+  .card { max-width: 34rem; }
+  .chip {
+    display: inline-block; margin: 0 0 1.5rem; padding: .35rem .9rem;
+    border: 1px solid #6f5a26; border-radius: 100px;
+    font-family: var(--mono); font-size: .62rem; letter-spacing: .2em;
+    text-transform: uppercase; color: var(--gold);
+  }
+  h1 {
+    font-family: var(--mono); font-size: clamp(1.75rem, 6vw, 2.75rem);
+    letter-spacing: .18em; margin: 0 0 1rem; color: #fff;
+  }
+  p { color: var(--muted); margin: 0 0 1rem; font-size: .95rem; }
+  .bar {
+    height: 3px; background: #16233c; border-radius: 3px;
+    overflow: hidden; margin: 1.5rem auto 0; max-width: 22rem;
+  }
+  .bar span {
+    display: block; height: 100%; width: 0;
+    background: linear-gradient(90deg, #6f5a26, var(--gold-bright));
+    transition: width .2s;
+  }
+  .actions { display: flex; flex-wrap: wrap; gap: .7rem; justify-content: center; margin-top: 1.75rem; }
+  .btn {
+    display: inline-block; padding: .7rem 1.3rem; border-radius: 3px;
+    font-family: var(--mono); font-size: .75rem; letter-spacing: .1em;
+    text-transform: uppercase; text-decoration: none;
+    border: 1px solid var(--edge); color: var(--ink);
+    background: linear-gradient(180deg, #16233c, #0d1728);
+  }
+  .btn:hover { border-color: #6f5a26; color: #fff; }
+  .btn-primary {
+    background: linear-gradient(180deg, var(--gold-bright), #c39b3f);
+    border-color: var(--gold-bright); color: #16110a; font-weight: 700;
+  }
+  .note {
+    margin-top: 1.75rem; font-size: .78rem; color: var(--muted); opacity: .8;
+    border-top: 1px solid var(--edge); padding-top: 1rem;
+  }
+  code {
+    font-family: var(--mono); font-size: .85em; color: #57d0e6;
+    background: #0c1424; border: 1px solid var(--edge);
+    border-radius: 3px; padding: .05em .35em;
+  }
+</style>
+</head>
+<body>
+<a class="back" href="/">← Orion</a>
+
+<div id="boot">
+  <div class="card">
+    <p class="chip">v0.19.0 · browser build</p>
+    <h1 id="title">LOADING</h1>
+    <p id="hint">Fetching the game — 3.2 MB, once. It runs entirely on your machine.</p>
+    <div class="bar" id="barwrap"><span id="bar"></span></div>
+    <div class="actions" id="actions" style="display:none">
+      <a class="btn btn-primary" href="/#download">Download the desktop build</a>
+      <a class="btn" href="/">Back to the site</a>
+    </div>
+    <p class="note" id="note">Runs entirely on your machine. Same build as the desktop download, so browser and desktop players can share lobbies. Ranked matchmaking and replay upload are desktop-only.</p>
+  </div>
+</div>
+
+<script type="module">
+  const boot = document.getElementById('boot');
+  const title = document.getElementById('title');
+  const hint = document.getElementById('hint');
+  const bar = document.getElementById('bar');
+  const barwrap = document.getElementById('barwrap');
+  const actions = document.getElementById('actions');
+
+  function fail(heading, detail) {
+    title.textContent = heading;
+    hint.innerHTML = detail;
+    barwrap.style.display = 'none';
+    actions.style.display = 'flex';
+  }
+
+  // Order matters: check the device first. Android Chrome *does* have WebGPU, so
+  // a phone would otherwise pull 3 MB and start a game that needs a mouse, a
+  // keyboard and right-click to play at all.
+  const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
+  const tooNarrow = window.innerWidth < 900;
+
+  if (coarsePointer || tooNarrow) {
+    fail(
+      'NEEDS A DESKTOP',
+      'Orion is a real-time strategy game built around a mouse, a keyboard and ' +
+        'right-click — there are no touch controls. Open this page on a ' +
+        'desktop in Chrome or Edge, or grab the desktop build.',
+    );
+  } else if (!navigator.gpu) {
+    fail(
+      'NEEDS WEBGPU',
+      'This browser has no WebGPU. Orion runs in the browser on ' +
+        '<strong>Chrome or Edge</strong> (desktop). The downloadable build ' +
+        'has no such requirement.',
+    );
+  } else {
+    try {
+      const res = await fetch('./dist/orion-client_bg.wasm');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // Stream it so a 3 MB download shows real progress instead of a blank wait.
+      const total = Number(res.headers.get('content-length')) || 0;
+      const reader = res.body?.getReader();
+      let bytes;
+      if (reader) {
+        const chunks = [];
+        let loaded = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          loaded += value.length;
+          if (total) bar.style.width = `${Math.round((loaded / total) * 100)}%`;
+        }
+        bytes = new Uint8Array(loaded);
+        let at = 0;
+        for (const c of chunks) { bytes.set(c, at); at += c.length; }
+      } else {
+        bytes = new Uint8Array(await res.arrayBuffer());
+      }
+      bar.style.width = '100%';
+      hint.textContent = 'Starting…';
+
+      const { default: init } = await import('./dist/orion-client.js');
+      await init({ module_or_path: bytes });
+      boot.hidden = true;
+    } catch (error) {
+      // winit exits main() through a control-flow exception by design; the game
+      // is running fine at that point.
+      if (`${error}`.includes('Using exceptions for control flow')) {
+        boot.hidden = true;
+      } else {
+        console.error(error);
+        fail('FAILED TO START', `Something went wrong: <code>${error}</code>`);
+      }
+    }
+  }
+</script>
+</body>
+</html>

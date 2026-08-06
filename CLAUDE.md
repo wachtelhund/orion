@@ -144,6 +144,18 @@ A-seat bias, compare swapped pairs), `probe_race r0 r1 seed` prints a
 Ferron's gas-hoarding leak was found). Client-side verification stays
 `--script` / `--shot` / `--mp-auto`.
 
+## Homepage (home/)
+
+The public site (orion.hampusnilsson.dev) lives in `home/` — static assets
+on Cloudflare Workers, no framework, wrangler is the only dependency. Its
+own CLAUDE.md has the architecture. The deployed site is fully
+self-contained (downloads, changelog, browser build are all same-origin
+assets); `npm run publish` from home/ mirrors content out of THIS repo,
+builds, tests and deploys — run it after cutting a release. A manual
+`Deploy homepage` Action does the same (needs the CLOUDFLARE_API_TOKEN
+repo secret). The old wachtelhund/orionhome repo is retired/archived —
+nothing references it.
+
 ## Multiplayer
 
 `sim/net.rs`: lockstep over newline-framed RON, transport-agnostic `Net`

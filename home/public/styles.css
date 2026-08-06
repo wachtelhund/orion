@@ -1,0 +1,327 @@
+/* Orion homepage — the game's own console palette: navy plates, gold piping. */
+
+:root {
+  --bg: #05070d;
+  --panel: #111d33;
+  --panel-deep: #0a1526;
+  --gold: #d8b25c;
+  --gold-bright: #f2d692;
+  --gold-dim: #6f5a26;
+  --teal: #57d0e6;
+  --ink: #e7edf8;
+  --muted: #8c99b2;
+  --edge: #1e2c47;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  --wrap: 1180px;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; scroll-padding-top: 4.5rem; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.65 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--teal); text-decoration: none; }
+a:hover { color: var(--gold); }
+
+img, video { max-width: 100%; height: auto; display: block; }
+
+.wrap { max-width: var(--wrap); margin: 0 auto; padding: 0 1.5rem; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+
+.skip {
+  position: absolute; left: -9999px; top: 0; background: var(--gold);
+  color: #10151f; padding: .6rem 1rem; z-index: 30;
+}
+.skip:focus { left: 0; }
+
+/* ---------- top bar ---------- */
+
+.topbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 12;
+  transition: background .25s, border-color .25s;
+  border-bottom: 1px solid transparent;
+}
+body.scrolled .topbar {
+  background: rgba(5, 7, 13, .88);
+  backdrop-filter: blur(12px);
+  border-bottom-color: rgba(216, 178, 92, .22);
+}
+.topbar-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; height: 4rem;
+}
+.wordmark {
+  font-family: var(--mono); font-size: 1rem; font-weight: 700;
+  letter-spacing: .42em; color: var(--gold); text-indent: .42em;
+}
+.wordmark:hover { color: var(--gold-bright); }
+.topbar nav { display: flex; gap: 1.5rem; }
+.topbar nav a {
+  font-family: var(--mono); font-size: .7rem; letter-spacing: .16em;
+  text-transform: uppercase; color: rgba(231, 237, 248, .72);
+}
+.topbar nav a:hover { color: var(--gold); }
+
+/* ---------- hero ---------- */
+
+.hero {
+  position: relative; min-height: 100svh;
+  display: grid; align-items: center;
+  overflow: hidden; isolation: isolate;
+}
+.hero-bg {
+  position: absolute; inset: 0; z-index: -2;
+  width: 100%; height: 100%; object-fit: cover;
+  /* Native art is 720x450 pixel art — keep the pixels crisp when upscaled. */
+  image-rendering: pixelated;
+}
+/* Dark enough for text contrast, light enough that it still reads as gameplay. */
+.hero-scrim {
+  position: absolute; inset: 0; z-index: -1;
+  background:
+    radial-gradient(115% 90% at 50% 45%, transparent 30%, rgba(5, 7, 13, .65) 100%),
+    linear-gradient(180deg, rgba(5, 7, 13, .72) 0%, rgba(5, 7, 13, .38) 38%, rgba(5, 7, 13, .88) 88%, var(--bg) 100%);
+}
+.hero-inner { padding-top: 5rem; padding-bottom: 6rem; text-align: center; }
+
+.chip {
+  display: inline-block; margin: 0 0 1.75rem;
+  padding: .4rem 1rem; border: 1px solid var(--gold-dim); border-radius: 100px;
+  background: rgba(10, 21, 38, .6); backdrop-filter: blur(4px);
+  font-family: var(--mono); font-size: .66rem; letter-spacing: .22em;
+  text-transform: uppercase; color: var(--gold);
+}
+
+.hero h1 {
+  font-family: var(--mono); font-weight: 700;
+  font-size: clamp(3.5rem, 15vw, 10rem);
+  letter-spacing: .16em; text-indent: .16em;
+  line-height: .95; margin: 0;
+  color: #fff;
+  text-shadow: 0 0 60px rgba(87, 208, 230, .35), 0 4px 30px rgba(0, 0, 0, .8);
+}
+
+.tagline {
+  margin: 1.6rem auto 0; max-width: 44rem;
+  font-size: clamp(1.05rem, 2.2vw, 1.5rem); line-height: 1.45;
+  color: rgba(231, 237, 248, .93);
+  text-shadow: 0 2px 20px rgba(0, 0, 0, .9);
+}
+
+.cta {
+  display: flex; flex-wrap: wrap; gap: .9rem;
+  justify-content: center; margin: 2.5rem 0 0;
+}
+.btn {
+  display: inline-flex; flex-direction: column; justify-content: center;
+  padding: .75rem 1.6rem; min-height: 3.4rem; border-radius: 3px;
+  font-family: var(--mono); font-size: .84rem; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink);
+  background: linear-gradient(180deg, #16233c, #0d1728);
+  border: 1px solid var(--edge);
+  transition: transform .15s, border-color .15s, box-shadow .15s;
+}
+.btn:hover {
+  color: #fff; border-color: var(--gold-dim);
+  transform: translateY(-2px); box-shadow: 0 10px 30px -12px #000;
+}
+.btn-sub {
+  font-size: .62rem; letter-spacing: .08em; opacity: .72;
+  text-transform: none; font-weight: 400; margin-top: .15rem;
+}
+.btn-primary {
+  background: linear-gradient(180deg, var(--gold-bright), #c39b3f);
+  border-color: var(--gold-bright); color: #16110a; font-weight: 700;
+  box-shadow: 0 0 40px -10px rgba(216, 178, 92, .55);
+}
+.btn-primary:hover {
+  color: #16110a; border-color: #fff;
+  box-shadow: 0 12px 34px -12px rgba(216, 178, 92, .8);
+}
+.btn-ghost { background: rgba(10, 21, 38, .55); backdrop-filter: blur(4px); }
+
+.pills {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem .65rem;
+  list-style: none; margin: 2.75rem 0 0; padding: 0;
+}
+.pills li {
+  padding: .35rem .85rem; border: 1px solid rgba(30, 44, 71, .9);
+  border-radius: 100px; background: rgba(10, 21, 38, .5);
+  font-family: var(--mono); font-size: .66rem; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted);
+}
+
+.scroll-cue {
+  position: absolute; bottom: 1.75rem; left: 50%; translate: -50% 0;
+  width: 1.5rem; height: 1.5rem; border-right: 1px solid var(--gold);
+  border-bottom: 1px solid var(--gold); rotate: 45deg; opacity: .55;
+  animation: cue 2.4s ease-in-out infinite;
+}
+.scroll-cue:hover { opacity: 1; }
+@keyframes cue {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(7px); }
+}
+
+/* ---------- about ---------- */
+
+.about { padding: 6rem 1.5rem 4.5rem; }
+.about-copy {
+  max-width: 42rem; margin: 0 auto; text-align: center;
+  font-size: clamp(1rem, 1.6vw, 1.18rem); line-height: 1.75; color: var(--muted);
+}
+.about-copy p { margin: 0; }
+.about-copy strong { color: var(--ink); }
+
+/* ---------- sections ---------- */
+
+.section { padding: 4.5rem 1.5rem; border-top: 1px solid var(--edge); }
+.section-title {
+  font-family: var(--mono); font-size: .78rem; letter-spacing: .28em;
+  text-transform: uppercase; color: var(--gold); margin: 0 0 .8rem;
+}
+.section-lede { color: var(--muted); font-size: .95rem; margin: 0 0 2rem; }
+
+/* ---------- downloads ---------- */
+
+.downloads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+.dl {
+  padding: 1.5rem; border-radius: 4px; border: 1px solid var(--edge);
+  background: linear-gradient(160deg, var(--panel) 0%, var(--panel-deep) 100%);
+  display: flex; flex-direction: column; gap: .5rem;
+  transition: border-color .2s, transform .2s;
+}
+.dl:hover { border-color: var(--gold-dim); transform: translateY(-3px); }
+.dl h3 {
+  font-family: var(--mono); font-size: .82rem; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--gold); margin: 0;
+}
+.dl .file { font-family: var(--mono); font-size: .68rem; color: var(--muted); word-break: break-all; }
+.dl .steps { font-size: .8rem; color: var(--muted); flex: 1; }
+.dl .steps p { margin: 0; }
+.dl .btn { align-self: stretch; align-items: center; margin-top: .6rem; }
+
+code {
+  font-family: var(--mono); font-size: .85em; color: var(--teal);
+  background: #0c1424; border: 1px solid var(--edge);
+  border-radius: 3px; padding: .05em .35em;
+}
+
+/* ---------- changelog ---------- */
+
+.release {
+  margin-bottom: .6rem; border-radius: 4px; border: 1px solid var(--edge);
+  background: linear-gradient(160deg, var(--panel) 0%, var(--panel-deep) 100%);
+}
+.release > summary {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem .9rem;
+  padding: 1rem 1.25rem; cursor: pointer; list-style: none;
+}
+.release > summary::-webkit-details-marker { display: none; }
+.release > summary::before {
+  content: "▸"; color: var(--gold); font-size: .72rem; transition: transform .15s;
+}
+.release[open] > summary::before { transform: rotate(90deg); }
+.release > summary:hover { background: rgba(216, 178, 92, .05); }
+.release .ver {
+  font-family: var(--mono); font-size: .82rem; letter-spacing: .1em; color: var(--gold);
+}
+.release .sum { color: var(--ink); font-size: .92rem; }
+.release .hl { color: var(--muted); font-size: .8rem; flex: 1 1 100%; padding-left: 1.2rem; }
+.release-body {
+  padding: .35rem 1.5rem 1.5rem; border-top: 1px solid var(--edge);
+  margin: 0 1.25rem; color: var(--muted); font-size: .92rem;
+}
+.release-body h3, .release-body h4, .release-body h5 {
+  font-family: var(--mono); font-size: .72rem; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--gold); margin: 1.6rem 0 .6rem;
+}
+.release-body img {
+  margin: 1rem 0; border-radius: 3px; border: 1px solid var(--edge); cursor: zoom-in;
+}
+.release-body ul { padding-left: 1.1rem; }
+.release-body li { margin-bottom: .45rem; }
+.release-body strong { color: var(--ink); }
+.release-body blockquote {
+  margin: 1rem 0; padding: .3rem 0 .3rem 1rem;
+  border-left: 2px solid var(--gold-dim); font-style: italic;
+}
+.release-body table {
+  width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .88rem;
+  display: block; overflow-x: auto;
+}
+.release-body th {
+  text-align: left; padding: .5rem .7rem; color: var(--gold);
+  font-family: var(--mono); font-size: .64rem; letter-spacing: .13em;
+  text-transform: uppercase; border-bottom: 1px solid var(--gold-dim);
+  white-space: nowrap;
+}
+.release-body td { padding: .5rem .7rem; vertical-align: top; border-bottom: 1px solid var(--edge); }
+
+/* ---------- footer ---------- */
+
+footer {
+  padding: 3rem 1.5rem 4rem; border-top: 1px solid var(--edge);
+  color: var(--muted); text-align: center;
+}
+.footer-mark {
+  display: inline-block; margin-bottom: 1rem;
+  font-family: var(--mono); font-size: .95rem; font-weight: 700;
+  letter-spacing: .4em; text-indent: .4em; color: var(--gold);
+}
+footer p { margin: 0 0 .35rem; font-size: .82rem; }
+.tiny { font-size: .72rem; opacity: .65; }
+
+/* ---------- lightbox ---------- */
+
+.lightbox {
+  position: fixed; inset: 0; z-index: 40; display: grid; place-items: center;
+  background: rgba(4, 6, 11, .94); padding: 2rem; cursor: zoom-out;
+}
+.lightbox[hidden] { display: none; }
+.lightbox img { max-height: 92vh; border-radius: 3px; border: 1px solid var(--gold-dim); }
+.lightbox-close {
+  position: absolute; top: 1rem; right: 1.5rem; background: none; border: 0;
+  color: var(--gold); font-size: 2.2rem; line-height: 1; cursor: pointer;
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 860px) {
+  .downloads { grid-template-columns: 1fr; }
+  .about { padding: 4rem 1.5rem 3rem; }
+  .hero-inner { padding-top: 6rem; padding-bottom: 5rem; }
+}
+
+@media (max-width: 620px) {
+  .topbar nav { gap: .9rem; }
+  .topbar nav a { font-size: .64rem; letter-spacing: .1em; }
+  .topbar nav a:first-child { display: none; }
+  .cta .btn { flex: 1 1 100%; align-items: center; }
+  .section { padding: 3.25rem 1.25rem; }
+  .release-body { margin: 0 .75rem; padding: .35rem .75rem 1.25rem; }
+}
+
+/* Orion needs a mouse, keyboard and right-click. Don't offer the browser build
+   where it cannot be played — /play explains itself if reached directly. */
+@media (pointer: coarse), (max-width: 899px) {
+  .play-only { display: none !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .scroll-cue { animation: none; }
+  * { transition: none !important; }
+}

@@ -1,0 +1,7 @@
+node_modules/
+.wrangler/
+.DS_Store
+*.log
+.claude/settings.local.json
+public/play/dist/
+public/downloads/

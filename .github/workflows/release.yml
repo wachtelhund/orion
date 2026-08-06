@@ -11,6 +11,18 @@ on:
         description: "Tag to build and attach assets to (e.g. v0.20.1)"
         required: true
         type: string
+      build_macos:
+        description: "macOS universal (bills 10x)"
+        type: boolean
+        default: true
+      build_linux:
+        description: "Linux x86_64"
+        type: boolean
+        default: true
+      build_windows:
+        description: "Windows x86_64 (bills 2x)"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -19,21 +31,38 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # The checkboxes pick the platforms; workflow_dispatch booleans cannot
+  # gate matrix entries directly, so a cheap Linux job assembles the
+  # matrix from them.
+  plan:
+    name: Plan builds
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        run: |
+          m='[]'
+          if [ "${{ inputs.build_macos }}" = "true" ]; then
+            m=$(echo "$m" | jq -c '. + [{"name":"macos-universal","os":"macos-14","artifact":"Orion-macOS.zip"}]')
+          fi
+          if [ "${{ inputs.build_linux }}" = "true" ]; then
+            m=$(echo "$m" | jq -c '. + [{"name":"linux-x86_64","os":"ubuntu-22.04","artifact":"orion-linux-x86_64.tar.gz"}]')
+          fi
+          if [ "${{ inputs.build_windows }}" = "true" ]; then
+            m=$(echo "$m" | jq -c '. + [{"name":"windows-x86_64","os":"windows-latest","artifact":"orion-windows-x86_64.zip"}]')
+          fi
+          echo "matrix=$m" >> "$GITHUB_OUTPUT"
+          echo "building: $m"
+
   build:
     name: ${{ matrix.name }}
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: macos-universal
-            os: macos-14
-            artifact: Orion-macOS.zip
-          - name: linux-x86_64
-            os: ubuntu-22.04
-            artifact: orion-linux-x86_64.tar.gz
-          - name: windows-x86_64
-            os: windows-latest
-            artifact: orion-windows-x86_64.zip
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

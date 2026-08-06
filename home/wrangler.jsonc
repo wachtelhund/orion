@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "orion-home",
+  "compatibility_date": "2026-08-01",
+
+  // Static assets only — no `main` worker script, so this runs entirely on
+  // Cloudflare's free static-asset serving (no Worker invocations billed).
+  "assets": {
+    "directory": "./public",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+
+  "routes": [
+    {
+      "pattern": "orion.hampusnilsson.dev",
+      "custom_domain": true
+    }
+  ],
+
+  "observability": {
+    "enabled": false
+  }
+}

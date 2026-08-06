@@ -1,0 +1,9 @@
+{
+  "name": "orion",
+  "fullName": "wachtelhund/orion",
+  "url": "https://github.com/wachtelhund/orion",
+  "description": "",
+  "language": "Rust",
+  "license": "MIT",
+  "sourceIsPublic": false
+}

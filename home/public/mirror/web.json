@@ -1,0 +1,9 @@
+{
+  "version": "v0.19.0",
+  "wasmBytes": 3347768,
+  "source": "orion-web-demo.zip",
+  "files": [
+    "orion-client.js",
+    "orion-client_bg.wasm"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "orion-home",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Static homepage for the Orion RTS \u2014 orion.hampusnilsson.dev",
+  "scripts": {
+    "mirror": "node scripts/mirror.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.mjs",
+    "dev": "wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "publish": "npm run mirror && npm run build && npm test && wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.42.0"
+  }
+}

@@ -1,0 +1,40 @@
+name: Deploy homepage
+
+# Manual only. Mirrors content out of this repo (README, wiki, release
+# binaries, the featured release's browser build), builds the static site,
+# runs its tests, and deploys to Cloudflare (orion.hampusnilsson.dev).
+#
+# Needs one repository secret: CLOUDFLARE_API_TOKEN (a token with
+# "Workers Scripts: Edit" on the account). Everything else uses the
+# workflow's own token — the mirror only reads this repo.
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Mirror, build, deploy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: home
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Mirror game content (readme, wiki, releases, web build)
+        env:
+          ORION_TOKEN: ${{ github.token }}
+        run: npm run mirror
+      - run: npm run build
+      - run: npm test
+      - name: Deploy to Cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN secret is not set (repo Settings -> Secrets and variables -> Actions)"
+            exit 1
+          fi
+          npx wrangler deploy
