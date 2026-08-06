@@ -1,8 +1,16 @@
 name: Release
 
+# Manual only: run from the Actions tab (or `gh workflow run`) with the
+# tag to build. Tag pushes deliberately do NOT trigger platform builds —
+# macOS bills 10x on private-repo Actions, and auto-building every tag
+# burned the monthly allowance in days (2026-08-05 billing lockout).
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and attach assets to (e.g. v0.20.1)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -29,6 +37,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -83,5 +93,6 @@ jobs:
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag }}
           files: ${{ matrix.artifact }}
           generate_release_notes: true

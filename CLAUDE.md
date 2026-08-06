@@ -249,9 +249,12 @@ hits and still connects; bot perception skips burrowed enemies).
 on every push/PR, plus a Linux-only client build — private-repo Actions
 bill macOS at 10x and Windows at 2x, and a 3-OS matrix per push burned
 the monthly allowance in days (2026-08-05 billing lockout). The full
-platform matrix runs only per release tag. `release.yml` triggers on
-`v*` tags: macOS universal (lipo), Linux x86_64, Windows x86_64, attached to
-the GitHub release. Linux builds need `libasound2-dev` (rodio/ALSA) — that
+platform matrix is MANUAL: `release.yml` is workflow_dispatch-only —
+Actions tab -> Release -> Run workflow with the tag (or `gh workflow
+run release.yml -f tag=vX.Y.Z`). Tagging alone builds nothing; Hampus
+decides when platform binaries get built. `release.yml` is manual
+(workflow_dispatch with a tag input): macOS universal (lipo), Linux
+x86_64, Windows x86_64, attached to the tag's GitHub release. Linux builds need `libasound2-dev` (rodio/ALSA) — that
 is the only system dependency.
 
 **Every minor and major version gets a wiki page** (mirrored into
