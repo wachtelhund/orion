@@ -69,9 +69,16 @@ impl State {
             f.vis.iter_mut().for_each(|v| *v = false);
         }
         MASKS.with(|masks| {
+            // Teammates share vision: every player's grid takes stamps
+            // from every allied entity. In 1v1 (team == player) this is
+            // exactly the old single-owner stamping.
+            for viewer in 0..self.fog.len() {
             for i in 0..self.entities.len() {
                 let e = &self.entities[i];
                 if !e.alive || e.owner == crate::state::NEUTRAL {
+                    continue;
+                }
+                if !self.allied(viewer as u8, e.owner) {
                     continue;
                 }
                 if e.kind == EntityKind::Resource {
@@ -84,7 +91,7 @@ impl State {
                 let viewer_elev =
                     if flying { u8::MAX } else { self.map.elev_at(t.x, t.y) };
                 let check_los = self.has_vision_blockers && !flying;
-                let fog = &mut self.fog[e.owner as usize];
+                let fog = &mut self.fog[viewer];
                 for &(dx, dy) in masks.get(sight) {
                     let (x, y) = (t.x + dx, t.y + dy);
                     if !self.map.in_bounds(x, y) {
@@ -106,6 +113,7 @@ impl State {
                     fog.vis[idx] = true;
                     fog.explored[idx] = true;
                 }
+            }
             }
         });
     }

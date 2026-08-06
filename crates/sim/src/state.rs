@@ -166,6 +166,9 @@ pub struct Player {
     pub gas: u32,
     pub defeated: bool,
     pub race: u8,
+    /// Team id — hostility, shared vision and victory are team-based.
+    /// 1v1 keeps team == player index, so nothing changes there.
+    pub team: u8,
     // End-of-game stats (deterministic, checksummed).
     pub units_built: u32,
     pub units_lost: u32,
@@ -285,6 +288,7 @@ impl State {
                     gas: 0,
                     defeated: false,
                     race: races.get(p).copied().unwrap_or(0),
+                    team: p as u8,
                     units_built: 0,
                     units_lost: 0,
                     buildings_lost: 0,
@@ -764,6 +768,23 @@ impl State {
 
     /// FNV-1a over logical state. Lockstep peers compare this every tick in
     /// dev builds; a mismatch is a desync at that exact tick.
+    /// Are two owners enemies? Neutral (destructibles) is hostile to no
+    /// one — it only dies to explicit attacks.
+    #[inline]
+    pub fn hostile(&self, a: u8, b: u8) -> bool {
+        a != NEUTRAL
+            && b != NEUTRAL
+            && self.players[a as usize].team != self.players[b as usize].team
+    }
+
+    /// Same team (includes self).
+    #[inline]
+    pub fn allied(&self, a: u8, b: u8) -> bool {
+        a != NEUTRAL
+            && b != NEUTRAL
+            && self.players[a as usize].team == self.players[b as usize].team
+    }
+
     pub fn checksum(&self) -> u64 {
         let mut h: u64 = 0xcbf29ce484222325;
         let mut mix = |v: u64| {
@@ -775,6 +796,7 @@ impl State {
             mix(p.minerals as u64);
             mix(p.gas as u64);
             mix(p.defeated as u64);
+            mix(p.team as u64);
             mix(p.weapons_level as u64);
             mix(p.armor_level as u64);
             mix(p.units_built as u64);

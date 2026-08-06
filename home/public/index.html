@@ -82,7 +82,17 @@
   <section class="wrap section" id="changelog">
     <h2 class="section-title">Changelog</h2>
     <p class="section-lede">Read live from the <a href="https://github.com/wachtelhund/orion/wiki" rel="noopener">project wiki</a>.</p>
-    <div class="changelog" id="changelog-list"><details class="release" id="v0.22.0"><summary><span class="ver">v0.22.0</span><span class="sum">The tutorial</span><span class="hl">The tutorial: a guided first game — seven objectives over a normal botless match, browser build included</span></summary><div class="release-body"><p>With the repo public and the game playable in a browser tab, strangers now land in Orion with zero context. The new <strong>TUTORIAL</strong> (top of the main menu, browser build included) turns that first five minutes into a guided game.</p>
+    <div class="changelog" id="changelog-list"><details class="release" id="v0.23.0"><summary><span class="ver">v0.23.0</span><span class="sum">Sudden death + a measured balance pass</span><span class="hl">Bot sudden death (thornwood stalls fixed, games end) + measured balance pass: Breaker siege 40-&gt;36, Mauler 100-&gt;110</span></summary><div class="release-body"><p>A gameplay batch: bot games now <em>end</em>, and the two most lopsided numbers in the game moved — with before/after measurements for all of it.</p>
+<h4>Bots: sudden death at 15 minutes</h4>
+<p>Two turtling bots on a multi-base map could rebuild faster than they killed — thornwood Hard mirrors mostly ran out the 20-minute clock. Past 15 minutes a bot now closes the macro tap: no new construction, no replacement workers. Armies decide the game instead of economies.</p>
+<p>Thornwood Hard went from &quot;mostly stalls&quot; to two-thirds of games resolving — and with games actually ending, the map turned out to be nearly balanced (VC 9 / Kyth 11 / Ferron 9 in the round-robin).</p>
+<h4>Balance: two numbers, measured</h4>
+<p>Hard-bot round-robins, 8 seeds per matchup, before → after:</p>
+<ul><li><strong>Breaker siege damage 40 → 36.</strong> The deployed tank&#39;s splash is the single biggest fight-winner in the game (the combat lab shows massed fights swinging entirely on it). Trimmed 10%.</li><li><strong>Mauler hp 100 → 110.</strong> Ferron&#39;s mineral-only front line dies first in every open-field trade; one more volley of survival.</li></ul>
+<p>Results: meridian VC-vs-Ferron narrowed <strong>12-4 → 10-6</strong>; causeway was already close (VC 16 / Kyth 10 / Ferron 12) and thornwood stayed even. Meridian still leans VC — especially against Kyth — and that&#39;s flagged for a taste pass with a human in the loop rather than deeper solo tuning. Soak: 24 games, zero invariant violations, all determinism shadows clean.</p>
+<h4>Also in this release</h4>
+<ul><li><code>--menu-shot tutorial3:</code> / <code>tutorial4:</code> step-jump captures for verifying tutorial hint rendering.</li></ul></div></details>
+<details class="release" id="v0.22.0"><summary><span class="ver">v0.22.0</span><span class="sum">The tutorial</span><span class="hl">The tutorial: a guided first game — seven objectives over a normal botless match, browser build included; v0.22.1: build grid puts HQ last, hints derive from live keybinds</span></summary><div class="release-body"><p>With the repo public and the game playable in a browser tab, strangers now land in Orion with zero context. The new <strong>TUTORIAL</strong> (top of the main menu, browser build included) turns that first five minutes into a guided game.</p>
 <p><img src="/mirror/changelog/images/v022-tutorial.png" alt="Tutorial opening" loading="lazy" decoding="async"></p>
 <h4>How it plays</h4>
 <p>Seven objectives, one at a time, in a gold-framed panel that stays out of the way:</p>
@@ -92,7 +102,10 @@
 <p>The tutorial is a thin objectives layer over a completely normal single-player game — same sim, same commands, same HUD. Nothing is simulated differently, so every habit learned transfers 1:1 to skirmish and multiplayer. Practice runs don&#39;t record replays.</p>
 <p>Objective predicates are unit-tested against the real sim (including the subtlety that mineral patches have limited mining slots).</p>
 <h4>Balance</h4>
-<p>No gameplay changes.</p></div></details>
+<p>No gameplay changes.</p>
+<h4>v0.22.1 — tutorial hotfix (thanks, first playtester)</h4>
+<p>The very first real tutorial run found it: &quot;B then Q&quot; placed a 400-mineral <strong>HQ</strong>, because the build grid was raw data order and the headquarters happened to be first. The pylon objective never advanced.</p>
+<ul><li>The build grid now puts the HQ <strong>last</strong> for every race — the first key a new player reaches raises supply, not an expansion.</li><li>Tutorial build hints are generated from the live build grid and your actual keybinds, so they can never drift from reality again.</li><li>The keybind screen&#39;s per-building &quot;PLACE ...&quot; labels (wrong per race and per order) became honest BUILD SLOT 1–7.</li></ul></div></details>
 <details class="release" id="v0.21.0"><summary><span class="ver">v0.21.0</span><span class="sum">Custom maps online + map sharing by code</span><span class="hl">Custom maps in multiplayer (the map travels in the handshake — browser peers too) + map sharing by 5-letter code</span></summary><div class="release-body"><p>The map editor stops being a single-player toy. Two changes, one theme: maps made in the editor now travel.</p>
 <h4>Custom maps in multiplayer</h4>
 <p>Host a lobby on any editor-made map — the joiner needs nothing. The map itself rides inside the match handshake, so the other player (desktop <strong>or browser</strong>) receives it in-band and both sides simulate the exact same terrain. No downloads, no version drift: verified end-to-end on the live relay with a native host and a headless-browser joiner playing 240 lockstep ticks on a custom map with matching checksums.</p>

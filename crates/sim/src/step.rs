@@ -515,7 +515,7 @@ impl State {
                 for j in 0..self.entities.len() {
                     let t = &self.entities[j];
                     if t.alive
-                        && t.owner == owner
+                        && self.allied(t.owner, owner)
                         && t.kind == EntityKind::Unit
                         && crate::fixed::dist_sq_raw(t.pos, pos) <= r_sq
                     {
@@ -532,8 +532,7 @@ impl State {
                 for j in 0..self.entities.len() {
                     let t = &self.entities[j];
                     if t.alive
-                        && t.owner != owner
-                        && t.owner != crate::state::NEUTRAL
+                        && self.hostile(owner, t.owner)
                         && t.kind != EntityKind::Resource
                         && crate::fixed::dist_sq_raw(t.pos, pos) <= r_sq
                     {
@@ -701,7 +700,7 @@ impl State {
             for j in 0..self.entities.len() {
                 let sp = &self.entities[j];
                 if !sp.alive
-                    || sp.owner != towner
+                    || !self.allied(sp.owner, towner)
                     || sp.kind != EntityKind::Unit
                     || !sp.sieged
                 {
@@ -740,10 +739,15 @@ impl State {
             });
             self.players[p].defeated = !has_building;
         }
+        // Team victory: the game ends when one TEAM has standing players.
+        // The winner slot is the lowest surviving player index — identical
+        // to the old rule in 1v1, where team == player.
         let alive: Vec<u8> = (0..self.players.len() as u8)
             .filter(|&p| !self.players[p as usize].defeated)
             .collect();
-        if alive.len() == 1 && self.players.len() > 1 {
+        let teams: std::collections::BTreeSet<u8> =
+            alive.iter().map(|&p| self.players[p as usize].team).collect();
+        if teams.len() == 1 && !alive.is_empty() && self.players.len() > 1 {
             self.winner = Some(alive[0]);
         }
     }

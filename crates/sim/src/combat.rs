@@ -278,8 +278,7 @@ impl State {
                 for &j in &self.buckets[self.map.idx(x, y)] {
                     let o = &self.entities[j as usize];
                     if o.alive
-                        && o.owner != owner
-                        && o.owner != crate::state::NEUTRAL
+                        && self.hostile(owner, o.owner)
                         && self.can_hit(i, o)
                     {
                         let d = dist_sq_raw(pos, o.pos);
@@ -294,8 +293,7 @@ impl State {
             for (j, o) in self.entities.iter().enumerate() {
                 if o.alive
                     && o.kind == EntityKind::Building
-                    && o.owner != owner
-                    && o.owner != crate::state::NEUTRAL
+                    && self.hostile(owner, o.owner)
                 {
                     let d = dist_sq_raw(pos, o.pos);
                     if d <= max_sq && self.visible_to(owner, j as u32) {

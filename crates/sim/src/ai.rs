@@ -1022,8 +1022,7 @@ impl Bot {
             .iter()
             .filter(|e| {
                 e.alive
-                    && e.owner != p
-                    && e.owner != crate::state::NEUTRAL
+                    && s.hostile(p, e.owner)
                     && e.kind != EntityKind::Resource
                     && !e.burrowed
                     && s.fog[p as usize].visible(&s.map, TilePos::of(e.pos))

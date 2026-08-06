@@ -1,30 +1,5 @@
 [
   {
-    "tag_name": "v0.21.0",
-    "name": "v0.21.0",
-    "html_url": "#download",
-    "draft": false,
-    "prerelease": false,
-    "published_at": "2026-08-06T12:49:07Z",
-    "assets": [
-      {
-        "name": "Orion-macOS.zip",
-        "size": 10720776,
-        "browser_download_url": "/downloads/v0.21.0/Orion-macOS.zip"
-      },
-      {
-        "name": "orion-linux-x86_64.tar.gz",
-        "size": 6264978,
-        "browser_download_url": "/downloads/v0.21.0/orion-linux-x86_64.tar.gz"
-      },
-      {
-        "name": "orion-windows-x86_64.zip",
-        "size": 5018251,
-        "browser_download_url": "/downloads/v0.21.0/orion-windows-x86_64.zip"
-      }
-    ]
-  },
-  {
     "tag_name": "v0.22.0",
     "name": "v0.22.0",
     "html_url": "#download",
@@ -71,6 +46,21 @@
         "name": "orion-windows-x86_64.zip",
         "size": 5032088,
         "browser_download_url": "/downloads/v0.22.1/orion-windows-x86_64.zip"
+      }
+    ]
+  },
+  {
+    "tag_name": "v0.23.0",
+    "name": "v0.23.0",
+    "html_url": "#download",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-08-06T15:52:54Z",
+    "assets": [
+      {
+        "name": "Orion-macOS.zip",
+        "size": 10995348,
+        "browser_download_url": "/downloads/v0.23.0/Orion-macOS.zip"
       }
     ]
   }
