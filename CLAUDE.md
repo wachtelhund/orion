@@ -246,7 +246,10 @@ hits and still connects; bot perception skips burrowed enemies).
 ## CI / releases
 
 `.github/workflows/ci.yml` runs tests + an 8-game soak + the stress budget
-on every push/PR, and builds all three platforms. `release.yml` triggers on
+on every push/PR, plus a Linux-only client build — private-repo Actions
+bill macOS at 10x and Windows at 2x, and a 3-OS matrix per push burned
+the monthly allowance in days (2026-08-05 billing lockout). The full
+platform matrix runs only per release tag. `release.yml` triggers on
 `v*` tags: macOS universal (lipo), Linux x86_64, Windows x86_64, attached to
 the GitHub release. Linux builds need `libasound2-dev` (rodio/ALSA) — that
 is the only system dependency.
