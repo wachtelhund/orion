@@ -38,7 +38,15 @@ pub const DEFAULT_PORT: u16 = 27515;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Msg {
     Hello { race: u8, version: String },
-    Start { seed: u64, host_race: u8, join_race: u8, map: String },
+    Start {
+        seed: u64,
+        host_race: u8,
+        join_race: u8,
+        map: String,
+        /// Custom maps travel inside the handshake (RON of `map::Map`) —
+        /// the joiner needs no file and no fetch. None for builtin maps.
+        map_ron: Option<String>,
+    },
     /// Handshake rejection (version mismatch etc.) — human-readable.
     Reject { reason: String },
     Cmds { tick: u32, cmds: Vec<Command>, checksum: Option<(u32, u64)> },
@@ -135,8 +143,20 @@ pub struct Started {
     pub races: [u8; 2],
     /// Map name (host's choice), resolved via `map::by_name`.
     pub map: String,
+    /// The map itself when it is not a builtin (custom/editor maps).
+    pub map_ron: Option<String>,
     /// Negotiated input delay in ticks.
     pub input_delay: u32,
+}
+
+impl Started {
+    /// The actual map to play: embedded custom map first, else builtin.
+    pub fn resolve_map(&self) -> Option<crate::map::Map> {
+        match &self.map_ron {
+            Some(src) => ron::de::from_str(src).ok(),
+            None => crate::map::by_name(&self.map),
+        }
+    }
 }
 
 /// Host-side handshake over any transport. The host picks the map.
@@ -145,6 +165,7 @@ pub fn host_handshake(
     my_race: u8,
     seed: u64,
     map: &str,
+    map_ron: Option<String>,
 ) -> std::io::Result<Started> {
     let join_race = match net.rx.recv() {
         Ok(Msg::Hello { race, version }) => {
@@ -161,7 +182,13 @@ pub fn host_handshake(
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad hello"));
         }
     };
-    net.send(&Msg::Start { seed, host_race: my_race, join_race, map: map.to_string() });
+    net.send(&Msg::Start {
+        seed,
+        host_race: my_race,
+        join_race,
+        map: map.to_string(),
+        map_ron: map_ron.clone(),
+    });
     // RTT probe: one round trip through whatever transport (and relay hop)
     // this session uses, so the input delay matches reality.
     let t0 = nettime::Instant::now();
@@ -187,6 +214,7 @@ pub fn host_handshake(
         local_player: 0,
         races: [my_race, join_race],
         map: map.to_string(),
+        map_ron,
         input_delay,
     })
 }
@@ -195,7 +223,7 @@ pub fn host_handshake(
 pub fn join_handshake(mut net: Net, my_race: u8) -> std::io::Result<Started> {
     net.send(&Msg::Hello { race: my_race, version: PROTOCOL_VERSION.to_string() });
     match net.rx.recv() {
-        Ok(Msg::Start { seed, host_race, join_race, map }) => {
+        Ok(Msg::Start { seed, host_race, join_race, map, map_ron }) => {
             // Answer the host's RTT probe, then wait for its delay pick.
             let mut input_delay = INPUT_DELAY_MIN;
             loop {
@@ -217,6 +245,7 @@ pub fn join_handshake(mut net: Net, my_race: u8) -> std::io::Result<Started> {
                 local_player: 1,
                 races: [host_race, join_race],
                 map,
+                map_ron,
                 input_delay,
             })
         }
@@ -239,7 +268,7 @@ pub fn fresh_seed() -> u64 {
 pub fn host_blocking(listener: TcpListener, my_race: u8, seed: u64) -> std::io::Result<Started> {
     let (stream, _) = listener.accept()?;
     let net = Net::from_stream(stream)?;
-    host_handshake(net, my_race, seed, "meridian")
+    host_handshake(net, my_race, seed, "meridian", None)
 }
 
 /// Join a host. Blocking — call in a thread.

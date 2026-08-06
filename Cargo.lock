@@ -1751,7 +1751,7 @@ dependencies = [
 
 [[package]]
 name = "orion-client"
-version = "0.20.1"
+version = "0.21.0"
 dependencies = [
  "bytemuck",
  "console_error_panic_hook",
@@ -1777,7 +1777,7 @@ dependencies = [
 
 [[package]]
 name = "orion-sim"
-version = "0.20.1"
+version = "0.21.0"
 dependencies = [
  "ron",
  "serde",

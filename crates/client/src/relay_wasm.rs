@@ -43,7 +43,13 @@ enum Phase {
     /// Join: sent Hello, waiting for Start.
     JoinWaitStart,
     /// Join: waiting for the host's delay pick.
-    JoinWaitGo { seed: u64, host_race: u8, join_race: u8, map: String },
+    JoinWaitGo {
+        seed: u64,
+        host_race: u8,
+        join_race: u8,
+        map: String,
+        map_ron: Option<String>,
+    },
     Done,
 }
 
@@ -232,6 +238,9 @@ fn pump(sess: &mut Session) -> bool {
                             host_race: sess.my_race,
                             join_race,
                             map: sess.map.clone(),
+                            // Browser hosts have no filesystem, so no custom
+                            // maps to embed — builtin names only.
+                            map_ron: None,
                         },
                     );
                     send_msg(&sess.ws, &Msg::Ping { k: 1 });
@@ -253,6 +262,7 @@ fn pump(sess: &mut Session) -> bool {
                         local_player: 0,
                         races: [sess.my_race, *join_race],
                         map: sess.map.clone(),
+                        map_ron: None,
                         input_delay: delay,
                     };
                     let _ = sess.result_tx.send(Ok(started));
@@ -260,12 +270,13 @@ fn pump(sess: &mut Session) -> bool {
                 }
             }
             Phase::JoinWaitStart => match &msg {
-                Msg::Start { seed, host_race, join_race, map } => {
+                Msg::Start { seed, host_race, join_race, map, map_ron } => {
                     sess.phase = Phase::JoinWaitGo {
                         seed: *seed,
                         host_race: *host_race,
                         join_race: *join_race,
                         map: map.clone(),
+                        map_ron: map_ron.clone(),
                     };
                 }
                 Msg::Reject { reason } => {
@@ -276,7 +287,7 @@ fn pump(sess: &mut Session) -> bool {
                 }
                 _ => {}
             },
-            Phase::JoinWaitGo { seed, host_race, join_race, map } => match &msg {
+            Phase::JoinWaitGo { seed, host_race, join_race, map, map_ron } => match &msg {
                 Msg::Ping { k } => {
                     send_msg(&sess.ws, &Msg::Pong { k: *k });
                 }
@@ -290,6 +301,7 @@ fn pump(sess: &mut Session) -> bool {
                         local_player: 1,
                         races: [*host_race, *join_race],
                         map: map.clone(),
+                        map_ron: map_ron.clone(),
                         input_delay: delay,
                     };
                     let _ = sess.result_tx.send(Ok(started));
@@ -431,7 +443,7 @@ pub fn host_relay_async_with_code(
     code: String,
     race: u8,
 ) -> (String, Receiver<io::Result<Started>>) {
-    host_relay_async_full(base, code, race, "COMMANDER", true, "meridian")
+    host_relay_async_full(base, code, race, "COMMANDER", true, "meridian", None)
 }
 
 pub fn host_relay_async_full(
@@ -441,6 +453,9 @@ pub fn host_relay_async_full(
     name: &str,
     private: bool,
     map: &str,
+    // Browser hosts have no local custom maps to embed; accepted for
+    // signature parity with the native module.
+    _map_ron: Option<String>,
 ) -> (String, Receiver<io::Result<Started>>) {
     let clean: String = name
         .chars()

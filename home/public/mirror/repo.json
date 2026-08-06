@@ -5,5 +5,5 @@
   "description": "",
   "language": "Rust",
   "license": "MIT",
-  "sourceIsPublic": false
+  "sourceIsPublic": true
 }

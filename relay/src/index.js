@@ -14,9 +14,11 @@ const LIST_CACHE_MS = 2000; // memoize /lobbies between client polls
 const MAX_LISTED = 200; // cap on public directory size
 
 // Per-connection relay caps. Lockstep sends ~24-48 frames/s per peer, all of
-// them short RON lines, so these leave >5x headroom while stopping the relay
-// from being used as a free data pipe.
-const MAX_MSG_BYTES = 16 * 1024;
+// them short RON lines — except the handshake's Start frame, which may
+// carry an embedded custom map (RON of map::Map, capped at 120 KiB client
+// side). The per-connection byte budget below is what actually stops the
+// relay from being used as a free data pipe.
+const MAX_MSG_BYTES = 160 * 1024;
 const MSG_RATE_PER_S = 120;
 const MSG_BURST = 300;
 const MAX_CONN_BYTES = 128 * 1024 * 1024;
@@ -81,6 +83,54 @@ export class Vault {
       const cors = { "access-control-allow-origin": "*" };
       if (!v) {
         return new Response("no replay with that code", { status: 404, headers: cors });
+      }
+      return new Response(v.data, { status: 200, headers: cors });
+    }
+
+    // Shared maps: same locker, "m:" prefix, same caps and TTL.
+    if (request.method === "POST" && url.pathname === "/map") {
+      const body = await request.text();
+      if (body.length > REPLAY_MAX_BYTES) {
+        return new Response("map too large to share", { status: 413 });
+      }
+      if (!body.startsWith("(")) {
+        return new Response("not a map", { status: 400 });
+      }
+      const now = Date.now();
+      const all = await this.state.storage.list({ prefix: "m:" });
+      let oldestKey = null;
+      let oldestAt = Infinity;
+      let live = 0;
+      for (const [k, v] of all) {
+        if (now - v.at > REPLAY_TTL_MS) {
+          await this.state.storage.delete(k);
+          continue;
+        }
+        live++;
+        if (v.at < oldestAt) {
+          oldestAt = v.at;
+          oldestKey = k;
+        }
+      }
+      if (live >= REPLAY_MAX_COUNT && oldestKey) {
+        await this.state.storage.delete(oldestKey);
+      }
+      let code;
+      do {
+        code = Array.from(
+          { length: 5 },
+          () => CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)]
+        ).join("");
+      } while (await this.state.storage.get("m:" + code));
+      await this.state.storage.put("m:" + code, { at: now, data: body });
+      return new Response(code, { status: 200 });
+    }
+    const mm = url.pathname.match(/^\/map\/([A-Z0-9]{4,8})$/);
+    if (mm && request.method === "GET") {
+      const v = await this.state.storage.get("m:" + mm[1]);
+      const cors = { "access-control-allow-origin": "*" };
+      if (!v) {
+        return new Response("no map with that code", { status: 404, headers: cors });
       }
       return new Response(v.data, { status: 200, headers: cors });
     }
@@ -649,8 +699,13 @@ export default {
       const id = env.MATCHMAKER.idFromName("matchmaker");
       return env.MATCHMAKER.get(id).fetch(request);
     }
-    // Replay sharing: upload gets a code, download by code.
-    if (url.pathname === "/replay" || url.pathname.startsWith("/replay/")) {
+    // Replay + map sharing: upload gets a code, download by code.
+    if (
+      url.pathname === "/replay" ||
+      url.pathname.startsWith("/replay/") ||
+      url.pathname === "/map" ||
+      url.pathname.startsWith("/map/")
+    ) {
       if (await rateLimited(env.LIST_LIMITER, ip)) return tooMany();
       const id = env.VAULT.idFromName("vault");
       return env.VAULT.get(id).fetch(request);

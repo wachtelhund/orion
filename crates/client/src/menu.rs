@@ -57,6 +57,7 @@ enum MenuAction {
     PlayReplay(usize),
     ToggleReplayShare,
     FetchReplayCode,
+    FetchMapCode,
     OpenUpdate,
     Rebind(Action),
 }
@@ -151,6 +152,9 @@ impl App {
                             ),
                             MenuAction::CycleMap,
                         ),
+                        // Fetch a shared map by its 5-letter code.
+                        #[cfg(not(target_arch = "wasm32"))]
+                        (format!("MAP CODE: {}_", self.map_code), MenuAction::FetchMapCode),
                         ("EASY".into(), MenuAction::StartGame(Difficulty::Easy)),
                         ("NORMAL".into(), MenuAction::StartGame(Difficulty::Normal)),
                         ("HARD".into(), MenuAction::StartGame(Difficulty::Hard)),
@@ -576,6 +580,15 @@ impl App {
         }
 
         // Page-specific copy.
+        if self.page == MenuPage::Difficulty {
+            if let Some(st) = &self.map_status {
+                let ts = self.ts(1.5);
+                let ok = !st.contains("FAILED");
+                let color = if ok { gold } else { [1.0, 0.5, 0.4, 1.0] };
+                let lw = self.gfx.text_width(ts, st);
+                self.gfx.text(out, cx - lw * 0.5, h * 0.215, ts, color, st);
+            }
+        }
         if self.page == MenuPage::Replays {
             if let Some(err) = &self.mp_error {
                 let ts = self.ts(1.5);
@@ -940,17 +953,23 @@ impl App {
             }
             MenuAction::CreateLobby { private } => {
                 self.mp_error = None;
-                // Custom maps are local files — the joiner wouldn't have
-                // them. Online play sticks to the shipped pool.
-                {
-                    let names = crate::app::all_map_names();
-                    let chosen = &names[self.map_choice % names.len()];
-                    if !orion_sim::map::MAP_NAMES.contains(&chosen.as_str()) {
-                        self.mp_error =
-                            Some("custom maps are single-player only (for now)".into());
-                        return;
+                let names = crate::app::all_map_names();
+                let chosen = names[self.map_choice % names.len()].clone();
+                // Custom maps travel inside the handshake — the joiner
+                // needs no file. Builtins go by name (small frames).
+                let map_ron = if orion_sim::map::MAP_NAMES.contains(&chosen.as_str()) {
+                    None
+                } else {
+                    match crate::editor::load_custom(&chosen)
+                        .and_then(|m| ron::ser::to_string(&m).ok())
+                    {
+                        Some(ron) => Some(ron),
+                        None => {
+                            self.mp_error = Some("could not load that custom map".into());
+                            return;
+                        }
                     }
-                }
+                };
                 self.settings.save(); // persist the name
                 self.mp_private = private;
                 let (code, rx) = crate::relay::host_relay_async_full(
@@ -959,7 +978,8 @@ impl App {
                     self.chosen_race,
                     &self.settings.player_name,
                     private,
-                    &crate::app::all_map_names()[self.map_choice % crate::app::all_map_names().len()],
+                    &chosen,
+                    map_ron,
                 );
                 self.mp_lobby_code = Some(code);
                 self.mp_waiting = Some(rx);
@@ -1040,6 +1060,9 @@ impl App {
             }
             MenuAction::FetchReplayCode => {
                 self.fetch_shared_replay();
+            }
+            MenuAction::FetchMapCode => {
+                self.fetch_shared_map();
             }
             MenuAction::PlayReplay(k) => {
                 if self.replay_share_mode {

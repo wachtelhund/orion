@@ -220,7 +220,14 @@ rotationally symmetric — run `cargo run -p orion-sim --example symmetry`
 point-symmetric (see `examples/mirror.rs`, the mirror-covariance probe that
 found the spawn bias: fixed-point Mul truncation, flow-field tie-break
 mirroring, spawn-arc symmetry all live downstream of it). The MP handshake
-carries the host's map choice; soak alternates maps per matchup cycle.
+carries the host's map choice — and for custom (editor) maps the map
+itself travels inside `Msg::Start` (`map_ron`), so joiners (including
+browser peers) need no file; the relay's per-message cap is sized for
+this (160 KiB). Maps also share by 5-letter code via the relay vault
+(`POST /map`, `GET /map/CODE`): editor `U` uploads, the difficulty
+page's MAP CODE row fetches into ~/.orion-maps and selects it. E2E:
+`--mp-auto host-pub:CODE:mapname` hosts a custom map by name.
+Soak alternates maps per matchup cycle.
 
 ## Ranked matchmaking
 

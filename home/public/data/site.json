@@ -1,24 +1,24 @@
 {
-  "generatedAt": "2026-08-06T07:15:44.185Z",
-  "sourceIsPublic": false,
+  "generatedAt": "2026-08-06T07:33:28.249Z",
+  "sourceIsPublic": true,
   "links": {
-    "primary": "#download",
-    "primaryLabel": "All downloads",
-    "primarySub": "Hosted right here",
-    "wiki": "#changelog",
+    "primary": "https://github.com/wachtelhund/orion",
+    "primaryLabel": "View source",
+    "primarySub": "GitHub · MIT",
+    "wiki": "https://github.com/wachtelhund/orion/wiki",
     "credit": "wachtelhund/orion"
   },
   "repo": {
     "name": "orion",
     "fullName": "wachtelhund/orion",
-    "url": "#download",
+    "url": "https://github.com/wachtelhund/orion",
     "description": "",
     "language": "Rust",
     "license": "MIT",
-    "wikiUrl": "#changelog",
+    "wikiUrl": "https://github.com/wachtelhund/orion/wiki",
     "releasesUrl": "#download"
   },
-  "tagline": "A StarCraft-style RTS built from scratch in Rust. No game engine — a purpose-built deterministic simulation with a wgpu isometric renderer. Three asymmetric races, skirmish AI, and online multiplayer via lobby codes. Full version history with screenshots: [docs/wiki](docs/wiki/Home.md). All art and audio are procedurally generated at startup: zero asset files.",
+  "tagline": "A StarCraft-style RTS built from scratch in Rust. No game engine — a purpose-built deterministic simulation with a wgpu isometric renderer. Three asymmetric races with heroes, skirmish AI, ranked online multiplayer, a map editor, and shareable replays. All art and audio are procedurally generated at startup: zero asset files.",
   "hero": {
     "tagline": "A StarCraft-style RTS built from scratch in Rust",
     "pills": [
@@ -28,7 +28,7 @@
       "ranked online multiplayer"
     ]
   },
-  "intro": "<p>No game engine — a purpose-built deterministic simulation with a wgpu isometric renderer. Three asymmetric races, skirmish AI, and online multiplayer via lobby codes. All art and audio are procedurally generated at startup: zero asset files.</p>",
+  "intro": "<p>No game engine — a purpose-built deterministic simulation with a wgpu isometric renderer. Three asymmetric races with heroes, skirmish AI, ranked online multiplayer, a map editor, and shareable replays. All art and audio are procedurally generated at startup: zero asset files.</p>",
   "install": {
     "macos": {
       "os": "macOS (Apple Silicon + Intel)",
@@ -47,27 +47,27 @@
     }
   },
   "release": {
-    "tag": "v0.19.0",
-    "name": "v0.19.0",
+    "tag": "v0.20.1",
+    "name": "v0.20.1",
     "url": "#download",
-    "publishedAt": "2026-08-05T10:47:18Z",
+    "publishedAt": "2026-08-05T14:02:32Z",
     "assets": [
       {
         "name": "Orion-macOS.zip",
-        "size": 10726387,
-        "url": "/downloads/v0.19.0/Orion-macOS.zip",
+        "size": 10947458,
+        "url": "/downloads/v0.20.1/Orion-macOS.zip",
         "platform": "macos"
       },
       {
         "name": "orion-windows-x86_64.zip",
-        "size": 5012702,
-        "url": "/downloads/v0.19.0/orion-windows-x86_64.zip",
+        "size": 5014479,
+        "url": "/downloads/v0.20.1/orion-windows-x86_64.zip",
         "platform": "windows"
       },
       {
         "name": "orion-linux-x86_64.tar.gz",
-        "size": 6244207,
-        "url": "/downloads/v0.19.0/orion-linux-x86_64.tar.gz",
+        "size": 6246362,
+        "url": "/downloads/v0.20.1/orion-linux-x86_64.tar.gz",
         "platform": "linux"
       }
     ]
@@ -202,8 +202,8 @@
     }
   ],
   "play": {
-    "version": "v0.19.0",
-    "wasmBytes": 3347768,
+    "version": "v0.20.1",
+    "wasmBytes": 3625313,
     "source": "orion-web-demo.zip",
     "files": [
       "orion-client.js",

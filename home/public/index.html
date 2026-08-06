@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Orion — A StarCraft-style RTS built from scratch in Rust</title>
-<meta name="description" content="A StarCraft-style RTS built from scratch in Rust. No game engine — a purpose-built deterministic simulation with a wgpu isometric renderer. Three asymmetric races, skirmish AI, and online multiplayer via lobby codes. Full version history with screenshots: [docs/wiki](docs/wiki/Home.md). All art and ">
+<meta name="description" content="A StarCraft-style RTS built from scratch in Rust. No game engine — a purpose-built deterministic simulation with a wgpu isometric renderer. Three asymmetric races with heroes, skirmish AI, ranked online multiplayer, a map editor, and shareable replays. All art and audio are procedurally generated at">
 <meta name="color-scheme" content="dark">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="styles.css">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Orion — A StarCraft-style RTS built from scratch in Rust">
-<meta property="og:description" content="A StarCraft-style RTS built from scratch in Rust. No game engine — a purpose-built deterministic simulation with a wgpu isometric renderer. Three asymmetric races, skirmish AI, and online multiplayer via lobby codes. Full version history with screenshots: [docs/wiki](docs/wiki/Home.md). All art and ">
+<meta property="og:description" content="A StarCraft-style RTS built from scratch in Rust. No game engine — a purpose-built deterministic simulation with a wgpu isometric renderer. Three asymmetric races with heroes, skirmish AI, ranked online multiplayer, a map editor, and shareable replays. All art and audio are procedurally generated at">
 <meta property="og:url" content="https://orion.hampusnilsson.dev/">
 <meta property="og:image" content="https://orion.hampusnilsson.dev/media/hero-poster.jpg">
 <meta name="twitter:card" content="summary_large_image">
@@ -25,7 +25,7 @@
       <a class="play-only" href="/play">Play</a>
       <a href="#download">Download</a>
       <a href="#changelog">Changelog</a>
-      <a href="#download" rel="noopener">GitHub</a>
+      <a href="https://github.com/wachtelhund/orion" rel="noopener">GitHub</a>
     </nav>
   </div>
 </header>
@@ -42,13 +42,13 @@
     <div class="hero-scrim"></div>
 
     <div class="hero-inner wrap">
-      <p class="chip" id="hero-eyebrow">v0.19.0 · free · MIT</p>
+      <p class="chip" id="hero-eyebrow">v0.20.1 · free · MIT</p>
       <h1>ORION</h1>
       <p class="tagline">A StarCraft-style RTS built from scratch in Rust</p>
 
       <div class="cta">
         <a class="btn btn-primary" id="hero-download" href="#download">
-          <span class="btn-label">Download v0.19.0</span>
+          <span class="btn-label">Download v0.20.1</span>
           <span class="btn-sub" id="hero-download-sub">Windows · macOS · Linux</span>
         </a>
         <a class="btn btn-ghost play-only" href="/play" rel="noopener">
@@ -64,24 +64,24 @@
   </section>
 
   <section class="about wrap" id="about">
-    <div class="about-copy"><p>No game engine — a purpose-built deterministic simulation with a wgpu isometric renderer. Three asymmetric races, skirmish AI, and online multiplayer via lobby codes. All art and audio are procedurally generated at startup: zero asset files.</p></div>
+    <div class="about-copy"><p>No game engine — a purpose-built deterministic simulation with a wgpu isometric renderer. Three asymmetric races with heroes, skirmish AI, ranked online multiplayer, a map editor, and shareable replays. All art and audio are procedurally generated at startup: zero asset files.</p></div>
   </section>
 
   <section class="wrap section" id="download">
     <h2 class="section-title">Download</h2>
     <p class="section-lede">
-      <strong id="release-tag">v0.19.0</strong><span id="release-date"> · Aug 5, 2026</span> —
+      <strong id="release-tag">v0.20.1</strong><span id="release-date"> · Aug 5, 2026</span> —
       precompiled, nothing to install. <a href="#download" rel="noopener">All releases</a> ·
-      <a href="#download" rel="noopener">build from source</a>
+      <a href="https://github.com/wachtelhund/orion" rel="noopener">build from source</a>
     </p>
-    <div class="downloads" id="downloads"><div class="dl frame" data-platform="macos"><h3>macOS (Apple Silicon + Intel)</h3><p class="file">Orion-macOS.zip</p><div class="steps"><p>Unzip → double-click <strong>Orion.app</strong>. First launch only: right-click → Open (it isn&#39;t notarized)</p></div><a class="btn btn-primary" href="/downloads/v0.19.0/Orion-macOS.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.19.0 · 10.2 MB</span></a></div>
-<div class="dl frame" data-platform="windows"><h3>Windows 10/11</h3><p class="file">orion-windows-x86_64.zip</p><div class="steps"><p>Unzip → double-click <strong>orion.exe</strong>. If SmartScreen objects: More info → Run anyway</p></div><a class="btn btn-primary" href="/downloads/v0.19.0/orion-windows-x86_64.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.19.0 · 4.8 MB</span></a></div>
-<div class="dl frame" data-platform="linux"><h3>Linux (x86_64)</h3><p class="file">orion-linux-x86_64.tar.gz</p><div class="steps"><p><code>tar xzf &amp;&amp; ./orion</code> (needs Vulkan drivers + ALSA <code>libasound2</code>)</p></div><a class="btn btn-primary" href="/downloads/v0.19.0/orion-linux-x86_64.tar.gz"><span class="btn-label">Download</span><span class="btn-sub">v0.19.0 · 6.0 MB</span></a></div></div>
+    <div class="downloads" id="downloads"><div class="dl frame" data-platform="macos"><h3>macOS (Apple Silicon + Intel)</h3><p class="file">Orion-macOS.zip</p><div class="steps"><p>Unzip → double-click <strong>Orion.app</strong>. First launch only: right-click → Open (it isn&#39;t notarized)</p></div><a class="btn btn-primary" href="/downloads/v0.20.1/Orion-macOS.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.20.1 · 10.4 MB</span></a></div>
+<div class="dl frame" data-platform="windows"><h3>Windows 10/11</h3><p class="file">orion-windows-x86_64.zip</p><div class="steps"><p>Unzip → double-click <strong>orion.exe</strong>. If SmartScreen objects: More info → Run anyway</p></div><a class="btn btn-primary" href="/downloads/v0.20.1/orion-windows-x86_64.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.20.1 · 4.8 MB</span></a></div>
+<div class="dl frame" data-platform="linux"><h3>Linux (x86_64)</h3><p class="file">orion-linux-x86_64.tar.gz</p><div class="steps"><p><code>tar xzf &amp;&amp; ./orion</code> (needs Vulkan drivers + ALSA <code>libasound2</code>)</p></div><a class="btn btn-primary" href="/downloads/v0.20.1/orion-linux-x86_64.tar.gz"><span class="btn-label">Download</span><span class="btn-sub">v0.20.1 · 6.0 MB</span></a></div></div>
   </section>
 
   <section class="wrap section" id="changelog">
     <h2 class="section-title">Changelog</h2>
-    <p class="section-lede">Read live from the <a href="#changelog" rel="noopener">project wiki</a>.</p>
+    <p class="section-lede">Read live from the <a href="https://github.com/wachtelhund/orion/wiki" rel="noopener">project wiki</a>.</p>
     <div class="changelog" id="changelog-list"><details class="release" id="v0.20.0"><summary><span class="ver">v0.20.0</span><span class="sum">Replay links: watch shared games in the browser</span><span class="hl">Replay links: ?replay=CODE plays a shared game from a URL; v0.20.1: browser brightness/sound/disconnect fixes from the first real web playtest</span></summary><div class="release-body"><p>v0.18.0 made replays shareable by code; now the code is all anyone needs. The web build&#39;s FETCH CODE row downloads a shared replay from the relay vault and plays it on the spot — no files, no install. Even better, replays are now <strong>linkable</strong>:</p>
 <p>https://&lt;demo-host&gt;/index.html?replay=KRCAP</p>
 <p>opens the demo and plays that shared game directly.</p>
@@ -295,7 +295,7 @@
 </main>
 
 <footer class="wrap">
-  <a class="footer-mark" href="#download" rel="noopener">ORION</a>
+  <a class="footer-mark" href="https://github.com/wachtelhund/orion" rel="noopener">ORION</a>
   <p>MIT · written in Rust · 3 releases</p>
   <p class="tiny">Built from wachtelhund/orion and its wiki · Aug 6, 2026</p>
 </footer>

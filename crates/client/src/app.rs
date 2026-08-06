@@ -165,6 +165,11 @@ pub struct App {
     pub replay_status: Option<String>,
     pub replay_share_rx: Option<std::sync::mpsc::Receiver<std::io::Result<String>>>,
     pub replay_fetch_rx: Option<std::sync::mpsc::Receiver<std::io::Result<String>>>,
+    /// Map sharing (difficulty page fetch row + editor upload).
+    pub map_code: String,
+    pub map_status: Option<String>,
+    pub map_share_rx: Option<std::sync::mpsc::Receiver<std::io::Result<String>>>,
+    pub map_fetch_rx: Option<std::sync::mpsc::Receiver<std::io::Result<String>>>,
     /// Set while hosting through the relay: show this code to the opponent.
     pub mp_lobby_code: Option<String>,
     pub mp_private: bool,
@@ -384,6 +389,10 @@ impl App {
             replay_status: None,
             replay_share_rx: None,
             replay_fetch_rx: None,
+            map_code: String::new(),
+            map_status: None,
+            map_share_rx: None,
+            map_fetch_rx: None,
             mp_lobby_code: None,
             mp_private: false,
             lobby_list: Vec::new(),
@@ -698,7 +707,15 @@ impl App {
         self.replay = None;
         self.record_replay = true;
         self.game_map = started.map.clone();
-        self.state = new_game_mp(started.seed, started.races[0], started.races[1], &started.map);
+        self.state = match started.resolve_map() {
+            Some(map) => State::new_with_races(
+                GameData::load_default(),
+                map,
+                started.seed,
+                &started.races,
+            ),
+            None => new_game_mp(started.seed, started.races[0], started.races[1], &started.map),
+        };
         self.human = started.local_player;
         self.mp = Some(Lockstep::new(started.net, started.local_player, started.input_delay));
         self.mp_waiting = None;
@@ -865,8 +882,84 @@ impl App {
         ));
     }
 
+    /// Download the map behind `map_code` into ~/.orion-maps and select it.
+    pub fn fetch_shared_map(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let code = self.map_code.trim().to_uppercase();
+            if code.is_empty() || self.map_fetch_rx.is_some() {
+                return;
+            }
+            self.map_status = Some(format!("FETCHING {code}..."));
+            self.map_fetch_rx = Some(crate::relay::fetch_map_async(
+                self.settings.relay_url.clone(),
+                code,
+            ));
+        }
+    }
+
     /// Poll the async share/fetch results (menu frame).
     fn poll_replay_net(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(rx) = &self.map_share_rx {
+                if let Ok(res) = rx.try_recv() {
+                    let msg = match res {
+                        Ok(code) => format!("MAP CODE: {} - SHARE IT", code.trim()),
+                        Err(e) => format!("SHARE FAILED: {e}").to_uppercase(),
+                    };
+                    if let Some(ed) = &mut self.editor {
+                        ed.status = msg.clone();
+                    }
+                    self.map_status = Some(msg);
+                    self.map_share_rx = None;
+                }
+            }
+            if let Some(rx) = &self.map_fetch_rx {
+                if let Ok(res) = rx.try_recv() {
+                    match res {
+                        Ok(ron_src) => {
+                            if ron::de::from_str::<orion_sim::map::Map>(&ron_src).is_err() {
+                                self.map_status =
+                                    Some("FETCH FAILED: NOT A VALID MAP".into());
+                            } else {
+                                let code = self.map_code.trim().to_uppercase();
+                                let stem = format!("shared-{code}");
+                                let dir = crate::editor::maps_dir();
+                                let _ = std::fs::create_dir_all(&dir);
+                                match std::fs::write(
+                                    dir.join(format!("{stem}.ron")),
+                                    &ron_src,
+                                ) {
+                                    Ok(()) => {
+                                        let names = all_map_names();
+                                        if let Some(k) =
+                                            names.iter().position(|n| *n == stem)
+                                        {
+                                            self.map_choice = k;
+                                        }
+                                        self.map_status = Some(format!(
+                                            "{code} FETCHED - MAP SELECTED"
+                                        ));
+                                        self.map_code.clear();
+                                    }
+                                    Err(e) => {
+                                        self.map_status = Some(
+                                            format!("SAVE FAILED: {e}").to_uppercase(),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.map_status =
+                                Some(format!("FETCH FAILED: {e}").to_uppercase())
+                        }
+                    }
+                    self.map_fetch_rx = None;
+                }
+            }
+        }
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(rx) = &self.replay_share_rx {
             if let Ok(res) = rx.try_recv() {
@@ -1163,6 +1256,33 @@ impl App {
                                 }
                             } else if ch.is_ascii_alphanumeric() && self.code_input.len() < 8 {
                                 self.code_input.push(ch.to_ascii_uppercase());
+                                used = true;
+                            }
+                        }
+                        if used {
+                            return;
+                        }
+                    }
+                }
+                // Map-code entry on the difficulty page.
+                if self.page == MenuPage::Difficulty
+                    && event.state == ElementState::Pressed
+                {
+                    if event.physical_key == PhysicalKey::Code(KeyCode::Backspace) {
+                        self.map_code.pop();
+                        return;
+                    }
+                    if event.physical_key == PhysicalKey::Code(KeyCode::Enter)
+                        && !self.map_code.trim().is_empty()
+                    {
+                        self.fetch_shared_map();
+                        return;
+                    }
+                    if let Some(text) = &event.text {
+                        let mut used = false;
+                        for ch in text.chars() {
+                            if ch.is_ascii_alphanumeric() && self.map_code.len() < 8 {
+                                self.map_code.push(ch.to_ascii_uppercase());
                                 used = true;
                             }
                         }
@@ -2976,13 +3096,26 @@ impl App {
                         0,
                     ));
                 } else if let Some(code) = role.strip_prefix("host-pub:") {
+                    // A custom map in ~/.orion-maps can be hosted by name for
+                    // the embedded-map E2E: host-pub:CODE:mapname
+                    let (code, map) = match code.split_once(':') {
+                        Some((c, m)) => (c.to_string(), m.to_string()),
+                        None => (code.to_string(), "meridian".to_string()),
+                    };
+                    let map_ron = if orion_sim::map::MAP_NAMES.contains(&map.as_str()) {
+                        None
+                    } else {
+                        crate::editor::load_custom(&map)
+                            .and_then(|m| ron::ser::to_string(&m).ok())
+                    };
                     let (shown, rx) = crate::relay::host_relay_async_full(
                         self.settings.relay_url.clone(),
-                        code.to_string(),
+                        code,
                         0,
                         "QA TEST LOBBY",
                         false,
-                        "meridian",
+                        &map,
+                        map_ron,
                     );
                     self.mp_lobby_code = Some(shown);
                     self.mp_waiting = Some(rx);
@@ -3666,6 +3799,23 @@ impl App {
                     Err(e) => ed.status = e,
                 }
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            KeyCode::KeyU => {
+                // Upload to the relay vault for a 5-letter share code.
+                match ed.validate() {
+                    Ok(()) => match ron::ser::to_string(&ed.map) {
+                        Ok(ron) => {
+                            ed.status = "UPLOADING...".into();
+                            self.map_share_rx = Some(crate::relay::share_map_async(
+                                self.settings.relay_url.clone(),
+                                ron,
+                            ));
+                        }
+                        Err(e) => ed.status = format!("SERIALIZE FAILED: {e}"),
+                    },
+                    Err(e) => ed.status = e,
+                }
+            }
             KeyCode::KeyP => {
                 match ed.validate() {
                     Ok(()) => {
@@ -3785,7 +3935,7 @@ impl App {
         // Title bar.
         self.gfx.sprite(out, book.chrome_panel, w * 0.5, 16.0 * ui, w, 32.0 * ui, [1.0, 1.0, 1.0, 0.97]);
         self.gfx.text(out, 12.0 * ui, 9.0 * ui, self.ts(2.0), gold, "MAP EDITOR");
-        let hint = "LMB PAINT   [ ] BRUSH   S SAVE   P PLAY-TEST   ESC BACK";
+        let hint = "LMB PAINT   [ ] BRUSH   S SAVE   P PLAY-TEST   U SHARE   ESC BACK";
         let hw = self.gfx.text_width(self.ts(1.1), hint);
         self.gfx.text(out, w - hw - 12.0 * ui, 12.0 * ui, self.ts(1.1), dim, hint);
         // Palette.
