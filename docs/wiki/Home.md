@@ -12,7 +12,7 @@ looks in game.
 
 | Version | Highlights |
 |---|---|
-| [v0.22.0](v0.22.0.md) | The tutorial: a guided first game — seven objectives over a normal botless match, browser build included |
+| [v0.22.0](v0.22.0.md) | The tutorial: a guided first game — seven objectives over a normal botless match, browser build included; v0.22.1: build grid puts HQ last, hints derive from live keybinds |
 | [v0.21.0](v0.21.0.md) | Custom maps in multiplayer (the map travels in the handshake — browser peers too) + map sharing by 5-letter code |
 | [v0.20.0](v0.20.0.md) | Replay links: ?replay=CODE plays a shared game from a URL; v0.20.1: browser brightness/sound/disconnect fixes from the first real web playtest |
 | [v0.19.0](v0.19.0.md) | Browser build lists and joins public lobbies (CORS + wasm fetch); headless-Chrome page hooks for web UI verification |
