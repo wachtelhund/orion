@@ -12,6 +12,7 @@ looks in game.
 
 | Version | Highlights |
 |---|---|
+| [v0.21.0](v0.21.0.md) | Custom maps in multiplayer (the map travels in the handshake — browser peers too) + map sharing by 5-letter code |
 | [v0.20.0](v0.20.0.md) | Replay links: ?replay=CODE plays a shared game from a URL; v0.20.1: browser brightness/sound/disconnect fixes from the first real web playtest |
 | [v0.19.0](v0.19.0.md) | Browser build lists and joins public lobbies (CORS + wasm fetch); headless-Chrome page hooks for web UI verification |
 | [v0.18.0](v0.18.0.md) | Replay sharing by code: upload a replay to the relay, hand out a 5-letter code, it lands in the other player's list |
