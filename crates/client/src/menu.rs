@@ -58,6 +58,7 @@ enum MenuAction {
     ToggleReplayShare,
     FetchReplayCode,
     FetchMapCode,
+    StartTutorial,
     OpenUpdate,
     Rebind(Action),
 }
@@ -108,6 +109,7 @@ impl App {
                 }
                 stack(
                     vec![
+                        ("TUTORIAL".into(), MenuAction::StartTutorial),
                         ("PLAY VS AI".into(), MenuAction::OpenDifficulty),
                         (
                             if self.mp_blocked {
@@ -911,6 +913,7 @@ impl App {
                     self.report_ranked(w);
                 }
                 self.in_game = false;
+                self.tutorial = None;
                 self.mp = None; // closes the socket; peer sees a disconnect
                 self.mm_code = None;
                 self.replay = None;
@@ -1063,6 +1066,9 @@ impl App {
             }
             MenuAction::FetchMapCode => {
                 self.fetch_shared_map();
+            }
+            MenuAction::StartTutorial => {
+                self.start_tutorial();
             }
             MenuAction::PlayReplay(k) => {
                 if self.replay_share_mode {

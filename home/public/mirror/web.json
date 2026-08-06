@@ -1,6 +1,6 @@
 {
-  "version": "v0.20.1",
-  "wasmBytes": 3625313,
+  "version": "v0.21.0",
+  "wasmBytes": 3661500,
   "source": "orion-web-demo.zip",
   "files": [
     "orion-client.js",

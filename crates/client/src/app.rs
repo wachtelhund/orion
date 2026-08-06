@@ -128,6 +128,8 @@ pub struct App {
     pub shot_bot0: Option<Bot>,
     /// Staged-showcase capture: scripted orders only, no bot drivers.
     pub stage_mode: bool,
+    /// Guided first game (objectives over a botless SP state).
+    pub tutorial: Option<crate::tutorial::Tutorial>,
     pub shot_focus: Option<(f32, f32)>,
     pub shot_zoom: Option<f32>,
     pub script: Option<String>,
@@ -366,6 +368,7 @@ impl App {
             smoke_deadline: smoke.then(|| Instant::now() + std::time::Duration::from_secs(3)),
             shot_bot0: shot.is_some().then(|| Bot::new(0)),
             stage_mode: false,
+            tutorial: None,
             shot,
             shot_focus: None,
             shot_zoom: None,
@@ -636,6 +639,12 @@ impl App {
         (self.ui() * m).round().max(1.0)
     }
 
+    /// Do AI opponents act this frame? Stage captures and the tutorial
+    /// run botless.
+    fn bots_active(&self) -> bool {
+        !self.stage_mode && self.tutorial.is_none()
+    }
+
     pub fn smoke_expired(&self) -> bool {
         self.smoke_deadline.is_some_and(|d| Instant::now() >= d)
     }
@@ -647,6 +656,7 @@ impl App {
     }
 
     pub fn start_game(&mut self, difficulty: Difficulty) {
+        self.tutorial = None;
         self.mp = None;
         self.mp_waiting = None;
         self.human = 0;
@@ -690,6 +700,129 @@ impl App {
         self.arm_countdown();
     }
 
+    /// Guided first game: Vanguard on meridian, no bot, a small Kyth
+    /// outpost mid-map as the final objective. Objectives live in
+    /// `tutorial.rs`; the sim runs completely normally.
+    pub fn start_tutorial(&mut self) {
+        self.mp = None;
+        self.mp_waiting = None;
+        self.human = 0;
+        self.replay = None;
+        self.record_replay = false; // practice games don't clutter replays
+        self.game_map = "meridian".into();
+        self.state = new_game_with(0, 1, "meridian");
+
+        // Clear the enemy start entirely, then raise the outpost on the
+        // first clear patch near the map center.
+        for i in 0..self.state.entities.len() {
+            if self.state.entities[i].alive && self.state.entities[i].owner == 1 {
+                self.state.kill(i as u32);
+            }
+        }
+        let warren = self
+            .state
+            .data
+            .buildings
+            .iter()
+            .position(|b| b.tag == "warren")
+            .unwrap_or(0) as u16;
+        let spire = self
+            .state
+            .data
+            .buildings
+            .iter()
+            .position(|b| b.tag == "spire")
+            .unwrap_or(0) as u16;
+        let skitter = self
+            .state
+            .data
+            .units
+            .iter()
+            .position(|u| u.tag == "skitter")
+            .unwrap_or(0) as u16;
+        let clear = |s: &orion_sim::State, ox: i32, oy: i32, w: i32, h: i32| {
+            (ox..ox + w).all(|x| {
+                (oy..oy + h).all(|y| {
+                    s.map.walkable(x, y) && !s.blocked[s.map.idx(x, y)]
+                })
+            })
+        };
+        let (cx, cy) = (self.state.map.width / 2, self.state.map.height / 2);
+        let mut site = None;
+        'scan: for r in 0i32..14 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs().max(dy.abs()) != r {
+                        continue;
+                    }
+                    let (x, y) = (cx + dx, cy + dy);
+                    if clear(&self.state, x, y, 7, 5) {
+                        site = Some((x, y));
+                        break 'scan;
+                    }
+                }
+            }
+        }
+        if let Some((x, y)) = site {
+            self.state.spawn_building(1, warren, orion_sim::TilePos::new(x, y), false);
+            self.state.spawn_building(1, spire, orion_sim::TilePos::new(x + 4, y + 1), false);
+            self.state
+                .spawn_unit(1, skitter, orion_sim::FxVec2::from_int(x + 2, y + 4));
+            self.state
+                .spawn_unit(1, skitter, orion_sim::FxVec2::from_int(x + 4, y + 4));
+            self.state.step(&[]); // settle fog/blockers
+        }
+
+        self.difficulty = Difficulty::Easy;
+        self.pending.clear();
+        self.selection.clear();
+        self.groups = Default::default();
+        self.mode = Mode::Normal;
+        self.effects.clear();
+        self.facings.clear();
+        self.headings.clear();
+        self.subgroup_offset = 0;
+        self.acc = 0.0;
+        self.in_game = true;
+        self.page = MenuPage::None;
+        let start = self.state.map.starts[0];
+        let (px, py) = iso::world_to_iso(start.x as f32 + 0.5, start.y as f32 + 0.5);
+        self.cam.cx = px;
+        self.cam.cy = py;
+        self.clamp_camera();
+        self.tutorial = Some(crate::tutorial::Tutorial::new((self.cam.cx, self.cam.cy)));
+        self.countdown = None; // read the objective instead
+    }
+
+    /// Advance tutorial objectives (called each playing frame).
+    fn tick_tutorial(&mut self, dt: f32) {
+        let Some(tut) = &mut self.tutorial else { return };
+        tut.flash = (tut.flash - dt).max(0.0);
+        if tut.finished() {
+            return;
+        }
+        let done = match tut.step {
+            0 => {
+                let (x0, y0) = tut.cam0;
+                (self.cam.cx - x0).abs() + (self.cam.cy - y0).abs() > 60.0
+            }
+            1 => {
+                self.selection
+                    .iter()
+                    .filter_map(|id| self.state.get(*id))
+                    .filter(|e| self.state.data.units[e.def as usize].harvester)
+                    .count()
+                    >= 3
+            }
+            _ => tut.current_done(&self.state, self.human),
+        };
+        if done {
+            tut.step += 1;
+            tut.flash = 1.4;
+            self.sfx(Sfx::UnitReady);
+        }
+    }
+
     /// 5-second frozen countdown before the match starts (skipped for
     /// headless automation).
     fn arm_countdown(&mut self) {
@@ -699,6 +832,7 @@ impl App {
     }
 
     pub fn start_mp_game(&mut self, started: Started) {
+        self.tutorial = None;
         crate::weblog(&format!(
             "orion: start_mp_game local={} delay={}",
             started.local_player, started.input_delay
@@ -2749,6 +2883,9 @@ impl App {
                     self.page = MenuPage::None;
                 }
                 "mp" => self.page = MenuPage::Multiplayer,
+                "tutorial" => {
+                    self.start_tutorial();
+                }
                 "replays" => {
                     self.replay_files =
                         crate::replays::list(&self.state.data.race_names);
@@ -2892,7 +3029,7 @@ impl App {
                 if let Some(b0) = self.shot_bot0.as_mut() {
                     cmds.extend(b0.think(&self.state));
                 }
-                if !self.stage_mode {
+                if self.bots_active() {
                     cmds.extend(self.bot.think(&self.state));
                 }
                 self.step_sim(cmds);
@@ -2911,7 +3048,7 @@ impl App {
                 if let Some(b0) = self.shot_bot0.as_mut() {
                     cmds.extend(b0.think(&self.state));
                 }
-                if !self.stage_mode {
+                if self.bots_active() {
                     cmds.extend(self.bot.think(&self.state));
                 }
                 self.step_sim(cmds);
@@ -3040,7 +3177,7 @@ impl App {
                 if let Some(b0) = self.shot_bot0.as_mut() {
                     cmds.extend(b0.think(&self.state));
                 }
-                if !self.stage_mode {
+                if self.bots_active() {
                     cmds.extend(self.bot.think(&self.state));
                 }
                 self.step_sim(cmds);
@@ -3273,6 +3410,9 @@ impl App {
         }
 
         let playing = self.in_game && self.page == MenuPage::None;
+        if playing {
+            self.tick_tutorial(dt as f32);
+        }
 
         if playing {
             self.camera_input(dt);
@@ -3283,7 +3423,7 @@ impl App {
                 self.acc += dt * self.settings.game_speed as f64;
                 while self.acc >= TICK_DT {
                     let mut cmds = std::mem::take(&mut self.pending);
-                    if !self.stage_mode {
+                    if self.bots_active() {
                     cmds.extend(self.bot.think(&self.state));
                 }
                     self.step_sim(cmds);
@@ -3337,9 +3477,9 @@ impl App {
             }
             let mut cmds = std::mem::take(&mut self.pending);
             self.script_commands(&mut cmds);
-            if !self.stage_mode {
-                    cmds.extend(self.bot.think(&self.state));
-                }
+            if self.bots_active() {
+                cmds.extend(self.bot.think(&self.state));
+            }
             self.step_sim(cmds);
             for e in &mut self.effects {
                 e.age += TICK_DT as f32;

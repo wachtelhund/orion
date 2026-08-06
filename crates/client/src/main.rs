@@ -34,6 +34,7 @@ mod relay;
 #[path = "relay_wasm.rs"]
 mod relay;
 mod replays;
+mod tutorial;
 
 use std::sync::Arc;
 
