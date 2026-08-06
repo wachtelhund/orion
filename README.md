@@ -192,7 +192,7 @@ All game hotkeys are rebindable in Settings (Escape menu). Defaults:
 | Right click | Move / attack / gather / resume construction / set rally |
 | A + click | Attack-move |
 | S / H | Stop / Hold position |
-| B, then Q/W/E/R | Build grid: Pylon / Muster Hall / HQ / Condenser (SC2-style card with icons) |
+| B, then Q/W/E/R... | Build grid in card order (supply first, HQ last — hover the icons) |
 | Q / W | Train (fills the shortest queue across selected buildings) |
 | Click queue icon | Cancel queued unit (full refund) |
 | Ctrl+# / Shift+# / # | Set group / add to group / select group |

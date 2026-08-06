@@ -42,13 +42,13 @@
     <div class="hero-scrim"></div>
 
     <div class="hero-inner wrap">
-      <p class="chip" id="hero-eyebrow">v0.21.0 · free · MIT</p>
+      <p class="chip" id="hero-eyebrow">v0.22.0 · free · MIT</p>
       <h1>ORION</h1>
       <p class="tagline">A StarCraft-style RTS built from scratch in Rust</p>
 
       <div class="cta">
         <a class="btn btn-primary" id="hero-download" href="#download">
-          <span class="btn-label">Download v0.21.0</span>
+          <span class="btn-label">Download v0.22.0</span>
           <span class="btn-sub" id="hero-download-sub">Windows · macOS · Linux</span>
         </a>
         <a class="btn btn-ghost play-only" href="/play" rel="noopener">
@@ -70,19 +70,30 @@
   <section class="wrap section" id="download">
     <h2 class="section-title">Download</h2>
     <p class="section-lede">
-      <strong id="release-tag">v0.21.0</strong><span id="release-date"> · Aug 6, 2026</span> —
+      <strong id="release-tag">v0.22.0</strong><span id="release-date"> · Aug 6, 2026</span> —
       precompiled, nothing to install. <a href="#download" rel="noopener">All releases</a> ·
       <a href="https://github.com/wachtelhund/orion" rel="noopener">build from source</a>
     </p>
-    <div class="downloads" id="downloads"><div class="dl frame" data-platform="macos"><h3>macOS (Apple Silicon + Intel)</h3><p class="file">Orion-macOS.zip</p><div class="steps"><p>Unzip → double-click <strong>Orion.app</strong>. First launch only: right-click → Open (it isn&#39;t notarized)</p></div><a class="btn btn-primary" href="/downloads/v0.21.0/Orion-macOS.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.21.0 · 10.2 MB</span></a></div>
-<div class="dl frame" data-platform="windows"><h3>Windows 10/11</h3><p class="file">orion-windows-x86_64.zip</p><div class="steps"><p>Unzip → double-click <strong>orion.exe</strong>. If SmartScreen objects: More info → Run anyway</p></div><a class="btn btn-primary" href="/downloads/v0.21.0/orion-windows-x86_64.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.21.0 · 4.8 MB</span></a></div>
-<div class="dl frame" data-platform="linux"><h3>Linux (x86_64)</h3><p class="file">orion-linux-x86_64.tar.gz</p><div class="steps"><p><code>tar xzf &amp;&amp; ./orion</code> (needs Vulkan drivers + ALSA <code>libasound2</code>)</p></div><a class="btn btn-primary" href="/downloads/v0.21.0/orion-linux-x86_64.tar.gz"><span class="btn-label">Download</span><span class="btn-sub">v0.21.0 · 6.0 MB</span></a></div></div>
+    <div class="downloads" id="downloads"><div class="dl frame" data-platform="macos"><h3>macOS (Apple Silicon + Intel)</h3><p class="file">Orion-macOS.zip</p><div class="steps"><p>Unzip → double-click <strong>Orion.app</strong>. First launch only: right-click → Open (it isn&#39;t notarized)</p></div><a class="btn btn-primary" href="/downloads/v0.22.0/Orion-macOS.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.22.0 · 10.2 MB</span></a></div>
+<div class="dl frame" data-platform="windows"><h3>Windows 10/11</h3><p class="file">orion-windows-x86_64.zip</p><div class="steps"><p>Unzip → double-click <strong>orion.exe</strong>. If SmartScreen objects: More info → Run anyway</p></div><a class="btn btn-primary" href="/downloads/v0.22.0/orion-windows-x86_64.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.22.0 · 4.8 MB</span></a></div>
+<div class="dl frame" data-platform="linux"><h3>Linux (x86_64)</h3><p class="file">orion-linux-x86_64.tar.gz</p><div class="steps"><p><code>tar xzf &amp;&amp; ./orion</code> (needs Vulkan drivers + ALSA <code>libasound2</code>)</p></div><a class="btn btn-primary" href="/downloads/v0.22.0/orion-linux-x86_64.tar.gz"><span class="btn-label">Download</span><span class="btn-sub">v0.22.0 · 6.0 MB</span></a></div></div>
   </section>
 
   <section class="wrap section" id="changelog">
     <h2 class="section-title">Changelog</h2>
     <p class="section-lede">Read live from the <a href="https://github.com/wachtelhund/orion/wiki" rel="noopener">project wiki</a>.</p>
-    <div class="changelog" id="changelog-list"><details class="release" id="v0.21.0"><summary><span class="ver">v0.21.0</span><span class="sum">Custom maps online + map sharing by code</span><span class="hl">Custom maps in multiplayer (the map travels in the handshake — browser peers too) + map sharing by 5-letter code</span></summary><div class="release-body"><p>The map editor stops being a single-player toy. Two changes, one theme: maps made in the editor now travel.</p>
+    <div class="changelog" id="changelog-list"><details class="release" id="v0.22.0"><summary><span class="ver">v0.22.0</span><span class="sum">The tutorial</span><span class="hl">The tutorial: a guided first game — seven objectives over a normal botless match, browser build included</span></summary><div class="release-body"><p>With the repo public and the game playable in a browser tab, strangers now land in Orion with zero context. The new <strong>TUTORIAL</strong> (top of the main menu, browser build included) turns that first five minutes into a guided game.</p>
+<p><img src="/mirror/changelog/images/v022-tutorial.png" alt="Tutorial opening" loading="lazy" decoding="async"></p>
+<h4>How it plays</h4>
+<p>Seven objectives, one at a time, in a gold-framed panel that stays out of the way:</p>
+<p>1. <strong>Look around</strong> — pan the camera 2. <strong>Select your Fabricators</strong> — box-select the workers 3. <strong>Put them to work</strong> — right-click the crystals 4. <strong>Build a Supply Pylon</strong> — the build grid (B, then Q) 5. <strong>Build a Muster Hall</strong> — army production 6. <strong>Train 4 Troopers</strong> — queueing 7. <strong>Destroy the outpost</strong> — attack-move into a small Kyth camp mid-map</p>
+<p>Completions chime and flash; razing the outpost triggers the normal victory screen. There is no fail state — no bot thinks during the tutorial, and the two Skitters guarding the camp only fight back.</p>
+<h4>Why it&#39;s built this way</h4>
+<p>The tutorial is a thin objectives layer over a completely normal single-player game — same sim, same commands, same HUD. Nothing is simulated differently, so every habit learned transfers 1:1 to skirmish and multiplayer. Practice runs don&#39;t record replays.</p>
+<p>Objective predicates are unit-tested against the real sim (including the subtlety that mineral patches have limited mining slots).</p>
+<h4>Balance</h4>
+<p>No gameplay changes.</p></div></details>
+<details class="release" id="v0.21.0"><summary><span class="ver">v0.21.0</span><span class="sum">Custom maps online + map sharing by code</span><span class="hl">Custom maps in multiplayer (the map travels in the handshake — browser peers too) + map sharing by 5-letter code</span></summary><div class="release-body"><p>The map editor stops being a single-player toy. Two changes, one theme: maps made in the editor now travel.</p>
 <h4>Custom maps in multiplayer</h4>
 <p>Host a lobby on any editor-made map — the joiner needs nothing. The map itself rides inside the match handshake, so the other player (desktop <strong>or browser</strong>) receives it in-band and both sides simulate the exact same terrain. No downloads, no version drift: verified end-to-end on the live relay with a native host and a headless-browser joiner playing 240 lockstep ticks on a custom map with matching checksums.</p>
 <h4>Share maps with a 5-letter code</h4>

@@ -33,11 +33,12 @@ pub const OBJECTIVES: [Objective; 7] = [
     },
     Objective {
         title: "BUILD A SUPPLY PYLON",
-        hint: "SELECT A WORKER, PRESS B THEN Q, CLICK OPEN GROUND",
+        // {BUILD} is filled from the live build grid + keybinds.
+        hint: "SELECT A WORKER, PRESS {BUILD}, CLICK OPEN GROUND",
     },
     Objective {
         title: "BUILD A MUSTER HALL",
-        hint: "B THEN W WITH A WORKER - IT TRAINS YOUR ARMY",
+        hint: "{BUILD} WITH A WORKER - IT TRAINS YOUR ARMY",
     },
     Objective {
         title: "TRAIN 4 TROOPERS",

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-06T12:53:46.503Z",
+  "generatedAt": "2026-08-06T13:19:52.354Z",
   "sourceIsPublic": true,
   "links": {
     "primary": "https://github.com/wachtelhund/orion",
@@ -47,33 +47,39 @@
     }
   },
   "release": {
-    "tag": "v0.21.0",
-    "name": "v0.21.0",
+    "tag": "v0.22.0",
+    "name": "v0.22.0",
     "url": "#download",
-    "publishedAt": "2026-08-06T12:49:07Z",
+    "publishedAt": "2026-08-06T13:07:15Z",
     "assets": [
       {
         "name": "Orion-macOS.zip",
-        "size": 10720776,
-        "url": "/downloads/v0.21.0/Orion-macOS.zip",
+        "size": 10728107,
+        "url": "/downloads/v0.22.0/Orion-macOS.zip",
         "platform": "macos"
       },
       {
         "name": "orion-windows-x86_64.zip",
-        "size": 5018251,
-        "url": "/downloads/v0.21.0/orion-windows-x86_64.zip",
+        "size": 5025203,
+        "url": "/downloads/v0.22.0/orion-windows-x86_64.zip",
         "platform": "windows"
       },
       {
         "name": "orion-linux-x86_64.tar.gz",
-        "size": 6264978,
-        "url": "/downloads/v0.21.0/orion-linux-x86_64.tar.gz",
+        "size": 6268315,
+        "url": "/downloads/v0.22.0/orion-linux-x86_64.tar.gz",
         "platform": "linux"
       }
     ]
   },
   "releaseCount": 3,
   "changelog": [
+    {
+      "version": "v0.22.0",
+      "highlights": "The tutorial: a guided first game — seven objectives over a normal botless match, browser build included",
+      "title": "v0.22.0 — The tutorial",
+      "html": "<p>With the repo public and the game playable in a browser tab, strangers now land in Orion with zero context. The new <strong>TUTORIAL</strong> (top of the main menu, browser build included) turns that first five minutes into a guided game.</p>\n<p><img src=\"/mirror/changelog/images/v022-tutorial.png\" alt=\"Tutorial opening\" loading=\"lazy\" decoding=\"async\"></p>\n<h4>How it plays</h4>\n<p>Seven objectives, one at a time, in a gold-framed panel that stays out of the way:</p>\n<p>1. <strong>Look around</strong> — pan the camera 2. <strong>Select your Fabricators</strong> — box-select the workers 3. <strong>Put them to work</strong> — right-click the crystals 4. <strong>Build a Supply Pylon</strong> — the build grid (B, then Q) 5. <strong>Build a Muster Hall</strong> — army production 6. <strong>Train 4 Troopers</strong> — queueing 7. <strong>Destroy the outpost</strong> — attack-move into a small Kyth camp mid-map</p>\n<p>Completions chime and flash; razing the outpost triggers the normal victory screen. There is no fail state — no bot thinks during the tutorial, and the two Skitters guarding the camp only fight back.</p>\n<h4>Why it&#39;s built this way</h4>\n<p>The tutorial is a thin objectives layer over a completely normal single-player game — same sim, same commands, same HUD. Nothing is simulated differently, so every habit learned transfers 1:1 to skirmish and multiplayer. Practice runs don&#39;t record replays.</p>\n<p>Objective predicates are unit-tested against the real sim (including the subtlety that mineral patches have limited mining slots).</p>\n<h4>Balance</h4>\n<p>No gameplay changes.</p>"
+    },
     {
       "version": "v0.21.0",
       "highlights": "Custom maps in multiplayer (the map travels in the handshake — browser peers too) + map sharing by 5-letter code",
@@ -208,8 +214,8 @@
     }
   ],
   "play": {
-    "version": "v0.21.0",
-    "wasmBytes": 3661500,
+    "version": "v0.22.0",
+    "wasmBytes": 3670231,
     "source": "orion-web-demo.zip",
     "files": [
       "orion-client.js",

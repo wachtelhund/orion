@@ -398,6 +398,11 @@ impl Bot {
         let minerals = s.players[p as usize].minerals;
         let gas = s.players[p as usize].gas;
         let (used, provided) = s.supply(p);
+        // Sudden death: two turtling bots on a multi-base map can rebuild
+        // faster than they kill (thornwood Hard mirrors ran out the clock).
+        // Past 15 minutes the macro tap closes — no new construction, no
+        // replacement workers — so the armies decide it.
+        let sudden_death = s.tick > 24 * 60 * 15;
 
         // ---- perception: fog-honest view of the enemy, folded into a
         // decaying memory so scouting information actually gets USED ----
@@ -554,7 +559,11 @@ impl Bot {
         // ---- worker production ----
         if let Some(hq_idx) = hq {
             let hq_e = &s.entities[hq_idx as usize];
-            if workers.len() < prm.max_workers && hq_e.queue.is_empty() && minerals >= 50 {
+            if !sudden_death
+                && workers.len() < prm.max_workers
+                && hq_e.queue.is_empty()
+                && minerals >= 50
+            {
                 cmds.push(Command::Train { building: s.id_of(hq_idx), unit: worker_def });
             }
         }
@@ -586,7 +595,7 @@ impl Bot {
         let hq_cost = s.data.buildings[hq_def as usize].cost_minerals;
         let want_expand =
             !s.map.expansions.is_empty() && deposits < 2 && workers.len() >= 13;
-        if constructing == 0 && !building_worker_busy {
+        if constructing == 0 && !building_worker_busy && !sudden_death {
             if want_expand && minerals >= hq_cost {
                 self.order_build_expansion(s, &workers, hq_def, &mut cmds);
             } else if want_depot && minerals >= depot_cost {

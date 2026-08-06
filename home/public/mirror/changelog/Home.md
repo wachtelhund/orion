@@ -12,6 +12,7 @@ looks in game.
 
 | Version | Highlights |
 |---|---|
+| [[v0.22.0]] | The tutorial: a guided first game — seven objectives over a normal botless match, browser build included |
 | [[v0.21.0]] | Custom maps in multiplayer (the map travels in the handshake — browser peers too) + map sharing by 5-letter code |
 | [[v0.20.0]] | Replay links: ?replay=CODE plays a shared game from a URL; v0.20.1: browser brightness/sound/disconnect fixes from the first real web playtest |
 | [[v0.19.0]] | Browser build lists and joins public lobbies (CORS + wasm fetch); headless-Chrome page hooks for web UI verification |

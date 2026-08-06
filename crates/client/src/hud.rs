@@ -375,12 +375,26 @@ impl App {
             return; // the normal victory overlay takes it from here
         }
         let obj = &objectives[tut.step];
+        let hint_owned;
+        let hint: &str = if obj.hint.contains("{BUILD}") {
+            let keys = match tut.step {
+                3 => self.build_hint_for(|b| b.supply_provided > 0 && !b.headquarters),
+                _ => self.build_hint_for(|b| {
+                    !b.trains.is_empty() && b.requires.is_none() && !b.headquarters
+                }),
+            }
+            .unwrap_or_else(|| "THE BUILD MENU".into());
+            hint_owned = obj.hint.replace("{BUILD}", &keys);
+            &hint_owned
+        } else {
+            obj.hint
+        };
         let counter = format!("TUTORIAL  {}/{}", tut.step + 1, objectives.len());
         let ts_c = self.ts(1.3);
         let ts_t = self.ts(1.9);
         let ts_h = self.ts(1.3);
         let tw = self.gfx.text_width(ts_t, obj.title);
-        let hw = self.gfx.text_width(ts_h, obj.hint);
+        let hw = self.gfx.text_width(ts_h, hint);
         let cw = self.gfx.text_width(ts_c, &counter);
         let pw = tw.max(hw).max(cw) + 44.0 * ui;
         let ph = 74.0 * ui;
@@ -396,7 +410,7 @@ impl App {
         self.gfx
             .text(out, px + (pw - tw) * 0.5, py + 26.0 * ui, ts_t, white, obj.title);
         self.gfx
-            .text(out, px + (pw - hw) * 0.5, py + 52.0 * ui, ts_h, dim, obj.hint);
+            .text(out, px + (pw - hw) * 0.5, py + 52.0 * ui, ts_h, dim, hint);
         // Completion flash of the PREVIOUS objective.
         if tut.flash > 0.0 && tut.step > 0 {
             let a = (tut.flash / 1.4).min(1.0);

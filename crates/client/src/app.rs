@@ -1632,13 +1632,45 @@ impl App {
         self.settings.action_for(code)
     }
 
-    /// The human race's buildable structures, in data order — the build
-    /// menu grid, mapped onto Place1..Place7.
+    /// The human race's buildable structures — the build menu grid,
+    /// mapped onto Place1..Place7. Data order, except the headquarters
+    /// goes last: the first key a new player presses should raise a
+    /// supply pylon, not a 400-mineral expansion (a tutorial player did
+    /// exactly that).
     pub(crate) fn build_menu_defs(&self) -> Vec<DefId> {
         let race = self.state.players[self.human as usize].race;
-        (0..self.state.data.buildings.len() as DefId)
+        let mut defs: Vec<DefId> = (0..self.state.data.buildings.len() as DefId)
             .filter(|&d| self.state.data.buildings[d as usize].race == race)
-            .collect()
+            .collect();
+        defs.sort_by_key(|&d| self.state.data.buildings[d as usize].headquarters);
+        defs
+    }
+
+    /// "B THEN Q"-style hint for building the first def matching `pick`,
+    /// derived from the live build grid and keybinds so it can never go
+    /// stale when either changes.
+    pub(crate) fn build_hint_for(
+        &self,
+        pick: impl Fn(&orion_sim::data::BuildingDef) -> bool,
+    ) -> Option<String> {
+        let slot = self
+            .build_menu_defs()
+            .into_iter()
+            .position(|d| pick(&self.state.data.buildings[d as usize]))?;
+        let place = [
+            crate::config::Action::Place1,
+            crate::config::Action::Place2,
+            crate::config::Action::Place3,
+            crate::config::Action::Place4,
+            crate::config::Action::Place5,
+            crate::config::Action::Place6,
+            crate::config::Action::Place7,
+        ]
+        .get(slot)
+        .copied()?;
+        let b = crate::config::key_label(self.settings.key_for(crate::config::Action::BuildMenu));
+        let k = crate::config::key_label(self.settings.key_for(place));
+        Some(format!("{b} THEN {k}"))
     }
 
     pub(crate) fn any_selected_siege(&self) -> bool {
@@ -2885,6 +2917,12 @@ impl App {
                 "mp" => self.page = MenuPage::Multiplayer,
                 "tutorial" => {
                     self.start_tutorial();
+                }
+                "tutorial3" | "tutorial4" => {
+                    self.start_tutorial();
+                    if let Some(t) = &mut self.tutorial {
+                        t.step = if page == "tutorial3" { 3 } else { 4 };
+                    }
                 }
                 "replays" => {
                     self.replay_files =
