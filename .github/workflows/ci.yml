@@ -25,18 +25,21 @@ jobs:
       - name: Pathfinding stress budget
         run: cargo run --release -p orion-sim --example stress
 
-  # Cross-platform client builds run on release tags only (release.yml).
-  # Private-repo Actions minutes bill macOS at 10x and Windows at 2x — a
-  # 3-OS matrix on every push burned the whole monthly allowance in days
-  # (learned 2026-08-05, at the cost of a billing lockout). Linux at 1x
-  # keeps a client compile check on every push.
+  # The repo is public, so standard-runner Actions minutes are free — the
+  # full platform matrix is back on every push. (History: while private,
+  # macOS billed 10x and this matrix burned the monthly allowance in days.)
   build:
-    name: Build linux client
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: System deps (audio)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - run: cargo build --release -p orion-client

@@ -2,9 +2,14 @@
 
 A StarCraft-style RTS built from scratch in Rust. No game engine — a
 purpose-built deterministic simulation with a wgpu isometric renderer.
-Three asymmetric races, skirmish AI, and online multiplayer via lobby codes.
-Full version history with screenshots: [docs/wiki](docs/wiki/Home.md).
-All art and audio are procedurally generated at startup: zero asset files.
+Three asymmetric races with heroes, skirmish AI, ranked online multiplayer,
+a map editor, and shareable replays. All art and audio are procedurally
+generated at startup: zero asset files.
+
+**[orion.hampusnilsson.dev](https://orion.hampusnilsson.dev)** — downloads,
+changelog, and **[play in the browser](https://orion.hampusnilsson.dev/play/)**
+(WebGPU, Chrome/Edge). Full version history with screenshots:
+[the wiki](../../wiki) (mirrored in [docs/wiki](docs/wiki/Home.md)).
 
 ![Orion gameplay — observer camera following a battle on Thornwood](docs/media/orion.gif)
 
@@ -36,15 +41,17 @@ live in `~/.orion-settings.ron`.
 cargo run --release -p orion-client
 ```
 
-Releases are cut by pushing a tag: `git tag v0.x.y && git push origin v0.x.y`
-— CI builds all three platforms and attaches them to the GitHub release.
+Releases are cut manually: tag (`git tag v0.x.y && git push origin v0.x.y`),
+then run the **Release** workflow from the Actions tab with that tag —
+checkboxes pick which platforms to build and attach to the GitHub release.
 
 See [SPEC.md](SPEC.md) for the full product specification and
 [CLAUDE.md](CLAUDE.md) for architecture.
 
 ## Status
 
-Playable game — single player vs AI, or 1v1 multiplayer (direct connect):
+Playable game — single player vs AI, or ranked 1v1 multiplayer through the
+lobby relay (desktop and browser, cross-play):
 
 - Full macro loop: minerals + plasma (gas) → build → tech → army → destroy
   the enemy base
@@ -86,14 +93,22 @@ Playable game — single player vs AI, or 1v1 multiplayer (direct connect):
 - Bot personalities (seeded timing/cap offsets) so games vary; escalation so
   they always finish; balance measured by
   `cargo run --release -p orion-sim --example balance`
-- Three maps: "Meridian" (two high-ground mains, ramps, chokepoints),
-  "Caverns" (Xel'Naga Caverns homage with natural expansions), and
-  "Thornwood" (96x96: mains, naturals, contested HIGH-GROUND third bases,
-  rock-sealed back doors, and sparse DESTRUCTIBLE FORESTS — trees block
-  movement and line of sight until chopped down; flyers cross and see
-  over everything) — pick per game; bots expand
+- Four maps: "Meridian" (two high-ground mains, ramps, chokepoints),
+  "Caverns" (Xel'Naga Caverns homage with natural expansions), "Thornwood"
+  (96x96: contested high-ground thirds, rock-sealed back doors, and
+  DESTRUCTIBLE FORESTS — trees block movement and line of sight until
+  chopped down), and "Causeway" (a raised land bridge carrying two
+  contested expansions, with rock-sealed breach ramps) — pick per game
+  with a live terrain preview; bots expand
+- A **hero per race** (Marshal Kade, Broodmother Sszrak, Magnus Vex): one
+  each, two abilities apiece — artillery zones, summons, heals, magnetic
+  wells. The bot fields and casts them too
+- **Map editor**: paint terrain, resources and starts with automatic
+  180-degree mirroring; custom maps appear in the single-player picker
 - Replays: every game auto-saves to ~/.orion-replays; watch from the
-  REPLAYS menu with pause, speed, and per-player fog perspective
+  REPLAYS menu with pause, speed, and per-player fog perspective — and
+  **share by code**: upload a replay, hand out 5 letters, it lands in the
+  other player's list (browser too: `/play?replay=CODE` is a linkable game)
 - Main menu (vs AI at three difficulties), pause menu with settings:
   fullscreen, HUD size, game speed, edge scroll, rebindable hotkeys
   (persisted to `~/.orion-settings.ron`)
@@ -108,8 +123,8 @@ Playable game — single player vs AI, or 1v1 multiplayer (direct connect):
   extractors (workers / cap)
 - Hover tooltips on every HUD element (units, buildings, research, actions)
 - SC:R-style console: navy tech panels with gold piping, framed minimap and
-  portrait, beveled command-card buttons, in-console MENU button — menus
-  share the same identity (framed dialogs, plated rows, hover glow)
+  portrait, beveled command-card buttons — menus share the same identity
+  (framed dialogs, plated rows, hover glow)
 - Update notice on the main menu when a newer release is out (one click
   opens the download page — no manual checking)
 - Procedural audio: ambient music loop + combat/UI/economy sound effects,
@@ -212,8 +227,11 @@ from identical inputs (the property lockstep multiplayer stands on), and the
 
 ## Deploy
 
-Desktop binaries are cut by CI on `v*` tags (see Install above). The only
-server component is the Cloudflare Worker relay in `relay/` (lobby directory +
-WebSocket forwarding, free tier): `cd relay && npx wrangler deploy`. The
-client's relay URL lives in `~/.orion-settings.ron` (`relay_url`). Ranked
-matchmaking (1v1 queue) is specified in SPEC.md but not built yet.
+Desktop binaries: run the manual **Release** workflow (see Install above).
+Server components, both on Cloudflare's free tier:
+
+- `relay/` — the multiplayer Worker (lobby directory, WebSocket forwarding,
+  ranked matchmaker, replay vault): `cd relay && npx wrangler deploy`. The
+  client's relay URL lives in `~/.orion-settings.ron` (`relay_url`).
+- `home/` — the website incl. the browser build: `cd home && npm run publish`
+  after cutting a release, or the manual **Deploy homepage** workflow.

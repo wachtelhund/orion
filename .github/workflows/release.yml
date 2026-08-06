@@ -1,9 +1,8 @@
 name: Release
 
 # Manual only: run from the Actions tab (or `gh workflow run`) with the
-# tag to build. Tag pushes deliberately do NOT trigger platform builds —
-# macOS bills 10x on private-repo Actions, and auto-building every tag
-# burned the monthly allowance in days (2026-08-05 billing lockout).
+# tag to build and checkboxes for which platforms. Tag pushes deliberately
+# do not trigger builds — releasing stays a human decision.
 on:
   workflow_dispatch:
     inputs:
@@ -12,7 +11,7 @@ on:
         required: true
         type: string
       build_macos:
-        description: "macOS universal (bills 10x)"
+        description: "macOS universal"
         type: boolean
         default: true
       build_linux:
@@ -20,7 +19,7 @@ on:
         type: boolean
         default: true
       build_windows:
-        description: "Windows x86_64 (bills 2x)"
+        description: "Windows x86_64"
         type: boolean
         default: true
 

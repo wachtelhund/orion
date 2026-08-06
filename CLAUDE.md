@@ -258,22 +258,22 @@ hits and still connects; bot perception skips burrowed enemies).
 ## CI / releases
 
 `.github/workflows/ci.yml` runs tests + an 8-game soak + the stress budget
-on every push/PR, plus a Linux-only client build — private-repo Actions
-bill macOS at 10x and Windows at 2x, and a 3-OS matrix per push burned
-the monthly allowance in days (2026-08-05 billing lockout). The full
-platform matrix is MANUAL: `release.yml` is workflow_dispatch-only —
-Actions tab -> Release -> Run workflow with the tag (or `gh workflow
-run release.yml -f tag=vX.Y.Z`). Tagging alone builds nothing; Hampus
-decides when platform binaries get built. `release.yml` is manual
+on every push/PR, plus 3-platform client builds (free on the public
+repo). Releases are MANUAL: `release.yml` is workflow_dispatch-only
+with per-platform checkboxes — Actions tab -> Release -> Run workflow
+with the tag (or `gh workflow run release.yml -f tag=vX.Y.Z
+-f build_macos=true ...`). Tagging alone builds nothing; Hampus decides
+when platform binaries get built. After the workflow attaches assets,
+publish the homepage (`cd home && npm run publish`) so the site
+features the new release. `release.yml` is manual
 (workflow_dispatch with a tag input): macOS universal (lipo), Linux
 x86_64, Windows x86_64, attached to the tag's GitHub release. Linux builds need `libasound2-dev` (rodio/ALSA) — that
 is the only system dependency.
 
-**Every minor and major version gets a wiki page** (mirrored into
-`docs/wiki/` in the main repo — the GitHub wiki feature doesn't render
-on private free-plan repos, so docs/wiki is what the user actually
-sees; push BOTH) (the wiki is the
-`orion.wiki.git` repo next to the main one). Each page covers: what's new
+**Every minor and major version gets a wiki page** (the wiki is the
+`orion.wiki.git` repo next to the main one; the repo is public so the
+wiki tab renders — keep mirroring into `docs/wiki/` too, it's linked
+from the README and costs one command; push BOTH). Each page covers: what's new
 and changed (features AND balance diffs, explained — not just a commit
 list), plus in-game screenshots of the new content (`--shot`/`--menu-shot`
 captures, committed into the wiki repo and referenced relatively). Write
@@ -285,7 +285,8 @@ of all versions.
 1. 2v2: lockstep generalizes to N players, but lobby/matchmaker/UI don't
    yet.
 2. macOS builds are unsigned — Gatekeeper right-click-open. Needs an
-   Apple Developer ID in CI.
+   Apple Developer ID in CI. (The repo going public did not change
+   this.)
 3. VC still leads the cross-race Hard round-robin (meridian: VC 25 /
    Kyth 15 / Ferron 8 after the v0.17.1 macro fixes; was 27/14/6, and
    VC-vs-Ferron went 15-1 -> 12-4). Bot macro is no longer the whole
