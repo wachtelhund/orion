@@ -3324,7 +3324,7 @@ impl App {
                     ));
                 }
             }
-            if self.mp.is_some() && self.state.tick >= 24 * 10 {
+            if self.mp.is_some() && self.state.tick >= 24 * 10 && !self.finished {
                 let ok = self
                     .mp
                     .as_ref()

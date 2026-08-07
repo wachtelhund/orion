@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-06T15:53:14.385Z",
+  "generatedAt": "2026-08-07T09:42:43.915Z",
   "sourceIsPublic": true,
   "links": {
     "primary": "https://github.com/wachtelhund/orion",
@@ -47,27 +47,27 @@
     }
   },
   "release": {
-    "tag": "v0.22.1",
-    "name": "v0.22.1",
+    "tag": "v0.23.0",
+    "name": "v0.23.0",
     "url": "#download",
-    "publishedAt": "2026-08-06T14:43:12Z",
+    "publishedAt": "2026-08-06T15:52:54Z",
     "assets": [
       {
         "name": "Orion-macOS.zip",
-        "size": 10772455,
-        "url": "/downloads/v0.22.1/Orion-macOS.zip",
+        "size": 10772599,
+        "url": "/downloads/v0.23.0/Orion-macOS.zip",
         "platform": "macos"
       },
       {
         "name": "orion-windows-x86_64.zip",
-        "size": 5032088,
-        "url": "/downloads/v0.22.1/orion-windows-x86_64.zip",
+        "size": 5031226,
+        "url": "/downloads/v0.23.0/orion-windows-x86_64.zip",
         "platform": "windows"
       },
       {
         "name": "orion-linux-x86_64.tar.gz",
-        "size": 6277945,
-        "url": "/downloads/v0.22.1/orion-linux-x86_64.tar.gz",
+        "size": 6278057,
+        "url": "/downloads/v0.23.0/orion-linux-x86_64.tar.gz",
         "platform": "linux"
       }
     ]
@@ -220,8 +220,8 @@
     }
   ],
   "play": {
-    "version": "v0.22.1",
-    "wasmBytes": 3678371,
+    "version": "v0.23.0",
+    "wasmBytes": 3678307,
     "source": "orion-web-demo.zip",
     "files": [
       "orion-client.js",

@@ -227,8 +227,10 @@ export class Directory {
 export class Lobby {
   constructor(state, env) {
     this.env = env;
-    this.host = null;
-    this.join = null;
+    // Slotted room: index 0 is the host; 1v1 lobbies cap at 2 seats,
+    // team lobbies declare ?slots=4. Entries are sockets or null.
+    this.seats = [];
+    this.capacity = 2;
     this.code = null;
     this.listed = false;
   }
@@ -268,10 +270,17 @@ export class Lobby {
       return new Response(null, { status: 101, webSocket: client });
     };
 
+    let mySlot = -1;
     if (role === "host") {
-      if (this.host) return fail("code already in use");
-      this.host = server;
-      // Public lobbies appear in the directory until someone joins.
+      if (this.seats[0]) return fail("code already in use");
+      this.capacity = Math.min(
+        4,
+        Math.max(2, parseInt(url.searchParams.get("slots") || "2", 10) || 2),
+      );
+      this.seats = new Array(this.capacity).fill(null);
+      this.seats[0] = server;
+      mySlot = 0;
+      // Public lobbies appear in the directory until the room fills.
       if (url.searchParams.get("private") !== "1") {
         const name = (url.searchParams.get("name") || "COMMANDER").slice(0, 16);
         const race = parseInt(url.searchParams.get("race") || "0", 10) || 0;
@@ -286,12 +295,33 @@ export class Lobby {
         } catch (_) {}
       }
     } else if (role === "join") {
-      if (!this.host) return fail("no such lobby");
-      if (this.join) return fail("lobby full");
-      this.join = server;
-      await this.unlist(); // seat filled: stop advertising
+      if (!this.seats[0]) return fail("no such lobby");
+      mySlot = this.seats.findIndex((s) => s === null);
+      if (mySlot < 0) return fail("lobby full");
+      this.seats[mySlot] = server;
+      if (!this.seats.includes(null)) {
+        await this.unlist(); // room filled: stop advertising
+      }
     } else {
       return fail("bad role");
+    }
+    // Tell the newcomer its seat, and everyone the fill state. Clients
+    // that predate team lobbies ignore non-protocol text frames.
+    const filled = this.seats.filter(Boolean).length;
+    const roster = JSON.stringify({
+      relay_slot: mySlot,
+      capacity: this.capacity,
+      filled,
+    });
+    try {
+      server.send(roster);
+    } catch (_) {}
+    for (const s of this.seats) {
+      if (s && s !== server) {
+        try {
+          s.send(JSON.stringify({ relay_fill: filled, capacity: this.capacity }));
+        } catch (_) {}
+      }
     }
 
     // Token bucket + byte budget, per connection. Returns a reason string on
@@ -315,36 +345,40 @@ export class Lobby {
       return null;
     };
 
-    const other = () => (server === this.host ? this.join : this.host);
     server.addEventListener("message", (ev) => {
       const size =
         typeof ev.data === "string" ? ev.data.length : ev.data.byteLength;
       const bad = violation(size);
       if (bad) {
-        // Closing fires the close listener below, which tears the pair down.
+        // Closing fires the close listener below, which tears the room down.
         try {
           server.send(JSON.stringify({ relay_error: bad }));
           server.close(1008, bad);
         } catch (_) {}
         return;
       }
-      const o = other();
-      if (o) {
-        try {
-          o.send(ev.data);
-        } catch (_) {}
+      // Broadcast to every other seat. Lockstep frames carry the sender's
+      // player slot, so receivers know whose commands these are.
+      for (const s of this.seats) {
+        if (s && s !== server) {
+          try {
+            s.send(ev.data);
+          } catch (_) {}
+        }
       }
     });
     const teardown = () => {
       this.unlist();
-      const o = other();
-      if (o) {
-        try {
-          o.close(1000, "peer left");
-        } catch (_) {}
+      // Lockstep cannot survive a missing peer: any departure closes the
+      // room (identical to the old two-seat behavior).
+      for (const s of this.seats) {
+        if (s && s !== server) {
+          try {
+            s.close(1000, "peer left");
+          } catch (_) {}
+        }
       }
-      this.host = null;
-      this.join = null;
+      this.seats = [];
     };
     server.addEventListener("close", teardown);
     server.addEventListener("error", teardown);

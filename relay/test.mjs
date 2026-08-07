@@ -120,10 +120,15 @@ const mkPair = async () => {
   return { l, host, join };
 };
 
+// Relay control frames ({relay_slot}/{relay_fill}) ride the same socket;
+// game-frame assertions must not count them.
+const game = (sock) => sock.sent.filter((d) => !/^\{"relay_/.test(d));
+
 {
   const { host, join } = await mkPair();
   host.emit("hello");
-  ok(join.sent.length === 1 && join.sent[0] === "hello", "normal frame relays to peer");
+  const g = game(join);
+  ok(g.length === 1 && g[0] === "hello", "normal frame relays to peer");
   ok(host.closed === null, "normal frame does not close");
 }
 
@@ -136,12 +141,12 @@ const mkPair = async () => {
   for (let i = 0; i < 24 * 30; i++) { t += 1000 / 24; host.emit("Cmd(...)"); }
   Date.now = realNow;
   ok(host.closed === null, "24 Hz traffic for 30s stays under the rate cap");
-  ok(join.sent.length === 720, "all 720 lockstep frames relayed");
+  ok(game(join).length === 720, "all 720 lockstep frames relayed");
 }
 
 {
   const { host } = await mkPair();
-  host.emit("x".repeat(17 * 1024));
+  host.emit("x".repeat(200 * 1024)); // over the 160 KiB handshake allowance
   ok(host.closed?.reason === "frame too large", "oversized frame is rejected");
 }
 
@@ -154,7 +159,7 @@ const mkPair = async () => {
   for (let i = 0; i < 400; i++) host.emit("f");
   Date.now = realNow;
   ok(host.closed?.reason === "message rate exceeded", "instant burst of 400 trips the bucket");
-  ok(join.sent.length === 300, "exactly the 300-token burst got through");
+  ok(game(join).length === 300, "exactly the 300-token burst got through");
 }
 
 {
@@ -168,6 +173,45 @@ const mkPair = async () => {
   closedBy = host.closed?.reason;
   Date.now = realNow;
   ok(closedBy === "byte budget exhausted", `byte budget terminates a data pipe (got: ${closedBy})`);
+}
+
+// --- Team rooms (4 seats) ---------------------------------------------------
+console.log("Team rooms");
+{
+  const l = new Lobby({}, { DIRECTORY: null });
+  await l.fetch(wsReq("/ws/TEAMS", "role=host&private=1&slots=4"));
+  const host = sockets[sockets.length - 1];
+  const joiners = [];
+  for (let k = 0; k < 3; k++) {
+    await l.fetch(wsReq("/ws/TEAMS", "role=join&private=1"));
+    joiners.push(sockets[sockets.length - 1]);
+  }
+  const slotOf = (sock) => {
+    const f = sock.sent.find((d) => /^\{"relay_slot/.test(d));
+    return f ? JSON.parse(f).relay_slot : -1;
+  };
+  ok(slotOf(host) === 0, "host takes seat 0");
+  ok(
+    joiners.map(slotOf).join(",") === "1,2,3",
+    "joiners seat 1..3 in arrival order",
+  );
+  const before = joiners.map((j) => game(j).length);
+  host.emit("frame-from-host");
+  ok(
+    joiners.every((j, i) => game(j).length === before[i] + 1),
+    "host frame broadcasts to all three joiners",
+  );
+  const h0 = game(host).length;
+  joiners[1].emit("frame-from-seat-2");
+  ok(game(host).length === h0 + 1, "joiner frame reaches the host");
+  ok(game(joiners[0]).length === before[0] + 2, "and the other joiners");
+  // A fifth connection is refused.
+  await l.fetch(wsReq("/ws/TEAMS", "role=join&private=1"));
+  const fifth = sockets[sockets.length - 1];
+  ok(fifth.closed?.reason === "lobby full", "seat five is refused");
+  // Any departure closes the room.
+  joiners[2].close(1000, "bye");
+  ok(host.closed !== null, "a leaver closes the room for everyone");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

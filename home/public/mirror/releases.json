@@ -59,8 +59,18 @@
     "assets": [
       {
         "name": "Orion-macOS.zip",
-        "size": 10995348,
+        "size": 10772599,
         "browser_download_url": "/downloads/v0.23.0/Orion-macOS.zip"
+      },
+      {
+        "name": "orion-linux-x86_64.tar.gz",
+        "size": 6278057,
+        "browser_download_url": "/downloads/v0.23.0/orion-linux-x86_64.tar.gz"
+      },
+      {
+        "name": "orion-windows-x86_64.zip",
+        "size": 5031226,
+        "browser_download_url": "/downloads/v0.23.0/orion-windows-x86_64.zip"
       }
     ]
   }
