@@ -186,7 +186,9 @@ pub fn host_handshake(
     map: &str,
     map_ron: Option<String>,
 ) -> std::io::Result<Started> {
-    let join_race = match net.rx.recv() {
+    let join_race = loop {
+        match net.rx.recv() {
+        Ok(Msg::Seat { .. }) => continue, // relay control frame, not a peer
         Ok(Msg::Hello { race, version }) => {
             if version != PROTOCOL_VERSION {
                 let reason = format!(
@@ -195,10 +197,11 @@ pub fn host_handshake(
                 net.send(&Msg::Reject { reason: reason.clone() });
                 return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, reason));
             }
-            race
+            break race;
         }
         _ => {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad hello"));
+        }
         }
     };
     net.send(&Msg::Start {
@@ -241,7 +244,9 @@ pub fn host_handshake(
 /// Join-side handshake over any transport.
 pub fn join_handshake(mut net: Net, my_race: u8) -> std::io::Result<Started> {
     net.send(&Msg::Hello { race: my_race, version: PROTOCOL_VERSION.to_string() });
+    loop {
     match net.rx.recv() {
+        Ok(Msg::Seat { .. }) => continue, // relay control frame, not a peer
         Ok(Msg::Start { seed, host_race, join_race, map, map_ron }) => {
             // Answer the host's RTT probe, then wait for its delay pick.
             let mut input_delay = INPUT_DELAY_MIN;
@@ -258,7 +263,7 @@ pub fn join_handshake(mut net: Net, my_race: u8) -> std::io::Result<Started> {
                     Err(_) => break,
                 }
             }
-            Ok(Started {
+            return Ok(Started {
                 net,
                 seed,
                 local_player: 1,
@@ -266,12 +271,13 @@ pub fn join_handshake(mut net: Net, my_race: u8) -> std::io::Result<Started> {
                 map,
                 map_ron,
                 input_delay,
-            })
+            });
         }
         Ok(Msg::Reject { reason }) => {
-            Err(std::io::Error::new(std::io::ErrorKind::InvalidData, reason))
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, reason));
         }
-        _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad start")),
+        _ => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad start")),
+    }
     }
 }
 
