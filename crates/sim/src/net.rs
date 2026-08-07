@@ -316,6 +316,157 @@ pub fn join_async(addr: String, my_race: u8) -> Receiver<std::io::Result<Started
     rx
 }
 
+/// A fully established ROOM match (3+ seats).
+pub struct RoomStarted {
+    pub net: Net,
+    pub local_player: u8,
+    pub seed: u64,
+    pub races: Vec<u8>,
+    pub teams: Vec<u8>,
+    pub map: String,
+    pub map_ron: Option<String>,
+    pub input_delay: u32,
+}
+
+impl RoomStarted {
+    /// The actual map to play: embedded custom map first, else builtin.
+    pub fn resolve_map(&self) -> Option<crate::map::Map> {
+        match &self.map_ron {
+            Some(src) => ron::de::from_str(src).ok(),
+            None => crate::map::by_name(&self.map),
+        }
+    }
+}
+
+/// Room host: wait for `capacity - 1` seated Hellos, deal seats into a
+/// game (teams by seat parity: 0+2 vs 1+3 for 2v2... no — adjacent pairs:
+/// seats 0+1 vs 2+3), measure the worst seat RTT, broadcast Start2 + Go.
+/// Blocking; run in a thread. `races[0]` is the host's race; joiner races
+/// arrive in their Hellos.
+pub fn room_host_handshake(
+    mut net: Net,
+    capacity: u8,
+    my_race: u8,
+    seed: u64,
+    map: &str,
+    map_ron: Option<String>,
+) -> std::io::Result<RoomStarted> {
+    let bad = |m: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, m.to_string());
+    let mut races: Vec<Option<u8>> = vec![None; capacity as usize];
+    races[0] = Some(my_race);
+    // Collect Hellos until every seat reported.
+    while races.iter().any(|r| r.is_none()) {
+        match net.rx.recv() {
+            Ok(Msg::Hello2 { slot, race, version, .. }) => {
+                if version != PROTOCOL_VERSION {
+                    let reason = format!(
+                        "version mismatch: you {PROTOCOL_VERSION}, opponent {version} - all players must update"
+                    );
+                    net.send(&Msg::Reject { reason: reason.clone() });
+                    return Err(bad(&reason));
+                }
+                if (slot as usize) < races.len() {
+                    races[slot as usize] = Some(race);
+                }
+            }
+            Ok(_) => continue,
+            Err(_) => return Err(bad("a player left while the room filled")),
+        }
+    }
+    let races: Vec<u8> = races.into_iter().map(|r| r.unwrap()).collect();
+    // Adjacent seats team up: 0+1 vs 2+3 (a 3-seat room is 1v2).
+    let teams: Vec<u8> = (0..capacity).map(|s| (s >= capacity / 2) as u8).collect();
+    // Worst-seat RTT sizes the shared pipeline.
+    let t0 = nettime::Instant::now();
+    net.send(&Msg::Ping { k: 7 });
+    let mut seen = vec![false; capacity as usize];
+    seen[0] = true;
+    let mut worst = std::time::Duration::ZERO;
+    while seen.iter().any(|s| !s) {
+        match net.rx.recv() {
+            Ok(Msg::Pong2 { slot, k: 7 }) => {
+                if (slot as usize) < seen.len() && !seen[slot as usize] {
+                    seen[slot as usize] = true;
+                    worst = t0.elapsed();
+                }
+            }
+            Ok(_) => continue,
+            Err(_) => return Err(bad("a player left during the RTT probe")),
+        }
+    }
+    let rtt_ticks = (worst.as_secs_f32() * crate::TICKS_PER_SEC as f32).ceil() as u32;
+    let input_delay = (rtt_ticks + 2).clamp(INPUT_DELAY_MIN, INPUT_DELAY_MAX);
+    net.send(&Msg::Start2 {
+        seed,
+        races: races.clone(),
+        teams: teams.clone(),
+        map: map.to_string(),
+        map_ron: map_ron.clone(),
+    });
+    net.send(&Msg::Go { delay: input_delay });
+    Ok(RoomStarted {
+        net,
+        local_player: 0,
+        seed,
+        races,
+        teams,
+        map: map.to_string(),
+        map_ron,
+        input_delay,
+    })
+}
+
+/// Room joiner: learn the seat from the transport's Seat message, say
+/// Hello2, answer the probe, adopt Start2 + Go.
+pub fn room_join_handshake(
+    mut net: Net,
+    my_race: u8,
+    name: &str,
+) -> std::io::Result<RoomStarted> {
+    let bad = |m: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, m.to_string());
+    // The relay's control frame arrives first on connect.
+    let slot = loop {
+        match net.rx.recv() {
+            Ok(Msg::Seat { slot, .. }) => break slot,
+            Ok(_) => continue,
+            Err(_) => return Err(bad("no seat assignment from the relay")),
+        }
+    };
+    net.send(&Msg::Hello2 {
+        slot,
+        race: my_race,
+        name: name.to_string(),
+        version: PROTOCOL_VERSION.to_string(),
+    });
+    let mut start: Option<(u64, Vec<u8>, Vec<u8>, String, Option<String>)> = None;
+    let delay = loop {
+        match net.rx.recv() {
+            Ok(Msg::Ping { k }) => {
+                net.send(&Msg::Pong2 { slot, k });
+            }
+            Ok(Msg::Start2 { seed, races, teams, map, map_ron }) => {
+                start = Some((seed, races, teams, map, map_ron));
+            }
+            Ok(Msg::Go { delay }) => break delay.clamp(INPUT_DELAY_MIN, INPUT_DELAY_MAX),
+            Ok(Msg::Reject { reason }) => return Err(bad(&reason)),
+            Ok(_) => continue,
+            Err(_) => return Err(bad("the host left during the handshake")),
+        }
+    };
+    let (seed, races, teams, map, map_ron) =
+        start.ok_or_else(|| bad("no start data before go"))?;
+    Ok(RoomStarted {
+        net,
+        local_player: slot,
+        seed,
+        races,
+        teams,
+        map,
+        map_ron,
+        input_delay: delay,
+    })
+}
+
 /// The lockstep driver: schedules local input, waits for remote input,
 /// steps when both sides of a tick are present, cross-checks checksums.
 pub struct Lockstep {

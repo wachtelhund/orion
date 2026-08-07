@@ -130,6 +130,10 @@ pub struct App {
     pub stage_mode: bool,
     /// Guided first game (objectives over a botless SP state).
     pub tutorial: Option<crate::tutorial::Tutorial>,
+    /// Pending 4-seat room handshake (native relay only for now).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub room_waiting:
+        Option<std::sync::mpsc::Receiver<std::io::Result<orion_sim::net::RoomStarted>>>,
     pub shot_focus: Option<(f32, f32)>,
     pub shot_zoom: Option<f32>,
     pub script: Option<String>,
@@ -369,6 +373,8 @@ impl App {
             shot_bot0: shot.is_some().then(|| Bot::new(0)),
             stage_mode: false,
             tutorial: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            room_waiting: None,
             shot,
             shot_focus: None,
             shot_zoom: None,
@@ -852,6 +858,69 @@ impl App {
         };
         self.human = started.local_player;
         self.mp = Some(Lockstep::new(started.net, started.local_player, started.input_delay));
+        self.mp_waiting = None;
+        self.mp_error = None;
+        self.pending.clear();
+        self.selection.clear();
+        self.groups = Default::default();
+        self.mode = Mode::Normal;
+        self.effects.clear();
+        self.facings.clear();
+        self.headings.clear();
+        self.subgroup_offset = 0;
+        self.acc = 0.0;
+        self.in_game = true;
+        self.page = MenuPage::None;
+        let start = self.state.map.starts[self.human as usize];
+        let (cx, cy) = iso::world_to_iso(start.x as f32 + 0.5, start.y as f32 + 0.5);
+        self.cam.cx = cx;
+        self.cam.cy = cy;
+        self.clamp_camera();
+        self.arm_countdown();
+    }
+
+    /// Start a 4-seat room match from a completed room handshake.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn start_room_game(&mut self, rs: orion_sim::net::RoomStarted) {
+        crate::weblog(&format!(
+            "orion: start_room_game seat={} of {} delay={}",
+            rs.local_player,
+            rs.races.len(),
+            rs.input_delay
+        ));
+        self.tutorial = None;
+        self.mp_lobby_code = None;
+        self.replay = None;
+        self.record_replay = false; // room replays need team headers first
+        self.game_map = rs.map.clone();
+        let map = match rs.resolve_map() {
+            Some(m) => m,
+            None => {
+                self.mp_error = Some(format!("unknown map '{}'", rs.map));
+                return;
+            }
+        };
+        if map.starts.len() < rs.races.len() {
+            self.mp_error = Some("map has too few start positions".into());
+            return;
+        }
+        let mut state = State::new_with_races(
+            GameData::load_default(),
+            map,
+            rs.seed,
+            &rs.races,
+        );
+        for (p, team) in rs.teams.iter().enumerate() {
+            state.players[p].team = *team;
+        }
+        self.state = state;
+        self.human = rs.local_player;
+        self.mp = Some(Lockstep::new_room(
+            rs.net,
+            rs.local_player,
+            rs.input_delay,
+            rs.races.len() as u8,
+        ));
         self.mp_waiting = None;
         self.mp_error = None;
         self.pending.clear();
@@ -3302,6 +3371,36 @@ impl App {
                     );
                     self.mp_lobby_code = Some(shown);
                     self.mp_waiting = Some(rx);
+                } else if let Some(code) = role.strip_prefix("room-host:") {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if self.room_waiting.is_none() {
+                        // room-host:CODE:mapname — the map embeds like any
+                        // custom map (rooms need 4 starts).
+                        let (code, map) = match code.split_once(':') {
+                            Some((c, m)) => (c.to_string(), m.to_string()),
+                            None => (code.to_string(), "qa-2v2".to_string()),
+                        };
+                        let map_ron = crate::editor::load_custom(&map)
+                            .and_then(|m| ron::ser::to_string(&m).ok());
+                        let (_, rx) = crate::relay::host_room_async(
+                            self.settings.relay_url.clone(),
+                            code,
+                            0,
+                            &map,
+                            map_ron,
+                        );
+                        self.room_waiting = Some(rx);
+                    }
+                } else if let Some(code) = role.strip_prefix("room-join:") {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if self.room_waiting.is_none() {
+                        self.room_waiting = Some(crate::relay::join_room_async(
+                            self.settings.relay_url.clone(),
+                            code.to_string(),
+                            1,
+                            "QA".into(),
+                        ));
+                    }
                 } else if let Some(code) = role.strip_prefix("join-relay:") {
                     self.mp_waiting = Some(crate::relay::join_relay_async(
                         self.settings.relay_url.clone(),
@@ -3344,6 +3443,25 @@ impl App {
         self.poll_replay_net();
 
         self.poll_lobbies();
+
+        // Pending room handshake resolved?
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(rx) = &self.room_waiting {
+            match rx.try_recv() {
+                Ok(Ok(rs)) => {
+                    self.room_waiting = None;
+                    self.start_room_game(rs);
+                }
+                Ok(Err(e)) => {
+                    self.mp_error = Some(format!("ROOM FAILED: {e}").to_uppercase());
+                    self.room_waiting = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.room_waiting = None;
+                }
+            }
+        }
 
         // Pending host/join attempt resolved?
         if let Some(rx) = &self.mp_waiting {

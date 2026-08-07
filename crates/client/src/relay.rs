@@ -74,9 +74,25 @@ fn ws_net(url: &str) -> io::Result<Net> {
                         if in_tx.send(m).is_err() {
                             return;
                         }
+                    } else if let Ok(v) =
+                        serde_json::from_str::<serde_json::Value>(t.as_str())
+                    {
+                        // Relay control frames: seat assignment becomes a
+                        // synthetic Msg for the room handshake. Other
+                        // control frames (fill, errors) are ignored here.
+                        if let Some(slot) = v.get("relay_slot").and_then(|x| x.as_u64()) {
+                            let capacity = v
+                                .get("capacity")
+                                .and_then(|x| x.as_u64())
+                                .unwrap_or(2) as u8;
+                            let filled =
+                                v.get("filled").and_then(|x| x.as_u64()).unwrap_or(1) as u8;
+                            let m = Msg::Seat { slot: slot as u8, capacity, filled };
+                            if in_tx.send(m).is_err() {
+                                return;
+                            }
+                        }
                     }
-                    // Non-Msg text (e.g. relay_error JSON) is ignored; the
-                    // relay closes right after, surfacing as a disconnect.
                 }
                 Ok(Message::Close(_)) => return,
                 Ok(_) => {}
@@ -208,6 +224,51 @@ pub fn fetch_map_async(base: String, code: String) -> Receiver<io::Result<String
                 r.into_string()
                     .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
             });
+        let _ = tx.send(result);
+    });
+    rx
+}
+
+/// Host a 4-seat team room on the relay. The Started arrives once the
+/// room fills and the handshake completes.
+pub fn host_room_async(
+    base: String,
+    code: String,
+    my_race: u8,
+    map: &str,
+    map_ron: Option<String>,
+) -> (String, Receiver<io::Result<orion_sim::net::RoomStarted>>) {
+    let url = format!("{}&private=1&slots=4", ws_url(&base, &code, "host"));
+    let map = map.to_string();
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let result = ws_net(&url).and_then(|net| {
+            orion_sim::net::room_host_handshake(
+                net,
+                4,
+                my_race,
+                orion_sim::net::fresh_seed(),
+                &map,
+                map_ron,
+            )
+        });
+        let _ = tx.send(result);
+    });
+    (code, rx)
+}
+
+/// Join a team room by code.
+pub fn join_room_async(
+    base: String,
+    code: String,
+    my_race: u8,
+    name: String,
+) -> Receiver<io::Result<orion_sim::net::RoomStarted>> {
+    let url = ws_url(&base, &code, "join");
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let result = ws_net(&url)
+            .and_then(|net| orion_sim::net::room_join_handshake(net, my_race, &name));
         let _ = tx.send(result);
     });
     rx
