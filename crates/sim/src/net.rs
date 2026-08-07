@@ -55,6 +55,25 @@ pub enum Msg {
     Pong { k: u32 },
     /// Host's chosen input delay (ticks), sized to the measured RTT.
     Go { delay: u32 },
+    // ---- team rooms (3+ players; 1v1 keeps the messages above) ----
+    /// Synthesized by the TRANSPORT from the relay's {relay_slot} control
+    /// frame — tells a client its seat before it says Hello. Never sent
+    /// by peers.
+    Seat { slot: u8, capacity: u8, filled: u8 },
+    /// Room Hello: a joiner announces itself with its relay seat.
+    Hello2 { slot: u8, race: u8, name: String, version: String },
+    /// Room start: everything every seat needs to build the same state.
+    Start2 {
+        seed: u64,
+        races: Vec<u8>,
+        teams: Vec<u8>,
+        map: String,
+        map_ron: Option<String>,
+    },
+    /// Room commands: broadcast, so the sender's seat rides along.
+    Cmds2 { player: u8, tick: u32, cmds: Vec<Command>, checksum: Option<(u32, u64)> },
+    /// Room RTT reply, tagged so the host can await one per seat.
+    Pong2 { slot: u8, k: u32 },
 }
 
 /// Two builds may only play together when their sim versions match —
@@ -310,8 +329,11 @@ pub struct Lockstep {
     /// Tick stamps of recent step->stall transitions (last minute kept).
     stall_ticks: std::collections::VecDeque<u32>,
     was_waiting: bool,
+    /// Total seats in the game (2 for 1v1). Command streams are indexed
+    /// by player slot; our own slot aliases `local`.
+    pub n_players: u8,
     local: BTreeMap<u32, Vec<Command>>,
-    remote: BTreeMap<u32, Vec<Command>>,
+    remotes: Vec<BTreeMap<u32, Vec<Command>>>,
     my_checksums: BTreeMap<u32, u64>,
     pending_checksum: Option<(u32, u64)>,
     sent_until: u32,
@@ -329,14 +351,23 @@ impl Lockstep {
             ping_sent: None,
             stall_ticks: std::collections::VecDeque::new(),
             was_waiting: false,
+            n_players: 2,
             local: BTreeMap::new(),
-            remote: BTreeMap::new(),
+            remotes: vec![BTreeMap::new(); 2],
             my_checksums: BTreeMap::new(),
             pending_checksum: None,
             sent_until: 0,
             desync: false,
             disconnected: false,
         }
+    }
+
+    /// A room lockstep: same driver, N command streams.
+    pub fn new_room(net: Net, local_player: u8, delay: u32, n_players: u8) -> Lockstep {
+        let mut l = Lockstep::new(net, local_player, delay);
+        l.n_players = n_players;
+        l.remotes = vec![BTreeMap::new(); n_players as usize];
+        l
     }
 
     /// Drain the receive channel.
@@ -354,12 +385,16 @@ impl Lockstep {
                         }
                     }
                 }
-                Ok(Msg::Cmds { tick, cmds, checksum }) => {
-                    self.remote.insert(tick, cmds);
-                    if let Some((t, sum)) = checksum {
-                        if let Some(mine) = self.my_checksums.get(&t) {
-                            if *mine != sum {
-                                self.desync = true;
+                Ok(Msg::Cmds2 { player, tick, cmds, checksum }) => {
+                    if player != self.local_player
+                        && (player as usize) < self.remotes.len()
+                    {
+                        self.remotes[player as usize].insert(tick, cmds);
+                        if let Some((t, sum)) = checksum {
+                            if let Some(mine) = self.my_checksums.get(&t) {
+                                if *mine != sum {
+                                    self.desync = true;
+                                }
                             }
                         }
                     }
@@ -398,7 +433,8 @@ impl Lockstep {
             };
             self.local.insert(tick, cmds.clone());
             let checksum = self.pending_checksum.take();
-            if !self.net.send(&Msg::Cmds { tick, cmds, checksum }) {
+            let player = self.local_player;
+            if !self.net.send(&Msg::Cmds2 { player, tick, cmds, checksum }) {
                 self.disconnected = true;
                 return false;
             }
@@ -411,14 +447,22 @@ impl Lockstep {
             let tick = self.sent_until;
             let cmds = std::mem::take(pending);
             self.local.insert(tick, cmds.clone());
-            if !self.net.send(&Msg::Cmds { tick, cmds, checksum: None }) {
+            let player = self.local_player;
+            if !self.net.send(&Msg::Cmds2 { player, tick, cmds, checksum: None }) {
                 self.disconnected = true;
                 return false;
             }
             self.sent_until += 1;
         }
-        // Step only with both halves of tick t present.
-        let (Some(local), Some(remote)) = (self.local.get(&t), self.remote.get(&t)) else {
+        // Step only when EVERY seat's commands for tick t are present.
+        let ready = (0..self.n_players).all(|p| {
+            if p == self.local_player {
+                self.local.contains_key(&t)
+            } else {
+                self.remotes[p as usize].contains_key(&t)
+            }
+        });
+        if !ready {
             // Count step->stall transitions, windowed to the last minute.
             if !self.was_waiting {
                 self.was_waiting = true;
@@ -428,16 +472,20 @@ impl Lockstep {
                 }
             }
             return false;
-        };
+        }
         self.was_waiting = false;
-        let (host, join) = if self.local_player == 0 {
-            (local, remote)
-        } else {
-            (remote, local)
-        };
+        // Slot order keeps the combined stream deterministic on all peers.
         let mut cmds: Vec<(u8, Command)> = Vec::new();
-        cmds.extend(host.iter().cloned().map(|c| (0u8, c)));
-        cmds.extend(join.iter().cloned().map(|c| (1u8, c)));
+        for p in 0..self.n_players {
+            let list = if p == self.local_player {
+                self.local.get(&t)
+            } else {
+                self.remotes[p as usize].get(&t)
+            };
+            if let Some(list) = list {
+                cmds.extend(list.iter().cloned().map(|c| (p, c)));
+            }
+        }
         state.step(&cmds);
 
         // Periodic checksum exchange.
@@ -450,7 +498,9 @@ impl Lockstep {
             self.my_checksums.retain(|k, _| *k >= keep);
         }
         self.local.remove(&t);
-        self.remote.remove(&t);
+        for r in &mut self.remotes {
+            r.remove(&t);
+        }
         true
     }
 
