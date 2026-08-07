@@ -12,6 +12,7 @@ looks in game.
 
 | Version | Highlights |
 |---|---|
+| [v0.24.0](v0.24.0.md) | 2v2: four-seat relay rooms, team vision/victory/colors, N-player lockstep, and Crossfire — the four-corner team map |
 | [v0.23.0](v0.23.0.md) | Bot sudden death (thornwood stalls fixed, games end) + measured balance pass: Breaker siege 40->36, Mauler 100->110 |
 | [v0.22.0](v0.22.0.md) | The tutorial: a guided first game — seven objectives over a normal botless match, browser build included; v0.22.1: build grid puts HQ last, hints derive from live keybinds |
 | [v0.21.0](v0.21.0.md) | Custom maps in multiplayer (the map travels in the handshake — browser peers too) + map sharing by 5-letter code |
