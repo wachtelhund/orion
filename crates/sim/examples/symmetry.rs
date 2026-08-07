@@ -94,7 +94,17 @@ fn main() {
             .collect();
         let rock_sym = sym_set(&rk, &rk_m);
 
-        let starts_sym = m.starts.len() == 2 && mirror(m.starts[0]) == m.starts[1];
+        // 1v1: the two starts mirror each other. Team maps (4 starts):
+        // the START SET maps onto itself — every start's mirror is also a
+        // start, so the two teams occupy mirrored ground.
+        let starts_sym = match m.starts.len() {
+            2 => mirror(m.starts[0]) == m.starts[1],
+            n if n >= 2 && n % 2 == 0 => m
+                .starts
+                .iter()
+                .all(|s| m.starts.contains(&mirror(*s))),
+            _ => false,
+        };
 
         let ok = terrain_bad + elev_bad == 0
             && min_sym

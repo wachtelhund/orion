@@ -59,6 +59,7 @@ enum MenuAction {
     FetchReplayCode,
     FetchMapCode,
     StartTutorial,
+    CreateRoom,
     OpenUpdate,
     Rebind(Action),
 }
@@ -181,7 +182,7 @@ impl App {
                         ],
                         h * 0.55,
                     );
-                } else if self.mp_waiting.is_some() {
+                } else if self.mp_busy() {
                     stack(vec![("CANCEL".into(), MenuAction::CancelMp)], h * 0.64);
                 } else {
                     let name_marker = if self.name_focus { "_" } else { "" };
@@ -223,6 +224,8 @@ impl App {
                             "CREATE PRIVATE LOBBY".into(),
                             MenuAction::CreateLobby { private: true },
                         ),
+                        #[cfg(not(target_arch = "wasm32"))]
+                        ("CREATE 2V2 ROOM".into(), MenuAction::CreateRoom),
                     ];
                     // Public lobbies, click to join.
                     for (k, l) in self.lobby_list.iter().take(4).enumerate() {
@@ -689,7 +692,7 @@ impl App {
     /// and sizing the dialog panel around them.
     fn multiplayer_copy(&self) -> Vec<String> {
         let mut lines: Vec<String> = Vec::new();
-        if self.mp_waiting.is_some() {
+        if self.mp_busy() {
             if self.mp_private {
                 if let Some(code) = &self.mp_lobby_code {
                     lines.push(format!("PRIVATE LOBBY CODE:  {code}"));
@@ -839,7 +842,20 @@ impl App {
         let code = self.code_input.trim().to_uppercase();
         if code.len() < 4 {
             self.mp_error = Some("type the lobby code first".into());
-        } else {
+            return;
+        }
+        // Native: the relay's seat frame decides duel vs 2v2 room.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.join_waiting = Some(crate::relay::join_auto_async(
+                self.settings.relay_url.clone(),
+                code,
+                self.chosen_race,
+                self.settings.player_name.clone(),
+            ));
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
             self.mp_waiting = Some(crate::relay::join_relay_async(
                 self.settings.relay_url.clone(),
                 code,
@@ -991,11 +1007,8 @@ impl App {
             MenuAction::JoinListed(k) => {
                 if let Some(l) = self.lobby_list.get(k) {
                     self.mp_error = None;
-                    self.mp_waiting = Some(crate::relay::join_relay_async(
-                        self.settings.relay_url.clone(),
-                        l.code.clone(),
-                        self.chosen_race,
-                    ));
+                    self.code_input = l.code.clone();
+                    self.join_private_lobby();
                 }
             }
             MenuAction::FocusName => {
@@ -1024,6 +1037,11 @@ impl App {
             MenuAction::CancelMp => {
                 self.mp_waiting = None;
                 self.mp_lobby_code = None;
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    self.room_waiting = None;
+                    self.join_waiting = None;
+                }
             }
             MenuAction::CycleMap => {
                 self.map_choice = (self.map_choice + 1) % crate::app::all_map_names().len();
@@ -1069,6 +1087,41 @@ impl App {
             }
             MenuAction::StartTutorial => {
                 self.start_tutorial();
+            }
+            MenuAction::CreateRoom => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    self.mp_error = None;
+                    let names = crate::app::all_map_names();
+                    let chosen = names[self.map_choice % names.len()].clone();
+                    let map = orion_sim::map::by_name(&chosen)
+                        .or_else(|| crate::editor::load_custom(&chosen));
+                    let Some(map) = map else {
+                        self.mp_error = Some("could not load that map".into());
+                        return;
+                    };
+                    if map.starts.len() < 4 {
+                        self.mp_error =
+                            Some("2v2 needs a 4-start map - pick crossfire".into());
+                        return;
+                    }
+                    let map_ron = if orion_sim::map::MAP_NAMES.contains(&chosen.as_str()) {
+                        None
+                    } else {
+                        ron::ser::to_string(&map).ok()
+                    };
+                    self.settings.save();
+                    self.mp_private = true;
+                    let (code, rx) = crate::relay::host_room_async(
+                        self.settings.relay_url.clone(),
+                        crate::relay::fresh_code(),
+                        self.chosen_race,
+                        &chosen,
+                        map_ron,
+                    );
+                    self.mp_lobby_code = Some(code);
+                    self.room_waiting = Some(rx);
+                }
             }
             MenuAction::PlayReplay(k) => {
                 if self.replay_share_mode {

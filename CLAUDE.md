@@ -203,7 +203,10 @@ the desk, which reads as a mystery disconnect in the logs.
 ## Maps
 
 `map.rs` registry: `MAP_NAMES` + `by_name` — names are replay/net
-identifiers, never rename a shipped one. Four maps: causeway (88x88,
+identifiers, never rename a shipped one. Five maps: crossfire (96x96,
+the 2v2 map: four corner mains in seat order [NW,NE,SE,SW] — allies
+share a side — with mirrored contested expansions; the symmetry checker
+validates team maps by start-SET mirroring), causeway (88x88,
 central land-bridge plateau carrying two contested thirds; open flank
 ramp + rock-sealed breach ramp per third; groves on the flanks) and the
 original three: meridian (single-base,
@@ -289,13 +292,14 @@ of all versions.
 
 ## Known gaps / next milestones (see SPEC.md for full list)
 
-1. 2v2: sim foundations SHIPPED (Player.team, State::hostile/allied,
-   team victory, shared team vision — tests/teams.rs; 1v1 unchanged,
-   team == player index). Remaining: N-player Lockstep (Cmds needs a
-   player tag; step waits on ALL players), multi-peer relay Lobby DO
-   (currently exactly host+join), 4-slot lobby UI with team picks, a
-   4-start map (tests/teams.rs has a fixture pattern), bot ally
-   awareness. Recommended order: relay DO -> net.rs -> UI -> map.
+1. 2v2 SHIPPED (v0.24.0): teams in the sim, slotted relay rooms,
+   N-player Lockstep (tagged Cmds2, worst-seat RTT), CREATE 2V2 ROOM +
+   auto-detecting code join, team-based colors, the crossfire 4-start
+   map. E2E: --mp-auto room-host:CODE:map + 3x room-join. Remaining
+   polish: public room listing + ranked 2v2 in the matchmaker, wasm
+   room joins (browser hangs politely at CANCEL on a room code), bots
+   filling empty seats, room replays (recording is off in rooms), team
+   pings/chat.
 2. macOS builds are unsigned — Gatekeeper right-click-open. Needs an
    Apple Developer ID in CI. (The repo going public did not change
    this.)

@@ -114,7 +114,7 @@ impl Map {
 
 /// All shipping maps, in menu order. Names are the replay/net identifiers —
 /// never rename one that shipped.
-pub const MAP_NAMES: &[&str] = &["meridian", "caverns", "thornwood", "causeway"];
+pub const MAP_NAMES: &[&str] = &["meridian", "caverns", "thornwood", "causeway", "crossfire"];
 
 pub fn by_name(name: &str) -> Option<Map> {
     match name {
@@ -122,6 +122,7 @@ pub fn by_name(name: &str) -> Option<Map> {
         "caverns" => Some(caverns()),
         "thornwood" => Some(thornwood()),
         "causeway" => Some(causeway()),
+        "crossfire" => Some(crossfire()),
         _ => None,
     }
 }
@@ -728,6 +729,169 @@ pub fn causeway() -> Map {
     let groves: [(i32, i32, i32, i32); 2] = [
         (46, 20, 9, 6),  // north flank woods (mirror = south flank)
         (68, 28, 6, 5),  // pocket at the SE main's north approach
+    ];
+    let mut occupied: Vec<i32> = Vec::new();
+    for &(cx, cy, rx, ry) in &groves {
+        for y in cy - ry..=cy + ry {
+            for x in cx - rx..=cx + rx {
+                if !map.in_bounds(x, y) {
+                    continue;
+                }
+                if map.kind[(y * w + x) as usize] != TileKind::Ground
+                    || map.elev[(y * w + x) as usize] != 0
+                {
+                    continue;
+                }
+                let dx = (x - cx) * 100 / rx.max(1);
+                let dy = (y - cy) * 100 / ry.max(1);
+                let d = dx * dx + dy * dy;
+                if d > 10000 {
+                    continue;
+                }
+                let density = 85 - d * 70 / 10000;
+                if (atlas_free_hash(x, y) % 100) as i32 >= density {
+                    continue;
+                }
+                let (mx, my) = (w - 1 - x, h - 1 - y);
+                let makes_block = |set: &Vec<i32>, tx: i32, ty: i32| {
+                    let at = |ax: i32, ay: i32| {
+                        (ax == tx && ay == ty) || set.contains(&(ay * w + ax))
+                    };
+                    (0..4).any(|q| {
+                        let (ox, oy) = [(0, 0), (-1, 0), (0, -1), (-1, -1)][q];
+                        at(tx + ox, ty + oy)
+                            && at(tx + ox + 1, ty + oy)
+                            && at(tx + ox, ty + oy + 1)
+                            && at(tx + ox + 1, ty + oy + 1)
+                    })
+                };
+                if makes_block(&occupied, x, y) || makes_block(&occupied, mx, my) {
+                    continue;
+                }
+                occupied.push(y * w + x);
+                occupied.push(my * w + mx);
+                map.trees.push(TilePos::new(x, y));
+                map.trees.push(TilePos::new(mx, my));
+            }
+        }
+    }
+
+    map
+}
+
+/// "Crossfire", 96x96 — the 2v2 map. Four corner mains; seats 0+1 spawn
+/// across the NORTH (allies share a side), seats 2+3 across the south.
+/// Two contested expansions flank an open center criss-crossed by
+/// ambush groves. 180-degree symmetric: NW<->SE and NE<->SW, so the two
+/// TEAMS mirror each other exactly.
+pub fn crossfire() -> Map {
+    let w = 96;
+    let h = 96;
+    let mut map = Map {
+        width: w,
+        height: h,
+        kind: vec![TileKind::Ground; (w * h) as usize],
+        elev: vec![0u8; (w * h) as usize],
+        // Order is seat order: [NW, NE, SE, SW] — teams (0,1) vs (2,3).
+        starts: vec![
+            TilePos::new(14, 14),
+            TilePos::new(w - 15, 14),
+            TilePos::new(w - 15, h - 15),
+            TilePos::new(14, h - 15),
+        ],
+        minerals: Vec::new(),
+        geysers: Vec::new(),
+        expansions: Vec::new(),
+        trees: Vec::new(),
+        rocks: Vec::new(),
+    };
+    for x in 0..w {
+        for y in 0..h {
+            if x == 0 || y == 0 || x == w - 1 || y == h - 1 {
+                map.kind[(y * w + x) as usize] = TileKind::Blocked;
+            }
+        }
+    }
+
+    let plateau = |map: &mut Map, ox: i32, oy: i32, sx: i32, sy: i32| {
+        for x in ox..ox + sx {
+            for y in oy..oy + sy {
+                if map.in_bounds(x, y) {
+                    let i = map.idx(x, y);
+                    map.elev[i] = 1;
+                }
+            }
+        }
+        for x in ox - 1..=ox + sx {
+            for y in oy - 1..=oy + sy {
+                let inside = x >= ox && x < ox + sx && y >= oy && y < oy + sy;
+                if !inside && map.in_bounds(x, y) {
+                    let i = map.idx(x, y);
+                    map.kind[i] = TileKind::Blocked;
+                    map.elev[i] = 1;
+                }
+            }
+        }
+    };
+    // Four 24x24 corner mains.
+    plateau(&mut map, 2, 2, 24, 24);
+    plateau(&mut map, w - 26, 2, 24, 24);
+    plateau(&mut map, w - 26, h - 26, 24, 24);
+    plateau(&mut map, 2, h - 26, 24, 24);
+
+    // Mirrored helper: paints a tile and its 180-degree twin.
+    let ramp = |map: &mut Map, tiles: &[(i32, i32)]| {
+        for &(x, y) in tiles {
+            for (px, py) in [(x, y), (map.width - 1 - x, map.height - 1 - y)] {
+                let i = map.idx(px, py);
+                map.kind[i] = TileKind::Ramp;
+                map.elev[i] = 0;
+            }
+        }
+    };
+    // NW main: ramps on the east + south faces (mirror covers SE), NE
+    // main: west + south faces (mirror covers SW).
+    ramp(&mut map, &[(26, 18), (26, 19), (26, 20), (26, 21)]);
+    ramp(&mut map, &[(18, 26), (19, 26), (20, 26), (21, 26)]);
+    ramp(&mut map, &[(w - 27, 18), (w - 27, 19), (w - 27, 20), (w - 27, 21)]);
+    ramp(&mut map, &[(w - 22, 26), (w - 21, 26), (w - 20, 26), (w - 19, 26)]);
+
+    let patches = |map: &mut Map, line: &[(i32, i32)], amount: i32| {
+        for &(x, y) in line {
+            map.minerals.push((TilePos::new(x, y), amount));
+            map.minerals
+                .push((TilePos::new(map.width - 1 - x, map.height - 1 - y), amount));
+        }
+    };
+    let geysers = |map: &mut Map, origins: &[(i32, i32)], amount: i32| {
+        for &(x, y) in origins {
+            map.geysers.push((TilePos::new(x, y), amount));
+            map.geysers
+                .push((TilePos::new(map.width - 2 - x, map.height - 2 - y), amount));
+        }
+    };
+
+    // NW main economy (mirror = SE), NE main economy (mirror = SW).
+    patches(&mut map, &[(6, 4), (8, 4), (4, 6), (4, 8), (4, 10), (4, 12), (5, 16), (4, 14)], 1250);
+    geysers(&mut map, &[(18, 4)], 2500);
+    patches(
+        &mut map,
+        &[(w - 7, 4), (w - 9, 4), (w - 5, 6), (w - 5, 8), (w - 5, 10), (w - 5, 12), (w - 6, 16), (w - 5, 14)],
+        1250,
+    );
+    geysers(&mut map, &[(w - 20, 4)], 2500);
+
+    // Contested expansions flanking the center (west pair mirrors east).
+    patches(&mut map, &[(8, 44), (8, 46), (8, 48), (8, 50), (9, 52), (9, 42)], 1000);
+    geysers(&mut map, &[(14, 46)], 2500);
+    map.expansions.push(TilePos::new(12, 45));
+    map.expansions.push(TilePos::new(w - 3 - 12, h - 3 - 45));
+
+    // Ambush groves shaping the center approaches.
+    let groves: [(i32, i32, i32, i32); 3] = [
+        (36, 36, 7, 5),
+        (60, 44, 6, 6),
+        (48, 22, 8, 4),
     ];
     let mut occupied: Vec<i32> = Vec::new();
     for &(cx, cy, rx, ry) in &groves {

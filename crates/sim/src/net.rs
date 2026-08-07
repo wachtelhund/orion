@@ -473,6 +473,62 @@ pub fn room_join_handshake(
     })
 }
 
+/// Either kind of established match, from a code the joiner knew nothing
+/// about — the relay's seat frame says whether this is a duel or a room.
+pub enum Joined {
+    Duel(Started),
+    Room(RoomStarted),
+}
+
+/// Join by code, auto-detecting duel vs room from the relay's Seat frame.
+pub fn join_auto(mut net: Net, my_race: u8, name: &str) -> std::io::Result<Joined> {
+    let bad = |m: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, m.to_string());
+    let (slot, capacity) = loop {
+        match net.rx.recv() {
+            Ok(Msg::Seat { slot, capacity, .. }) => break (slot, capacity),
+            Ok(_) => continue,
+            Err(_) => return Err(bad("no seat assignment from the relay")),
+        }
+    };
+    if capacity <= 2 {
+        return join_handshake(net, my_race).map(Joined::Duel);
+    }
+    // Room flow, seat already in hand.
+    net.send(&Msg::Hello2 {
+        slot,
+        race: my_race,
+        name: name.to_string(),
+        version: PROTOCOL_VERSION.to_string(),
+    });
+    let mut start: Option<(u64, Vec<u8>, Vec<u8>, String, Option<String>)> = None;
+    let delay = loop {
+        match net.rx.recv() {
+            Ok(Msg::Ping { k }) => {
+                net.send(&Msg::Pong2 { slot, k });
+            }
+            Ok(Msg::Start2 { seed, races, teams, map, map_ron }) => {
+                start = Some((seed, races, teams, map, map_ron));
+            }
+            Ok(Msg::Go { delay }) => break delay.clamp(INPUT_DELAY_MIN, INPUT_DELAY_MAX),
+            Ok(Msg::Reject { reason }) => return Err(bad(&reason)),
+            Ok(_) => continue,
+            Err(_) => return Err(bad("the host left during the handshake")),
+        }
+    };
+    let (seed, races, teams, map, map_ron) =
+        start.ok_or_else(|| bad("no start data before go"))?;
+    Ok(Joined::Room(RoomStarted {
+        net,
+        local_player: slot,
+        seed,
+        races,
+        teams,
+        map,
+        map_ron,
+        input_delay: delay,
+    }))
+}
+
 /// The lockstep driver: schedules local input, waits for remote input,
 /// steps when both sides of a tick are present, cross-checks checksums.
 pub struct Lockstep {

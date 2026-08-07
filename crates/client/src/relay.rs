@@ -319,6 +319,23 @@ pub fn host_relay_async_full(
 }
 
 /// Join a lobby code through the relay.
+/// Join any code — the relay's seat frame decides duel vs room.
+pub fn join_auto_async(
+    base: String,
+    code: String,
+    my_race: u8,
+    name: String,
+) -> Receiver<io::Result<orion_sim::net::Joined>> {
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let url = ws_url(&base, &code.to_uppercase(), "join");
+        let result =
+            ws_net(&url).and_then(|net| orion_sim::net::join_auto(net, my_race, &name));
+        let _ = tx.send(result);
+    });
+    rx
+}
+
 pub fn join_relay_async(base: String, code: String, my_race: u8) -> Receiver<io::Result<Started>> {
     let (tx, rx) = channel();
     std::thread::spawn(move || {

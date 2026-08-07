@@ -134,6 +134,10 @@ pub struct App {
     #[cfg(not(target_arch = "wasm32"))]
     pub room_waiting:
         Option<std::sync::mpsc::Receiver<std::io::Result<orion_sim::net::RoomStarted>>>,
+    /// Pending auto-detected join (duel or room).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub join_waiting:
+        Option<std::sync::mpsc::Receiver<std::io::Result<orion_sim::net::Joined>>>,
     pub shot_focus: Option<(f32, f32)>,
     pub shot_zoom: Option<f32>,
     pub script: Option<String>,
@@ -375,6 +379,8 @@ impl App {
             tutorial: None,
             #[cfg(not(target_arch = "wasm32"))]
             room_waiting: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            join_waiting: None,
             shot,
             shot_focus: None,
             shot_zoom: None,
@@ -643,6 +649,34 @@ impl App {
     /// Text scale helper (integer-ish multiples keep the 5x7 font crisp).
     pub fn ts(&self, m: f32) -> f32 {
         (self.ui() * m).round().max(1.0)
+    }
+
+    /// Any multiplayer connection attempt in flight (duel, auto-join,
+    /// or 2v2 room)?
+    pub(crate) fn mp_busy(&self) -> bool {
+        if self.mp_waiting.is_some() {
+            return true;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if self.room_waiting.is_some() || self.join_waiting.is_some() {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Sprite/color team index for an owner: the player's TEAM, clamped
+    /// to the two baked sprite palettes. In 1v1 team == player, so this
+    /// is exactly the old owner-based coloring; in 2v2 teammates share
+    /// a color.
+    pub(crate) fn team_of(&self, owner: u8) -> usize {
+        self.state
+            .players
+            .get(owner as usize)
+            .map(|p| p.team as usize)
+            .unwrap_or(0)
+            .min(1)
     }
 
     /// Do AI opponents act this frame? Stage captures and the tutorial
@@ -3444,6 +3478,29 @@ impl App {
 
         self.poll_lobbies();
 
+        // Pending auto-join resolved?
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(rx) = &self.join_waiting {
+            match rx.try_recv() {
+                Ok(Ok(orion_sim::net::Joined::Duel(started))) => {
+                    self.join_waiting = None;
+                    self.start_mp_game(started);
+                }
+                Ok(Ok(orion_sim::net::Joined::Room(rs))) => {
+                    self.join_waiting = None;
+                    self.start_room_game(rs);
+                }
+                Ok(Err(e)) => {
+                    self.mp_error = Some(format!("CONNECTION FAILED: {e}").to_uppercase());
+                    self.join_waiting = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.join_waiting = None;
+                }
+            }
+        }
+
         // Pending room handshake resolved?
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(rx) = &self.room_waiting {
@@ -4483,7 +4540,7 @@ impl App {
                 }
                 EntityKind::Building => {
                     let btype = self.building_type[e.def as usize];
-                    let team = (e.owner as usize).min(1);
+                    let team = self.team_of(e.owner);
                     let r = book.building(btype, team);
                     let (ax, ay) = BUILDING_ANCHOR[btype];
                     // Drop shadow: light from the upper-left.
@@ -4573,7 +4630,7 @@ impl App {
                     } else {
                         self.unit_type[e.def as usize]
                     };
-                    let team = (e.owner as usize).min(1);
+                    let team = self.team_of(e.owner);
                     let facing = self.facings.get(i as usize).copied().unwrap_or(2) as usize;
                     let moving = e.pos != e.prev_pos;
                     // Walk cycle speed scales with movement speed; flyers and
@@ -4627,7 +4684,7 @@ impl App {
                             let w = r_aura.to_f32() * iso::TILE_HALF_W * 2.0 * 2.0 * zoom;
                             let hgt = w * (r.h as f32 / r.w as f32);
                             let cy2 = sy - (200.0 / 352.0 - 0.5) * hgt;
-                            let tc = TEAM_COLORS[(e.owner as usize).min(1)];
+                            let tc = TEAM_COLORS[self.team_of(e.owner)];
                             let pulse = 0.75 + 0.1 * (self.state.tick as f32 * 0.2).sin();
                             self.gfx.sprite(out, r, sx, cy2, w, hgt, [tc[0], tc[1], tc[2], pulse]);
                             self.gfx.sprite(glow, r, sx, cy2, w, hgt, [tc[0], tc[1], tc[2], 0.22]);

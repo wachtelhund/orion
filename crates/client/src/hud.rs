@@ -606,7 +606,7 @@ impl App {
                 EntityKind::Resource => (true, MINERAL_COLOR),
                 _ => {
                     let vis = e.owner == self.human || self.visible(t);
-                    (vis, TEAM_COLORS[e.owner as usize % 2])
+                    (vis, TEAM_COLORS[self.team_of(e.owner)])
                 }
             };
             if !visible {
@@ -732,7 +732,7 @@ impl App {
         let pw = 104.0 * ui;
         self.chrome_panel(out, x0, cy + 12.0 * ui, pw, pw + 8.0 * ui, true);
         self.gold_frame(out, x0 - 2.0 * ui, cy + 10.0 * ui, pw + 4.0 * ui, pw + 12.0 * ui);
-        let team = (e.owner as usize).min(1);
+        let team = self.team_of(e.owner);
         match e.kind {
             EntityKind::Unit => {
                 let ut = self.unit_type[e.def as usize];
@@ -876,13 +876,13 @@ impl App {
             self.gfx.quad(out, bx - 1.0, by - 1.0, tw2 - 2.0 * ui, th2 - 2.0 * ui, [0.06, 0.06, 0.09, 1.0]);
             match u.kind {
                 EntityKind::Unit => {
-                    let r = book.unit(self.unit_type[u.def as usize], (u.owner as usize).min(1), 2, 0);
+                    let r = book.unit(self.unit_type[u.def as usize], self.team_of(u.owner), 2, 0);
                     self.gfx.sprite(out, r, bx + 17.0 * ui, by + 22.0 * ui, r.w as f32 / r.scale * ui, r.h as f32 / r.scale * ui, WHITE);
                     let frac = u.hp as f32 / self.state.data.units[u.def as usize].hp as f32;
                     self.gfx.quad(out, bx, by + 46.0 * ui, 34.0 * ui * frac, 3.0 * ui, hp_color(frac));
                 }
                 EntityKind::Building => {
-                    let r = book.building(self.building_type[u.def as usize], (u.owner as usize).min(1));
+                    let r = book.building(self.building_type[u.def as usize], self.team_of(u.owner));
                     let s = (34.0 * ui) / r.w as f32;
                     self.gfx.sprite(out, r, bx + 17.0 * ui, by + 22.0 * ui, r.w as f32 * s, r.h as f32 * s, WHITE);
                     let frac = u.hp as f32 / self.state.data.buildings[u.def as usize].hp as f32;
