@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-11T07:34:12.692Z",
+  "generatedAt": "2026-08-11T08:29:41.663Z",
   "sourceIsPublic": true,
   "links": {
     "primary": "https://github.com/wachtelhund/orion",
@@ -47,33 +47,39 @@
     }
   },
   "release": {
-    "tag": "v0.25.0",
-    "name": "v0.25.0",
+    "tag": "v0.26.0",
+    "name": "v0.26.0",
     "url": "#download",
-    "publishedAt": "2026-08-11T07:27:34Z",
+    "publishedAt": "2026-08-11T08:25:37Z",
     "assets": [
       {
         "name": "Orion-macOS.zip",
-        "size": 10857231,
-        "url": "/downloads/v0.25.0/Orion-macOS.zip",
+        "size": 10891713,
+        "url": "/downloads/v0.26.0/Orion-macOS.zip",
         "platform": "macos"
       },
       {
         "name": "orion-windows-x86_64.zip",
-        "size": 5093502,
-        "url": "/downloads/v0.25.0/orion-windows-x86_64.zip",
+        "size": 5123320,
+        "url": "/downloads/v0.26.0/orion-windows-x86_64.zip",
         "platform": "windows"
       },
       {
         "name": "orion-linux-x86_64.tar.gz",
-        "size": 6331256,
-        "url": "/downloads/v0.25.0/orion-linux-x86_64.tar.gz",
+        "size": 6341807,
+        "url": "/downloads/v0.26.0/orion-linux-x86_64.tar.gz",
         "platform": "linux"
       }
     ]
   },
   "releaseCount": 3,
   "changelog": [
+    {
+      "version": "v0.26.0",
+      "highlights": "Observer mode: watch live duels and 2v2 rooms through the relay — free camera, TAB fog perspectives, checksum-verified view",
+      "title": "v0.26.0 — Observer mode",
+      "html": "<p>Watch live matches. Any lobby or 2v2 room can now be observed through the relay — silently, from the outside, with the full picture.</p>\n<p><img src=\"/mirror/changelog/images/v026-observer.png\" alt=\"Observing a live 2v2 — revealed map, four corner bases on the minimap\" loading=\"lazy\" decoding=\"async\"></p>\n<h4>Watching a match</h4>\n<p>Type a code on the multiplayer page and pick <strong>WATCH THIS CODE</strong> (shown under PRIVATE CODE). You&#39;ll drop into the match the moment it starts: map revealed, free camera, no seat of your own. <strong>TAB</strong> cycles the fog perspective — each player&#39;s own view, then ALL. Works for duels and 2v2 rooms alike, custom maps included; up to eight observers per match.</p>\n<p>Observers are invisible to the players: they receive the game but send nothing, and joining or leaving mid-match disturbs no one.</p>\n<h4>How it works</h4>\n<ul><li>The relay gained a third role: <code>obs</code> connections tap the room&#39;s broadcast without taking a seat. The match tears them down when it ends.</li><li>The observer client never handshakes — it watches the players&#39; handshake fly by (Start/Start2, then Go) and builds the same deterministic sim from their tagged command streams, stepping each tick as soon as every seat&#39;s commands have arrived.</li><li>Trust, but verify: the players exchange periodic state checksums; the observer checks its own sim against them, so a diverged view is flagged (OBSERVER DESYNC) instead of silently lying.</li><li>Replay fog cycling is now sized to the player count, so 4-player room replays (new in v0.25.0) cycle all four perspectives too.</li><li>E2E-verified live: a duel and a bot-filled Crossfire room were both observed past tick 190 with checksums matching (<code>--mp-auto obs:CODE</code>, plus <code>ORION_OBS_SHOT</code> for visual proof).</li></ul>\n<p>Observing is desktop-only for now — the browser client doesn&#39;t speak the passive handshake yet.</p>\n<h4>Balance</h4>\n<p>No unit numbers changed.</p>"
+    },
     {
       "version": "v0.25.0",
       "highlights": "2v2 everywhere: bots fill empty seats, public rooms with live fill counts, room replays (teams + embedded maps), browser room joins",
@@ -232,8 +238,8 @@
     }
   ],
   "play": {
-    "version": "v0.25.0",
-    "wasmBytes": 3809432,
+    "version": "v0.26.0",
+    "wasmBytes": 3810468,
     "source": "orion-web-demo.zip",
     "files": [
       "orion-client.js",
