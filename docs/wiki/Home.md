@@ -12,6 +12,7 @@ looks in game.
 
 | Version | Highlights |
 |---|---|
+| [v0.27.0](v0.27.0.md) | The mini-campaign: five scripted missions (play all three races, survive missions, a 2v2 finale with Marshal Kade) + trooper trim from the meridian taste pass |
 | [v0.26.0](v0.26.0.md) | Observer mode: watch live duels and 2v2 rooms through the relay — free camera, TAB fog perspectives, checksum-verified view |
 | [v0.25.0](v0.25.0.md) | 2v2 everywhere: bots fill empty seats, public rooms with live fill counts, room replays (teams + embedded maps), browser room joins |
 | [v0.24.0](v0.24.0.md) | 2v2: four-seat relay rooms, team vision/victory/colors, N-player lockstep, and Crossfire — the four-corner team map |
