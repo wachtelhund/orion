@@ -6,7 +6,7 @@
 
 use orion_sim::ai::{Bot, Difficulty};
 use orion_sim::fixed::Fx;
-use orion_sim::map::meridian;
+use orion_sim::map::by_name;
 use orion_sim::{EntityKind, GameData, State};
 
 fn snapshot(s: &State, swap_owner: bool, mirror: bool) -> Vec<(u8, u8, u16, i64, i64, i32)> {
@@ -39,8 +39,9 @@ fn main() {
     let seed = 13u64;
     let data_a = GameData::load_default();
     let data_b = GameData::load_default();
-    let map_a = meridian();
-    let mut map_b = meridian();
+    let name = std::env::args().nth(1).unwrap_or_else(|| "meridian".into());
+    let map_a = by_name(&name).expect("unknown map");
+    let mut map_b = by_name(&name).expect("unknown map");
     map_b.starts.swap(0, 1);
 
     let mut a = State::new_with_races(data_a, map_a, seed, &[1, 1]);

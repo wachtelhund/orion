@@ -103,6 +103,49 @@ fn main() {
     );
     fight("20 arclight vs 18 trooper", &[("arclight", 20)], &[("trooper", 18)]);
     fight("11 mauler vs 10 vanguard", &[("mauler", 11)], &[("vanguard", 10)]);
+    println!("--- VC (A) vs Kyth (B), cost-matched clumps ---");
+    // trooper 60 / skitter 45 / spitter 65 / ravager 225 / vanguard 150.
+    fight("15 trooper vs 20 skitter", &[("trooper", 15)], &[("skitter", 20)]);
+    fight("13 trooper vs 12 spitter", &[("trooper", 13)], &[("spitter", 12)]);
+    fight(
+        "core 1500: 15t+4v vs 12ski+10spi",
+        &[("trooper", 15), ("vanguard", 4)],
+        &[("skitter", 12), ("spitter", 10)],
+    );
+    fight(
+        "core 2100: 15t+6v+2brk vs 12ski+14spi+2rav",
+        &[("trooper", 15), ("vanguard", 6), ("breaker", 2)],
+        &[("skitter", 12), ("spitter", 14), ("ravager", 2)],
+    );
+    println!("--- swapped seats (Kyth as A) ---");
+    fight("20 skitter vs 15 trooper", &[("skitter", 20)], &[("trooper", 15)]);
+    fight("12 spitter vs 13 trooper", &[("spitter", 12)], &[("trooper", 13)]);
+    fight(
+        "12ski+10spi vs 15t+4v",
+        &[("skitter", 12), ("spitter", 10)],
+        &[("trooper", 15), ("vanguard", 4)],
+    );
+    fight(
+        "12ski+14spi+2rav vs 15t+6v+2brk",
+        &[("skitter", 12), ("spitter", 14), ("ravager", 2)],
+        &[("trooper", 15), ("vanguard", 6), ("breaker", 2)],
+    );
+    println!("--- Ferron (A) vs Kyth (B), cost-matched clumps ---");
+    fight("16 arclight vs 20 skitter", &[("arclight", 16)], &[("skitter", 20)]);
+    fight("14 arclight vs 12 spitter", &[("arclight", 14)], &[("spitter", 12)]);
+    fight(
+        "core 1500: 14arc+3maul vs 14ski+13spi",
+        &[("arclight", 14), ("mauler", 3)],
+        &[("skitter", 14), ("spitter", 13)],
+    );
+    println!("--- swapped (Kyth as A) ---");
+    fight("20 skitter vs 16 arclight", &[("skitter", 20)], &[("arclight", 16)]);
+    fight("12 spitter vs 14 arclight", &[("spitter", 12)], &[("arclight", 14)]);
+    fight(
+        "14ski+13spi vs 14arc+3maul",
+        &[("skitter", 14), ("spitter", 13)],
+        &[("arclight", 14), ("mauler", 3)],
+    );
     println!("--- mirrors (sanity: should be ~even) ---");
     fight("15 trooper vs 15 trooper", &[("trooper", 15)], &[("trooper", 15)]);
     fight("15 arclight vs 15 arclight", &[("arclight", 15)], &[("arclight", 15)]);

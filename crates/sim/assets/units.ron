@@ -30,7 +30,7 @@
             cost_minerals: 60,
             supply: 1,
             build_time_s: 15.0,
-            weapon: Some((damage: 7, range: 4.5, cooldown_s: 0.86, air: true)),
+            weapon: Some((damage: 7, range: 4.5, cooldown_s: 0.90, air: true)),
         ),
         (
             id: "vanguard",

@@ -383,11 +383,9 @@ pub fn room_host_handshake_signaled(
     let mut races: Vec<Option<u8>> = vec![None; capacity as usize];
     races[0] = Some(my_race);
     // Collect Hellos until the room fills or the host says go.
-    let mut start_now = false;
-    while races.iter().any(|r| r.is_none()) && !start_now {
+    while races.iter().any(|r| r.is_none()) {
         if start_rx.try_recv().is_ok() {
-            start_now = true;
-            break;
+            break; // host says go — empty seats become bots
         }
         match net.rx.recv_timeout(std::time::Duration::from_millis(100)) {
             Ok(Msg::Hello2 { slot, race, version, .. }) => {
