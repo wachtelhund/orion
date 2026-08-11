@@ -42,13 +42,13 @@
     <div class="hero-scrim"></div>
 
     <div class="hero-inner wrap">
-      <p class="chip" id="hero-eyebrow">v0.23.0 · free · MIT</p>
+      <p class="chip" id="hero-eyebrow">v0.24.0 · free · MIT</p>
       <h1>ORION</h1>
       <p class="tagline">A StarCraft-style RTS built from scratch in Rust</p>
 
       <div class="cta">
         <a class="btn btn-primary" id="hero-download" href="#download">
-          <span class="btn-label">Download v0.23.0</span>
+          <span class="btn-label">Download v0.24.0</span>
           <span class="btn-sub" id="hero-download-sub">Windows · macOS · Linux</span>
         </a>
         <a class="btn btn-ghost play-only" href="/play" rel="noopener">
@@ -70,19 +70,30 @@
   <section class="wrap section" id="download">
     <h2 class="section-title">Download</h2>
     <p class="section-lede">
-      <strong id="release-tag">v0.23.0</strong><span id="release-date"> · Aug 6, 2026</span> —
+      <strong id="release-tag">v0.24.0</strong><span id="release-date"> · Aug 7, 2026</span> —
       precompiled, nothing to install. <a href="#download" rel="noopener">All releases</a> ·
       <a href="https://github.com/wachtelhund/orion" rel="noopener">build from source</a>
     </p>
-    <div class="downloads" id="downloads"><div class="dl frame" data-platform="macos"><h3>macOS (Apple Silicon + Intel)</h3><p class="file">Orion-macOS.zip</p><div class="steps"><p>Unzip → double-click <strong>Orion.app</strong>. First launch only: right-click → Open (it isn&#39;t notarized)</p></div><a class="btn btn-primary" href="/downloads/v0.23.0/Orion-macOS.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.23.0 · 10.3 MB</span></a></div>
-<div class="dl frame" data-platform="windows"><h3>Windows 10/11</h3><p class="file">orion-windows-x86_64.zip</p><div class="steps"><p>Unzip → double-click <strong>orion.exe</strong>. If SmartScreen objects: More info → Run anyway</p></div><a class="btn btn-primary" href="/downloads/v0.23.0/orion-windows-x86_64.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.23.0 · 4.8 MB</span></a></div>
-<div class="dl frame" data-platform="linux"><h3>Linux (x86_64)</h3><p class="file">orion-linux-x86_64.tar.gz</p><div class="steps"><p><code>tar xzf &amp;&amp; ./orion</code> (needs Vulkan drivers + ALSA <code>libasound2</code>)</p></div><a class="btn btn-primary" href="/downloads/v0.23.0/orion-linux-x86_64.tar.gz"><span class="btn-label">Download</span><span class="btn-sub">v0.23.0 · 6.0 MB</span></a></div></div>
+    <div class="downloads" id="downloads"><div class="dl frame" data-platform="macos"><h3>macOS (Apple Silicon + Intel)</h3><p class="file">Orion-macOS.zip</p><div class="steps"><p>Unzip → double-click <strong>Orion.app</strong>. First launch only: right-click → Open (it isn&#39;t notarized)</p></div><a class="btn btn-primary" href="/downloads/v0.24.0/Orion-macOS.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.24.0 · 10.3 MB</span></a></div>
+<div class="dl frame" data-platform="windows"><h3>Windows 10/11</h3><p class="file">orion-windows-x86_64.zip</p><div class="steps"><p>Unzip → double-click <strong>orion.exe</strong>. If SmartScreen objects: More info → Run anyway</p></div><a class="btn btn-primary" href="/downloads/v0.24.0/orion-windows-x86_64.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.24.0 · 4.9 MB</span></a></div>
+<div class="dl frame" data-platform="linux"><h3>Linux (x86_64)</h3><p class="file">orion-linux-x86_64.tar.gz</p><div class="steps"><p><code>tar xzf &amp;&amp; ./orion</code> (needs Vulkan drivers + ALSA <code>libasound2</code>)</p></div><a class="btn btn-primary" href="/downloads/v0.24.0/orion-linux-x86_64.tar.gz"><span class="btn-label">Download</span><span class="btn-sub">v0.24.0 · 6.0 MB</span></a></div></div>
   </section>
 
   <section class="wrap section" id="changelog">
     <h2 class="section-title">Changelog</h2>
     <p class="section-lede">Read live from the <a href="https://github.com/wachtelhund/orion/wiki" rel="noopener">project wiki</a>.</p>
-    <div class="changelog" id="changelog-list"><details class="release" id="v0.23.0"><summary><span class="ver">v0.23.0</span><span class="sum">Sudden death + a measured balance pass</span><span class="hl">Bot sudden death (thornwood stalls fixed, games end) + measured balance pass: Breaker siege 40-&gt;36, Mauler 100-&gt;110</span></summary><div class="release-body"><p>A gameplay batch: bot games now <em>end</em>, and the two most lopsided numbers in the game moved — with before/after measurements for all of it.</p>
+    <div class="changelog" id="changelog-list"><details class="release" id="v0.24.0"><summary><span class="ver">v0.24.0</span><span class="sum">2v2</span><span class="hl">2v2: four-seat relay rooms, team vision/victory/colors, N-player lockstep, and Crossfire — the four-corner team map</span></summary><div class="release-body"><p>Team games. The biggest multiplayer feature since ranked, built in three verified layers.</p>
+<p><img src="/mirror/changelog/images/v024-crossfire.png" alt="Crossfire — the 2v2 map" loading="lazy" decoding="async"></p>
+<h4>Playing it</h4>
+<p><strong>CREATE 2V2 ROOM</strong> on the multiplayer page gives you a 5-letter code for a four-seat room; the match auto-starts the moment it fills. Teams are seat pairs: the host and the first joiner against the other two. Joining needs nothing new — type any code into PRIVATE CODE and the game detects whether it&#39;s a duel or a room.</p>
+<p><strong>Crossfire</strong> is the 2v2 map: four corner mains where allies share a side of the map, mirrored contested expansions on the flanks, and ambush groves shaping the open center. The two teams occupy exactly mirrored ground (the symmetry checker now validates team maps). Editor-made 4-start maps work in rooms too — the map still travels inside the handshake.</p>
+<p>Teammates share vision, can&#39;t be hit by your auto-attacks, benefit from your shield auras and heals, and share your team&#39;s color. Victory is by team: the game ends when one side has no standing players.</p>
+<h4>Under the hood</h4>
+<ul><li>The relay&#39;s lobby became a slotted room (host + up to three seats, broadcast forwarding, seat assignment by control frame). 1v1 lobbies are byte-identical to before.</li><li>The lockstep driver now runs N tagged command streams and steps only when every seat&#39;s tick has arrived; the host sizes the shared input delay to the WORST seat&#39;s measured RTT.</li><li>Verified end to end: four processes through the live relay on crossfire — 240 lockstep ticks, matched checksums on every seat. Plus a four-peer in-process lockstep test and three team-mechanics tests in the sim suite.</li></ul>
+<p>Not yet: public room listing, ranked 2v2, browser-side room joins, bots filling empty seats, room replays.</p>
+<h4>Balance</h4>
+<p>No unit numbers changed.</p></div></details>
+<details class="release" id="v0.23.0"><summary><span class="ver">v0.23.0</span><span class="sum">Sudden death + a measured balance pass</span><span class="hl">Bot sudden death (thornwood stalls fixed, games end) + measured balance pass: Breaker siege 40-&gt;36, Mauler 100-&gt;110</span></summary><div class="release-body"><p>A gameplay batch: bot games now <em>end</em>, and the two most lopsided numbers in the game moved — with before/after measurements for all of it.</p>
 <h4>Bots: sudden death at 15 minutes</h4>
 <p>Two turtling bots on a multi-base map could rebuild faster than they killed — thornwood Hard mirrors mostly ran out the 20-minute clock. Past 15 minutes a bot now closes the macro tap: no new construction, no replacement workers. Armies decide the game instead of economies.</p>
 <p>Thornwood Hard went from &quot;mostly stalls&quot; to two-thirds of games resolving — and with games actually ending, the map turned out to be nearly balanced (VC 9 / Kyth 11 / Ferron 9 in the round-robin).</p>

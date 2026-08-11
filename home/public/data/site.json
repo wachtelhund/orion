@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-07T09:42:43.915Z",
+  "generatedAt": "2026-08-07T10:33:17.333Z",
   "sourceIsPublic": true,
   "links": {
     "primary": "https://github.com/wachtelhund/orion",
@@ -47,33 +47,39 @@
     }
   },
   "release": {
-    "tag": "v0.23.0",
-    "name": "v0.23.0",
+    "tag": "v0.24.0",
+    "name": "v0.24.0",
     "url": "#download",
-    "publishedAt": "2026-08-06T15:52:54Z",
+    "publishedAt": "2026-08-07T10:28:39Z",
     "assets": [
       {
         "name": "Orion-macOS.zip",
-        "size": 10772599,
-        "url": "/downloads/v0.23.0/Orion-macOS.zip",
+        "size": 10830737,
+        "url": "/downloads/v0.24.0/Orion-macOS.zip",
         "platform": "macos"
       },
       {
         "name": "orion-windows-x86_64.zip",
-        "size": 5031226,
-        "url": "/downloads/v0.23.0/orion-windows-x86_64.zip",
+        "size": 5094573,
+        "url": "/downloads/v0.24.0/orion-windows-x86_64.zip",
         "platform": "windows"
       },
       {
         "name": "orion-linux-x86_64.tar.gz",
-        "size": 6278057,
-        "url": "/downloads/v0.23.0/orion-linux-x86_64.tar.gz",
+        "size": 6314753,
+        "url": "/downloads/v0.24.0/orion-linux-x86_64.tar.gz",
         "platform": "linux"
       }
     ]
   },
   "releaseCount": 3,
   "changelog": [
+    {
+      "version": "v0.24.0",
+      "highlights": "2v2: four-seat relay rooms, team vision/victory/colors, N-player lockstep, and Crossfire — the four-corner team map",
+      "title": "v0.24.0 — 2v2",
+      "html": "<p>Team games. The biggest multiplayer feature since ranked, built in three verified layers.</p>\n<p><img src=\"/mirror/changelog/images/v024-crossfire.png\" alt=\"Crossfire — the 2v2 map\" loading=\"lazy\" decoding=\"async\"></p>\n<h4>Playing it</h4>\n<p><strong>CREATE 2V2 ROOM</strong> on the multiplayer page gives you a 5-letter code for a four-seat room; the match auto-starts the moment it fills. Teams are seat pairs: the host and the first joiner against the other two. Joining needs nothing new — type any code into PRIVATE CODE and the game detects whether it&#39;s a duel or a room.</p>\n<p><strong>Crossfire</strong> is the 2v2 map: four corner mains where allies share a side of the map, mirrored contested expansions on the flanks, and ambush groves shaping the open center. The two teams occupy exactly mirrored ground (the symmetry checker now validates team maps). Editor-made 4-start maps work in rooms too — the map still travels inside the handshake.</p>\n<p>Teammates share vision, can&#39;t be hit by your auto-attacks, benefit from your shield auras and heals, and share your team&#39;s color. Victory is by team: the game ends when one side has no standing players.</p>\n<h4>Under the hood</h4>\n<ul><li>The relay&#39;s lobby became a slotted room (host + up to three seats, broadcast forwarding, seat assignment by control frame). 1v1 lobbies are byte-identical to before.</li><li>The lockstep driver now runs N tagged command streams and steps only when every seat&#39;s tick has arrived; the host sizes the shared input delay to the WORST seat&#39;s measured RTT.</li><li>Verified end to end: four processes through the live relay on crossfire — 240 lockstep ticks, matched checksums on every seat. Plus a four-peer in-process lockstep test and three team-mechanics tests in the sim suite.</li></ul>\n<p>Not yet: public room listing, ranked 2v2, browser-side room joins, bots filling empty seats, room replays.</p>\n<h4>Balance</h4>\n<p>No unit numbers changed.</p>"
+    },
     {
       "version": "v0.23.0",
       "highlights": "Bot sudden death (thornwood stalls fixed, games end) + measured balance pass: Breaker siege 40->36, Mauler 100->110",
@@ -220,8 +226,8 @@
     }
   ],
   "play": {
-    "version": "v0.23.0",
-    "wasmBytes": 3678307,
+    "version": "v0.24.0",
+    "wasmBytes": 3732836,
     "source": "orion-web-demo.zip",
     "files": [
       "orion-client.js",
