@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-11T09:54:24.560Z",
+  "generatedAt": "2026-08-11T12:09:01.572Z",
   "sourceIsPublic": true,
   "links": {
     "primary": "https://github.com/wachtelhund/orion",
@@ -47,33 +47,39 @@
     }
   },
   "release": {
-    "tag": "v0.27.0",
-    "name": "v0.27.0",
+    "tag": "v0.27.1",
+    "name": "v0.27.1",
     "url": "#download",
-    "publishedAt": "2026-08-11T09:51:02Z",
+    "publishedAt": "2026-08-11T12:04:37Z",
     "assets": [
       {
         "name": "Orion-macOS.zip",
-        "size": 10904091,
-        "url": "/downloads/v0.27.0/Orion-macOS.zip",
+        "size": 10921254,
+        "url": "/downloads/v0.27.1/Orion-macOS.zip",
         "platform": "macos"
       },
       {
         "name": "orion-windows-x86_64.zip",
-        "size": 5133571,
-        "url": "/downloads/v0.27.0/orion-windows-x86_64.zip",
+        "size": 5141769,
+        "url": "/downloads/v0.27.1/orion-windows-x86_64.zip",
         "platform": "windows"
       },
       {
         "name": "orion-linux-x86_64.tar.gz",
-        "size": 6351239,
-        "url": "/downloads/v0.27.0/orion-linux-x86_64.tar.gz",
+        "size": 6361565,
+        "url": "/downloads/v0.27.1/orion-linux-x86_64.tar.gz",
         "platform": "linux"
       }
     ]
   },
   "releaseCount": 3,
   "changelog": [
+    {
+      "version": "v0.27.1",
+      "highlights": "Caverns seat-bias patch: entombed-worker expel, bot builder watchdog, mirror-covariant tie-breaks — seat mirrors even again",
+      "title": "v0.27.1 — The Caverns seat bug",
+      "html": "<p>A patch release for a real competitive bug: on Caverns, the player-1 seat was winning bot mirror matches about 8–0. Same race, same difficulty, same map — the seat decided the game. Found by pointing the mirror-covariance probe at Caverns (it now takes a map name), fixed by hunting the chain to its end.</p>\n<h4>What was actually happening</h4>\n<p>1. When a building finished (or started) it stamped its footprint into the blocked grid — <strong>sealing in any unit standing there</strong>. A worker walking the mining lane at the wrong moment ended up inside a depot, where no flow field could ever reach it. It never moved again. 2. The bot&#39;s macro has a gate: one construction at a time, and a busy builder blocks new orders. When the bot picked the entombed worker as its next builder, that gate <strong>froze the entire macro forever</strong> — no more depots, supply-capped at 36, thousands of minerals floating, army starved. The seat geometry of Caverns made this hit one seat far more often than the other. 3. Two smaller asymmetries stacked on top: perfectly coincident units were always pushed <strong>east</strong> (+x) to separate them, and the nearest-open-tile scan used a fixed raster order — both break the 180-degree symmetry the maps are built around.</p>\n<h4>The fixes</h4>\n<ul><li><strong>Units sealed under a new footprint are expelled</strong> to the nearest open tile — the root cure; an entombed unit can no longer exist.</li><li>The bot gained a <strong>stuck-builder watchdog</strong> (a builder still traveling after 15 s with nothing under construction gets stopped), a <strong>bad-site blacklist</strong>, and a <strong>reachability check</strong> before committing a builder to a site — so no single confused worker can deadlock a macro again, on any map.</li><li>The coincident-unit push and the nearest-open-tile scan are now <strong>mirror-covariant</strong> (away-from-center axis push; rotation-invariant ring ordering), removing the systematic eastward drift.</li></ul>\n<p>Measured result (Caverns, Hard, 8 seeds per matchup): mirror matches went from <strong>P1 winning 7–0 / 8–0</strong> to even splits.</p>\n<p>Full post-fix sweep (all Hard, 8 seeds): mirrors VC 3–3, Kyth 4–4, Ferron 3–5. The cross-race totals on Caverns now read VC 7 / Kyth 18 / Ferron 22 — the old numbers were seat-noise, and with the trooper trim in, VC looks weak on this map specifically (meridian reads VC 20 / 16 / 10). Map-by-map race spread goes on the watchlist; this patch is about seat fairness, and that box is ticked.</p>\n<p>Sim behavior changed, so this is a protocol bump: 0.27.1 clients can&#39;t play 0.27.0 peers — update both sides.</p>\n<h4>Still open</h4>\n<p>The mirror probe still reports a residual ulp-level drift divergence at ~90 s on every map (present at least since v0.17.1 — fixed-point Mul truncation under mirrored normalization). It is chaotic, not directional: sweep mirrors stay even, so it doesn&#39;t bias games. Full covariance remains a long-term project; seat fairness is verified by sweep mirrors, which is the metric that matters.</p>"
+    },
     {
       "version": "v0.27.0",
       "highlights": "The mini-campaign: five scripted missions (play all three races, survive missions, a 2v2 finale with Marshal Kade) + trooper trim from the meridian taste pass",
@@ -244,8 +250,8 @@
     }
   ],
   "play": {
-    "version": "v0.27.0",
-    "wasmBytes": 3832007,
+    "version": "v0.27.1",
+    "wasmBytes": 3858374,
     "source": "orion-web-demo.zip",
     "files": [
       "orion-client.js",

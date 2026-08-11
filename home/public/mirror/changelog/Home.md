@@ -12,6 +12,7 @@ looks in game.
 
 | Version | Highlights |
 |---|---|
+| [[v0.27.1]] | Caverns seat-bias patch: entombed-worker expel, bot builder watchdog, mirror-covariant tie-breaks — seat mirrors even again |
 | [[v0.27.0]] | The mini-campaign: five scripted missions (play all three races, survive missions, a 2v2 finale with Marshal Kade) + trooper trim from the meridian taste pass |
 | [[v0.26.0]] | Observer mode: watch live duels and 2v2 rooms through the relay — free camera, TAB fog perspectives, checksum-verified view |
 | [[v0.25.0]] | 2v2 everywhere: bots fill empty seats, public rooms with live fill counts, room replays (teams + embedded maps), browser room joins |
