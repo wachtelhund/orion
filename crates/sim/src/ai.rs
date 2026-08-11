@@ -151,6 +151,12 @@ pub struct Bot {
     memory: Vec<(i32, Sighting)>,
     last_defense_tick: u32,
     last_flee_tick: u32,
+    /// Stuck-builder watchdog: (worker idx, first tick seen traveling).
+    /// A Build order to an unreachable site never completes and would
+    /// otherwise freeze ALL construction via the busy-builder gate.
+    builder_watch: Option<(u32, u32)>,
+    /// Sites a builder provably could not reach — never picked again.
+    pub bad_sites: Vec<TilePos>,
     /// Home guard: units that stay near the base and intercept threats.
     last_score: i64,
     last_known: i64,
@@ -193,6 +199,8 @@ impl Bot {
             memory: Vec::new(),
             last_defense_tick: 0,
             last_flee_tick: 0,
+            builder_watch: None,
+            bad_sites: Vec::new(),
             last_score: 0,
             last_known: 0,
             ball: BallState::Hold,
@@ -317,6 +325,7 @@ impl Bot {
         let mut condenser: Option<u32> = None;
         let mut constructing = 0u32;
         let mut building_worker_busy = false;
+        let mut traveling_builder: Option<u32> = None;
         let mut lab_exists = false;
         let mut idle_lab: Option<u32> = None;
         for (i, e) in s.entities.iter().enumerate() {
@@ -337,7 +346,10 @@ impl Bot {
                         workers.push(i as u32);
                         match e.order {
                             Order::Idle => idle_workers.push(i as u32),
-                            Order::Build { .. } => building_worker_busy = true,
+                            Order::Build { .. } => {
+                                building_worker_busy = true;
+                                traveling_builder = Some(i as u32);
+                            }
                             Order::Gather { resource, .. } => {
                                 let gas = s
                                     .get(resource)
@@ -595,6 +607,33 @@ impl Bot {
         let hq_cost = s.data.buildings[hq_def as usize].cost_minerals;
         let want_expand =
             !s.map.expansions.is_empty() && deposits < 2 && workers.len() >= 13;
+        // Stuck-builder watchdog: a builder still TRAVELING while nothing
+        // is under construction, for 15s straight, is walking to a site it
+        // will never reach — stop it or the busy gate freezes the macro
+        // forever (found on caverns: unreachable depot pocket, seat froze
+        // at 2 depots and lost every mirror game).
+        if constructing == 0 {
+            match (traveling_builder, self.builder_watch) {
+                (Some(w), Some((pw, since))) if w == pw => {
+                    if s.tick.saturating_sub(since) > 24 * 15 {
+                        if let Order::Build { site, .. } = s.entities[w as usize].order {
+                            if !self.bad_sites.contains(&site) {
+                                self.bad_sites.push(site);
+                                if self.bad_sites.len() > 16 {
+                                    self.bad_sites.remove(0);
+                                }
+                            }
+                        }
+                        cmds.push(Command::Stop { units: vec![s.id_of(w)] });
+                        self.builder_watch = None;
+                    }
+                }
+                (Some(w), _) => self.builder_watch = Some((w, s.tick)),
+                (None, _) => self.builder_watch = None,
+            }
+        } else {
+            self.builder_watch = None;
+        }
         if constructing == 0 && !building_worker_busy && !sudden_death {
             if want_expand && minerals >= hq_cost {
                 self.order_build_expansion(s, &workers, hq_def, &mut cmds);
@@ -1504,7 +1543,13 @@ impl Bot {
                         continue;
                     }
                     let site = TilePos::new(hq_tile.x + dx * sx + ox, hq_tile.y + dy * sy + oy);
-                    if site_ok(site) && s.valid_building_site(def, site, Some(builder)) {
+                    if self.bad_sites.contains(&site) {
+                        continue;
+                    }
+                    if site_ok(site)
+                        && s.valid_building_site(def, site, Some(builder))
+                        && site_reachable(s, s.entities[builder as usize].pos, site, (fw, fh))
+                    {
                         cmds.push(Command::Build {
                             worker: s.id_of(builder),
                             building: def,
@@ -1588,6 +1633,15 @@ impl Bot {
             .copied()
     }
 
+    fn hq_entity<'a>(&self, s: &'a State) -> Option<&'a crate::Entity> {
+        s.entities.iter().find(|e| {
+            e.alive
+                && e.owner == self.player
+                && e.kind == EntityKind::Building
+                && s.data.buildings[e.def as usize].headquarters
+        })
+    }
+
     fn hq_tile(&self, s: &State) -> Option<TilePos> {
         s.entities
             .iter()
@@ -1618,4 +1672,58 @@ fn nearest_mineral(s: &State, pos: FxVec2) -> Option<EntityId> {
         }
     }
     best.map(|(_, j)| s.id_of(j))
+}
+
+
+/// Can a builder standing at `from` actually walk next to `site`? A
+/// bounded BFS over the static+dynamic walkability — cheap (runs once
+/// per accepted candidate), and it keeps the site scan from committing
+/// a worker to a pocket across a cliff it can never enter.
+fn site_reachable(
+    s: &State,
+    from: crate::fixed::FxVec2,
+    site: TilePos,
+    (fw, fh): (i32, i32),
+) -> bool {
+    // MIRROR COVARIANCE: every ingredient here must give the same answer
+    // for the 180-degree-rotated question. The goal test is a box around
+    // the whole FOOTPRINT (a corner-anchored box is lopsided under
+    // rotation), and the search region is a min/max box with full
+    // exploration — an exploration budget would cut off at different
+    // frontiers in the two games.
+    let start = TilePos::of(from);
+    let near_goal = |t: TilePos| {
+        t.x >= site.x - 1 && t.x <= site.x + fw && t.y >= site.y - 1 && t.y <= site.y + fh
+    };
+    if near_goal(start) {
+        return true;
+    }
+    let x0 = start.x.min(site.x - 1) - 10;
+    let x1 = start.x.max(site.x + fw) + 10;
+    let y0 = start.y.min(site.y - 1) - 10;
+    let y1 = start.y.max(site.y + fh) + 10;
+    let ok = |t: TilePos| -> bool {
+        t.x >= x0.max(0)
+            && t.y >= y0.max(0)
+            && t.x <= x1.min(s.map.width - 1)
+            && t.y <= y1.min(s.map.height - 1)
+            && s.map.walkable(t.x, t.y)
+            && !s.blocked[s.map.idx(t.x, t.y)]
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    let mut queue = std::collections::VecDeque::new();
+    seen.insert((start.x, start.y));
+    queue.push_back(start);
+    while let Some(t) = queue.pop_front() {
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let n = TilePos::new(t.x + dx, t.y + dy);
+            if near_goal(n) {
+                return true;
+            }
+            if ok(n) && seen.insert((n.x, n.y)) {
+                queue.push_back(n);
+            }
+        }
+    }
+    false
 }

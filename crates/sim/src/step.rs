@@ -591,15 +591,38 @@ impl State {
         if open(t.x, t.y) {
             return want;
         }
+        // Ring scan in a MIRROR-COVARIANT order: a fixed raster order here
+        // meant game A and its 180-degree mirror B resolved the same
+        // situation to non-mirrored tiles (first divergence of the mirror
+        // probe). Order candidates by their angle relative to the
+        // away-from-map-center direction — dot and cross both survive the
+        // rotation unchanged, so both games pick mirrored tiles.
+        let c = crate::fixed::FxVec2::new(
+            crate::fixed::Fx::from_int(self.map.width) * crate::fixed::Fx::HALF,
+            crate::fixed::Fx::from_int(self.map.height) * crate::fixed::Fx::HALF,
+        );
+        let away = (
+            (want.x - c.x).0 as i64,
+            (want.y - c.y).0 as i64,
+        );
         for r in 1..=4i32 {
+            let mut ring: Vec<(i64, i64, i32, i32)> = Vec::new();
             for dy in -r..=r {
                 for dx in -r..=r {
                     if dx.abs().max(dy.abs()) != r {
-                        continue; // ring only, fixed scan order
+                        continue;
                     }
-                    if open(t.x + dx, t.y + dy) {
-                        return crate::map::TilePos::new(t.x + dx, t.y + dy).center();
-                    }
+                    let dot = dx as i64 * away.0 + dy as i64 * away.1;
+                    let cross = dx as i64 * away.1 - dy as i64 * away.0;
+                    // Prefer outward (max dot); cross breaks the mirror-pair
+                    // tie the same way in both games.
+                    ring.push((-dot, -cross, dx, dy));
+                }
+            }
+            ring.sort();
+            for &(_, _, dx, dy) in &ring {
+                if open(t.x + dx, t.y + dy) {
+                    return crate::map::TilePos::new(t.x + dx, t.y + dy).center();
                 }
             }
         }

@@ -83,8 +83,30 @@ impl State {
                         }
                         let mag = (overlap * Fx::HALF).min(MAX_PUSH);
                         let dir = if d.len_sq_raw() == 0 {
-                            // Perfectly coincident: deterministic tie-break.
-                            FxVec2::new(Fx::from_ratio(1, 16), Fx::ZERO)
+                            // Perfectly coincident: push along the dominant
+                            // axis of away-from-map-center. The direction
+                            // must flip EXACTLY under the 180-degree map
+                            // rotation: a fixed +x was systematically
+                            // biased (the caverns P1 seat advantage), and
+                            // a normalized away-vector carries 1-ulp Mul
+                            // truncation asymmetry — signs and compares
+                            // are exact.
+                            let c = FxVec2::new(
+                                Fx::from_int(self.map.width) * Fx::HALF,
+                                Fx::from_int(self.map.height) * Fx::HALF,
+                            );
+                            let ax = (tentative[i].x - c.x).0;
+                            let ay = (tentative[i].y - c.y).0;
+                            let unit = Fx::ONE;
+                            if ax == 0 && ay == 0 {
+                                FxVec2::new(Fx::from_ratio(1, 16), Fx::ZERO)
+                            } else if ax.abs() >= ay.abs() {
+                                let sx = if ax >= 0 { unit } else { Fx::ZERO - unit };
+                                FxVec2::new(sx, Fx::ZERO)
+                            } else {
+                                let sy = if ay >= 0 { unit } else { Fx::ZERO - unit };
+                                FxVec2::new(Fx::ZERO, sy)
+                            }
                         } else {
                             d.scaled_to(Fx::ONE)
                         };

@@ -13,9 +13,10 @@ fn main() {
     let r0: u8 = args.next().and_then(|a| a.parse().ok()).unwrap_or(0);
     let r1: u8 = args.next().and_then(|a| a.parse().ok()).unwrap_or(2);
     let seed: u64 = args.next().and_then(|a| a.parse().ok()).unwrap_or(11);
+    let map = args.next().unwrap_or_else(|| "meridian".into());
     let mut s = State::new_with_races(
         GameData::load_default(),
-        by_name("meridian").unwrap(),
+        by_name(&map).unwrap(),
         seed,
         &[r0, r1],
     );

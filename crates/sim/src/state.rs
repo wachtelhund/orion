@@ -421,6 +421,31 @@ impl State {
             ..Entity::blank()
         };
         self.set_footprint_blocked(def, origin, true);
+        // Expel ground units caught under the new footprint. Without this
+        // a passing miner gets sealed inside the blocked tiles: no flow
+        // field can reach it, it never moves again, and a bot that picks
+        // it as a builder deadlocks its whole macro (the caverns freeze).
+        let (fw, fh) = self.data.buildings[def as usize].footprint;
+        for u in 0..self.entities.len() {
+            let e = &self.entities[u];
+            if !e.alive || e.kind != EntityKind::Unit {
+                continue;
+            }
+            if self.data.units[e.def as usize].fly {
+                continue;
+            }
+            let t = TilePos::of(e.pos);
+            if t.x >= origin.x
+                && t.x < origin.x + fw
+                && t.y >= origin.y
+                && t.y < origin.y + fh
+            {
+                let out = self.walkable_near(e.pos, e.pos);
+                let e = &mut self.entities[u];
+                e.pos = out;
+                e.prev_pos = out;
+            }
+        }
         EntityId { idx, gen }
     }
 
