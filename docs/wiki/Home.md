@@ -12,6 +12,7 @@ looks in game.
 
 | Version | Highlights |
 |---|---|
+| [v0.26.0](v0.26.0.md) | Observer mode: watch live duels and 2v2 rooms through the relay — free camera, TAB fog perspectives, checksum-verified view |
 | [v0.25.0](v0.25.0.md) | 2v2 everywhere: bots fill empty seats, public rooms with live fill counts, room replays (teams + embedded maps), browser room joins |
 | [v0.24.0](v0.24.0.md) | 2v2: four-seat relay rooms, team vision/victory/colors, N-player lockstep, and Crossfire — the four-corner team map |
 | [v0.23.0](v0.23.0.md) | Bot sudden death (thornwood stalls fixed, games end) + measured balance pass: Breaker siege 40->36, Mauler 100->110 |
