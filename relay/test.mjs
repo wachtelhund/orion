@@ -214,5 +214,45 @@ console.log("Team rooms");
   ok(host.closed !== null, "a leaver closes the room for everyone");
 }
 
+// --- Observers ---------------------------------------------------------------
+console.log("Observers");
+{
+  const l = new Lobby({}, { DIRECTORY: null });
+  await l.fetch(wsReq("/ws/WATCH", "role=host&private=1"));
+  const host = sockets[sockets.length - 1];
+  await l.fetch(wsReq("/ws/WATCH", "role=obs"));
+  const obs = sockets[sockets.length - 1];
+  ok(
+    obs.sent.some((d) => /^\{"relay_obs/.test(d)),
+    "observer is greeted with the obs frame",
+  );
+  await l.fetch(wsReq("/ws/WATCH", "role=join&private=1"));
+  const join = sockets[sockets.length - 1];
+  const o0 = game(obs).length;
+  host.emit("frame-from-host");
+  join.emit("frame-from-join");
+  ok(game(obs).length === o0 + 2, "observer taps both players' frames");
+  const h0 = game(host).length;
+  obs.emit("frame-from-obs");
+  ok(game(host).length === h0 + 1 - 1, "observer frames are never forwarded");
+  obs.close(1000, "bye");
+  ok(host.closed === null && join.closed === null,
+    "an observer leaving never closes the room");
+  await l.fetch(wsReq("/ws/WATCH", "role=obs"));
+  const obs2 = sockets[sockets.length - 1];
+  const o2 = game(obs2).length;
+  join.emit("later-frame");
+  ok(game(obs2).length === o2 + 1, "late observers tap frames too");
+  join.close(1000, "bye");
+  ok(obs2.closed?.reason === "match over", "room teardown closes observers");
+}
+{
+  // No lobby yet: observing a dead code is refused.
+  const l = new Lobby({}, { DIRECTORY: null });
+  await l.fetch(wsReq("/ws/NOPE", "role=obs"));
+  const obs = sockets[sockets.length - 1];
+  ok(obs.closed?.reason === "no such lobby", "observing a dead code refused");
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

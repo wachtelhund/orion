@@ -42,13 +42,13 @@
     <div class="hero-scrim"></div>
 
     <div class="hero-inner wrap">
-      <p class="chip" id="hero-eyebrow">v0.24.0 · free · MIT</p>
+      <p class="chip" id="hero-eyebrow">v0.25.0 · free · MIT</p>
       <h1>ORION</h1>
       <p class="tagline">A StarCraft-style RTS built from scratch in Rust</p>
 
       <div class="cta">
         <a class="btn btn-primary" id="hero-download" href="#download">
-          <span class="btn-label">Download v0.24.0</span>
+          <span class="btn-label">Download v0.25.0</span>
           <span class="btn-sub" id="hero-download-sub">Windows · macOS · Linux</span>
         </a>
         <a class="btn btn-ghost play-only" href="/play" rel="noopener">
@@ -70,19 +70,36 @@
   <section class="wrap section" id="download">
     <h2 class="section-title">Download</h2>
     <p class="section-lede">
-      <strong id="release-tag">v0.24.0</strong><span id="release-date"> · Aug 7, 2026</span> —
+      <strong id="release-tag">v0.25.0</strong><span id="release-date"> · Aug 11, 2026</span> —
       precompiled, nothing to install. <a href="#download" rel="noopener">All releases</a> ·
       <a href="https://github.com/wachtelhund/orion" rel="noopener">build from source</a>
     </p>
-    <div class="downloads" id="downloads"><div class="dl frame" data-platform="macos"><h3>macOS (Apple Silicon + Intel)</h3><p class="file">Orion-macOS.zip</p><div class="steps"><p>Unzip → double-click <strong>Orion.app</strong>. First launch only: right-click → Open (it isn&#39;t notarized)</p></div><a class="btn btn-primary" href="/downloads/v0.24.0/Orion-macOS.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.24.0 · 10.3 MB</span></a></div>
-<div class="dl frame" data-platform="windows"><h3>Windows 10/11</h3><p class="file">orion-windows-x86_64.zip</p><div class="steps"><p>Unzip → double-click <strong>orion.exe</strong>. If SmartScreen objects: More info → Run anyway</p></div><a class="btn btn-primary" href="/downloads/v0.24.0/orion-windows-x86_64.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.24.0 · 4.9 MB</span></a></div>
-<div class="dl frame" data-platform="linux"><h3>Linux (x86_64)</h3><p class="file">orion-linux-x86_64.tar.gz</p><div class="steps"><p><code>tar xzf &amp;&amp; ./orion</code> (needs Vulkan drivers + ALSA <code>libasound2</code>)</p></div><a class="btn btn-primary" href="/downloads/v0.24.0/orion-linux-x86_64.tar.gz"><span class="btn-label">Download</span><span class="btn-sub">v0.24.0 · 6.0 MB</span></a></div></div>
+    <div class="downloads" id="downloads"><div class="dl frame" data-platform="macos"><h3>macOS (Apple Silicon + Intel)</h3><p class="file">Orion-macOS.zip</p><div class="steps"><p>Unzip → double-click <strong>Orion.app</strong>. First launch only: right-click → Open (it isn&#39;t notarized)</p></div><a class="btn btn-primary" href="/downloads/v0.25.0/Orion-macOS.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.25.0 · 10.4 MB</span></a></div>
+<div class="dl frame" data-platform="windows"><h3>Windows 10/11</h3><p class="file">orion-windows-x86_64.zip</p><div class="steps"><p>Unzip → double-click <strong>orion.exe</strong>. If SmartScreen objects: More info → Run anyway</p></div><a class="btn btn-primary" href="/downloads/v0.25.0/orion-windows-x86_64.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.25.0 · 4.9 MB</span></a></div>
+<div class="dl frame" data-platform="linux"><h3>Linux (x86_64)</h3><p class="file">orion-linux-x86_64.tar.gz</p><div class="steps"><p><code>tar xzf &amp;&amp; ./orion</code> (needs Vulkan drivers + ALSA <code>libasound2</code>)</p></div><a class="btn btn-primary" href="/downloads/v0.25.0/orion-linux-x86_64.tar.gz"><span class="btn-label">Download</span><span class="btn-sub">v0.25.0 · 6.0 MB</span></a></div></div>
   </section>
 
   <section class="wrap section" id="changelog">
     <h2 class="section-title">Changelog</h2>
     <p class="section-lede">Read live from the <a href="https://github.com/wachtelhund/orion/wiki" rel="noopener">project wiki</a>.</p>
-    <div class="changelog" id="changelog-list"><details class="release" id="v0.24.0"><summary><span class="ver">v0.24.0</span><span class="sum">2v2</span><span class="hl">2v2: four-seat relay rooms, team vision/victory/colors, N-player lockstep, and Crossfire — the four-corner team map</span></summary><div class="release-body"><p>Team games. The biggest multiplayer feature since ranked, built in three verified layers.</p>
+    <div class="changelog" id="changelog-list"><details class="release" id="v0.25.0"><summary><span class="ver">v0.25.0</span><span class="sum">2v2 everywhere</span><span class="hl">2v2 everywhere: bots fill empty seats, public rooms with live fill counts, room replays (teams + embedded maps), browser room joins</span></summary><div class="release-body"><p>The polish pass on team games: everything v0.24.0 said &quot;not yet&quot; about 2v2, except ranked. Rooms are now listed publicly, start on demand with bot fill, record replays, and can be joined from the browser.</p>
+<p><img src="/mirror/changelog/images/v025-lobby-browser.png" alt="A public 2v2 room in the lobby browser" loading="lazy" decoding="async"></p>
+<h4>Bots fill empty seats</h4>
+<p>The room waiting page has a new row: <strong>START NOW — BOTS FILL EMPTY SEATS</strong>. Two friends no longer need two more friends — start with any number of humans and Hard bots take the remaining seats.</p>
+<p>Under the hood the host drives the bot brains and feeds their commands through the exact same lockstep channel as its own input, so joiners need zero new code — a bot seat looks like any other player&#39;s tagged command stream. Which seats are bots rides in the start handshake, and bot races are dealt from the match seed.</p>
+<h4>Public rooms in the lobby browser</h4>
+<p>CREATE 2V2 ROOM now lists your room publicly (same as duel lobbies — private rooms by code still work). Rooms appear as <code>JOIN 2V2  &lt;name&gt;  1/4</code> with a <strong>live fill count</strong>: the relay re-announces the room as seats fill and delists it when it&#39;s full or anyone leaves. One click seats you.</p>
+<h4>Browser room joins</h4>
+<p><img src="/mirror/changelog/images/v025-browser-room.png" alt="A 2v2 room played from the browser — Kyth main on Crossfire" loading="lazy" decoding="async"></p>
+<p>The web build speaks the room handshake. Type a room code (or click a listed room) in the browser and you&#39;re seated — the join path auto-detects duel vs room from the relay&#39;s seat frame, identically on desktop and web. Custom 4-start maps work too: the map itself travels inside the handshake, so the browser needs no file.</p>
+<p>Hosting rooms stays desktop-only for now (the host runs the fill bots).</p>
+<h4>Room replays</h4>
+<p>Replays now record <strong>teams</strong>, and games on custom maps embed <strong>the map itself</strong> in the replay file — so a 2v2 on an editor-made map plays back anywhere, shared with anyone. Room games record automatically, like every other match. Old replay files load unchanged.</p>
+<h4>Under the hood</h4>
+<ul><li>The wasm relay pump gained the room phases (seat frame → Hello2 → Start2 → Go), sharing the native handshake&#39;s shape; the duel path is untouched.</li><li>The relay directory upserts a room&#39;s entry on every join until it fills, keeping <code>filled/slots</code> live in <code>/lobbies</code>.</li><li>A new sim test replays a 2v2 on an embedded custom map and asserts the resimulated checksum matches the live game bit-for-bit.</li><li>Verified end to end: a native host + headless-Chrome joiner played Crossfire in lockstep past tick 240 with two host-driven bots, no desync — and the protocol version gate correctly refused a stale 0.24.0 web build during testing.</li></ul>
+<h4>Balance</h4>
+<p>No unit numbers changed.</p></div></details>
+<details class="release" id="v0.24.0"><summary><span class="ver">v0.24.0</span><span class="sum">2v2</span><span class="hl">2v2: four-seat relay rooms, team vision/victory/colors, N-player lockstep, and Crossfire — the four-corner team map</span></summary><div class="release-body"><p>Team games. The biggest multiplayer feature since ranked, built in three verified layers.</p>
 <p><img src="/mirror/changelog/images/v024-crossfire.png" alt="Crossfire — the 2v2 map" loading="lazy" decoding="async"></p>
 <h4>Playing it</h4>
 <p><strong>CREATE 2V2 ROOM</strong> on the multiplayer page gives you a 5-letter code for a four-seat room; the match auto-starts the moment it fills. Teams are seat pairs: the host and the first joiner against the other two. Joining needs nothing new — type any code into PRIVATE CODE and the game detects whether it&#39;s a duel or a room.</p>
@@ -343,7 +360,7 @@
 <footer class="wrap">
   <a class="footer-mark" href="https://github.com/wachtelhund/orion" rel="noopener">ORION</a>
   <p>MIT · written in Rust · 3 releases</p>
-  <p class="tiny">Built from wachtelhund/orion and its wiki · Aug 7, 2026</p>
+  <p class="tiny">Built from wachtelhund/orion and its wiki · Aug 11, 2026</p>
 </footer>
 
 <div class="lightbox" id="lightbox" hidden>

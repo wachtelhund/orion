@@ -61,6 +61,7 @@ enum MenuAction {
     StartTutorial,
     CreateRoom,
     StartRoomNow,
+    WatchCode,
     OpenUpdate,
     Rebind(Action),
 }
@@ -263,6 +264,9 @@ impl App {
                     ));
                     if self.code_input.trim().len() >= 4 {
                         rows.push(("JOIN PRIVATE".into(), MenuAction::JoinRelay));
+                        // Silent spectator tap on the same code.
+                        #[cfg(not(target_arch = "wasm32"))]
+                        rows.push(("WATCH THIS CODE".into(), MenuAction::WatchCode));
                     }
                     rows.push(("BACK".into(), MenuAction::Back));
                     stack(rows, h * 0.24);
@@ -936,6 +940,10 @@ impl App {
                 self.in_game = false;
                 self.tutorial = None;
                 self.mp = None; // closes the socket; peer sees a disconnect
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    self.observer = None;
+                }
                 self.mm_code = None;
                 self.replay = None;
                 self.page = MenuPage::MainRoot;
@@ -1009,6 +1017,19 @@ impl App {
                 self.mp_waiting = Some(rx);
             }
             MenuAction::JoinRelay => self.join_private_lobby(),
+            MenuAction::WatchCode => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    self.mp_error = None;
+                    let code = self.code_input.trim().to_uppercase();
+                    if code.len() >= 4 {
+                        self.obs_waiting = Some(crate::relay::observe_async(
+                            self.settings.relay_url.clone(),
+                            code,
+                        ));
+                    }
+                }
+            }
             MenuAction::JoinListed(k) => {
                 if let Some(l) = self.lobby_list.get(k) {
                     self.mp_error = None;

@@ -21,6 +21,7 @@ const MAX_LISTED = 200; // cap on public directory size
 const MAX_MSG_BYTES = 160 * 1024;
 const MSG_RATE_PER_S = 120;
 const MSG_BURST = 300;
+const MAX_WATCHERS = 8;
 const MAX_CONN_BYTES = 128 * 1024 * 1024;
 
 // Shared replays, keyed by 5-letter code. Size-capped uploads, oldest
@@ -238,6 +239,9 @@ export class Lobby {
     // Slotted room: index 0 is the host; 1v1 lobbies cap at 2 seats,
     // team lobbies declare ?slots=4. Entries are sockets or null.
     this.seats = [];
+    // Observers: receive every broadcast frame, send nothing, hold no
+    // seat. They may connect any time before the room tears down.
+    this.watchers = [];
     this.capacity = 2;
     this.code = null;
     this.listed = false;
@@ -330,6 +334,22 @@ export class Lobby {
           });
         } catch (_) {}
       }
+    } else if (role === "obs") {
+      if (!this.seats[0]) return fail("no such lobby");
+      if (this.watchers.length >= MAX_WATCHERS) return fail("too many observers");
+      this.watchers.push(server);
+      // Observers are one-way taps: nothing they send is forwarded, and
+      // their departure never tears the room down.
+      server.addEventListener("message", () => {});
+      const drop = () => {
+        this.watchers = this.watchers.filter((w) => w !== server);
+      };
+      server.addEventListener("close", drop);
+      server.addEventListener("error", drop);
+      try {
+        server.send(JSON.stringify({ relay_obs: 1, capacity: this.capacity }));
+      } catch (_) {}
+      return new Response(null, { status: 101, webSocket: client });
     } else {
       return fail("bad role");
     }
@@ -394,6 +414,12 @@ export class Lobby {
           } catch (_) {}
         }
       }
+      // Observers get a copy of everything.
+      for (const w of this.watchers) {
+        try {
+          w.send(ev.data);
+        } catch (_) {}
+      }
     });
     const teardown = () => {
       this.unlist();
@@ -407,6 +433,12 @@ export class Lobby {
         }
       }
       this.seats = [];
+      for (const w of this.watchers) {
+        try {
+          w.close(1000, "match over");
+        } catch (_) {}
+      }
+      this.watchers = [];
     };
     server.addEventListener("close", teardown);
     server.addEventListener("error", teardown);

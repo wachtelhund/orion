@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-07T10:33:17.333Z",
+  "generatedAt": "2026-08-11T07:34:12.692Z",
   "sourceIsPublic": true,
   "links": {
     "primary": "https://github.com/wachtelhund/orion",
@@ -47,33 +47,39 @@
     }
   },
   "release": {
-    "tag": "v0.24.0",
-    "name": "v0.24.0",
+    "tag": "v0.25.0",
+    "name": "v0.25.0",
     "url": "#download",
-    "publishedAt": "2026-08-07T10:28:39Z",
+    "publishedAt": "2026-08-11T07:27:34Z",
     "assets": [
       {
         "name": "Orion-macOS.zip",
-        "size": 10830737,
-        "url": "/downloads/v0.24.0/Orion-macOS.zip",
+        "size": 10857231,
+        "url": "/downloads/v0.25.0/Orion-macOS.zip",
         "platform": "macos"
       },
       {
         "name": "orion-windows-x86_64.zip",
-        "size": 5094573,
-        "url": "/downloads/v0.24.0/orion-windows-x86_64.zip",
+        "size": 5093502,
+        "url": "/downloads/v0.25.0/orion-windows-x86_64.zip",
         "platform": "windows"
       },
       {
         "name": "orion-linux-x86_64.tar.gz",
-        "size": 6314753,
-        "url": "/downloads/v0.24.0/orion-linux-x86_64.tar.gz",
+        "size": 6331256,
+        "url": "/downloads/v0.25.0/orion-linux-x86_64.tar.gz",
         "platform": "linux"
       }
     ]
   },
   "releaseCount": 3,
   "changelog": [
+    {
+      "version": "v0.25.0",
+      "highlights": "2v2 everywhere: bots fill empty seats, public rooms with live fill counts, room replays (teams + embedded maps), browser room joins",
+      "title": "v0.25.0 — 2v2 everywhere",
+      "html": "<p>The polish pass on team games: everything v0.24.0 said &quot;not yet&quot; about 2v2, except ranked. Rooms are now listed publicly, start on demand with bot fill, record replays, and can be joined from the browser.</p>\n<p><img src=\"/mirror/changelog/images/v025-lobby-browser.png\" alt=\"A public 2v2 room in the lobby browser\" loading=\"lazy\" decoding=\"async\"></p>\n<h4>Bots fill empty seats</h4>\n<p>The room waiting page has a new row: <strong>START NOW — BOTS FILL EMPTY SEATS</strong>. Two friends no longer need two more friends — start with any number of humans and Hard bots take the remaining seats.</p>\n<p>Under the hood the host drives the bot brains and feeds their commands through the exact same lockstep channel as its own input, so joiners need zero new code — a bot seat looks like any other player&#39;s tagged command stream. Which seats are bots rides in the start handshake, and bot races are dealt from the match seed.</p>\n<h4>Public rooms in the lobby browser</h4>\n<p>CREATE 2V2 ROOM now lists your room publicly (same as duel lobbies — private rooms by code still work). Rooms appear as <code>JOIN 2V2  &lt;name&gt;  1/4</code> with a <strong>live fill count</strong>: the relay re-announces the room as seats fill and delists it when it&#39;s full or anyone leaves. One click seats you.</p>\n<h4>Browser room joins</h4>\n<p><img src=\"/mirror/changelog/images/v025-browser-room.png\" alt=\"A 2v2 room played from the browser — Kyth main on Crossfire\" loading=\"lazy\" decoding=\"async\"></p>\n<p>The web build speaks the room handshake. Type a room code (or click a listed room) in the browser and you&#39;re seated — the join path auto-detects duel vs room from the relay&#39;s seat frame, identically on desktop and web. Custom 4-start maps work too: the map itself travels inside the handshake, so the browser needs no file.</p>\n<p>Hosting rooms stays desktop-only for now (the host runs the fill bots).</p>\n<h4>Room replays</h4>\n<p>Replays now record <strong>teams</strong>, and games on custom maps embed <strong>the map itself</strong> in the replay file — so a 2v2 on an editor-made map plays back anywhere, shared with anyone. Room games record automatically, like every other match. Old replay files load unchanged.</p>\n<h4>Under the hood</h4>\n<ul><li>The wasm relay pump gained the room phases (seat frame → Hello2 → Start2 → Go), sharing the native handshake&#39;s shape; the duel path is untouched.</li><li>The relay directory upserts a room&#39;s entry on every join until it fills, keeping <code>filled/slots</code> live in <code>/lobbies</code>.</li><li>A new sim test replays a 2v2 on an embedded custom map and asserts the resimulated checksum matches the live game bit-for-bit.</li><li>Verified end to end: a native host + headless-Chrome joiner played Crossfire in lockstep past tick 240 with two host-driven bots, no desync — and the protocol version gate correctly refused a stale 0.24.0 web build during testing.</li></ul>\n<h4>Balance</h4>\n<p>No unit numbers changed.</p>"
+    },
     {
       "version": "v0.24.0",
       "highlights": "2v2: four-seat relay rooms, team vision/victory/colors, N-player lockstep, and Crossfire — the four-corner team map",
@@ -226,8 +232,8 @@
     }
   ],
   "play": {
-    "version": "v0.24.0",
-    "wasmBytes": 3732836,
+    "version": "v0.25.0",
+    "wasmBytes": 3809432,
     "source": "orion-web-demo.zip",
     "files": [
       "orion-client.js",

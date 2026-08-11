@@ -145,6 +145,16 @@ pub struct App {
     /// RON of the active map when it is not a builtin — recorded into
     /// replays so custom-map games play back anywhere.
     pub game_map_ron: Option<String>,
+    /// Live observer tap: we run the sim from the players' command
+    /// streams but hold no seat (native only).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub observer: Option<orion_sim::net::Observer>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub obs_waiting:
+        Option<std::sync::mpsc::Receiver<std::io::Result<orion_sim::net::ObsStarted>>>,
+    /// QA: one observer-view frame armed ($ORION_OBS_SHOT) before exit.
+    #[cfg(not(target_arch = "wasm32"))]
+    obs_shot: bool,
     pub shot_focus: Option<(f32, f32)>,
     pub shot_zoom: Option<f32>,
     pub script: Option<String>,
@@ -391,6 +401,12 @@ impl App {
             room_start_tx: None,
             room_bots: Vec::new(),
             game_map_ron: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            observer: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            obs_waiting: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            obs_shot: false,
             shot,
             shot_focus: None,
             shot_zoom: None,
@@ -671,7 +687,7 @@ impl App {
             return true;
         }
         #[cfg(not(target_arch = "wasm32"))]
-        if self.room_waiting.is_some() {
+        if self.room_waiting.is_some() || self.obs_waiting.is_some() {
             return true;
         }
         false
@@ -709,6 +725,10 @@ impl App {
     pub fn start_game(&mut self, difficulty: Difficulty) {
         self.tutorial = None;
         self.mp = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.observer = None;
+        }
         self.mp_waiting = None;
         self.human = 0;
         self.replay = None;
@@ -762,6 +782,10 @@ impl App {
     /// `tutorial.rs`; the sim runs completely normally.
     pub fn start_tutorial(&mut self) {
         self.mp = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.observer = None;
+        }
         self.mp_waiting = None;
         self.human = 0;
         self.replay = None;
@@ -932,6 +956,96 @@ impl App {
         self.arm_countdown();
     }
 
+    /// Start watching a live match from a completed observer tap.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn start_observe_game(&mut self, os: orion_sim::net::ObsStarted) {
+        self.tutorial = None;
+        self.mp_lobby_code = None;
+        self.replay = None;
+        self.record_replay = false;
+        self.game_map = os.map.clone();
+        self.game_map_ron = os.map_ron.clone();
+        let map = match os.resolve_map() {
+            Some(m) => m,
+            None => {
+                self.mp_error = Some(format!("unknown map '{}'", os.map));
+                return;
+            }
+        };
+        let mut state = State::new_with_races(
+            GameData::load_default(),
+            map,
+            os.seed,
+            &os.races,
+        );
+        for (p, team) in os.teams.iter().enumerate() {
+            state.players[p].team = *team;
+        }
+        let n = os.races.len() as u8;
+        self.state = state;
+        self.human = 0;
+        self.room_bots.clear();
+        self.mp = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.observer = None;
+        }
+        self.observer = Some(orion_sim::net::Observer::new(os.net, n));
+        // Free viewing: revealed map, TAB cycles player perspectives.
+        self.reveal_all = true;
+        self.replay_view = n;
+        self.mp_waiting = None;
+        self.mp_error = None;
+        self.pending.clear();
+        self.selection.clear();
+        self.groups = Default::default();
+        self.mode = Mode::Normal;
+        self.effects.clear();
+        self.facings.clear();
+        self.headings.clear();
+        self.subgroup_offset = 0;
+        self.acc = 0.0;
+        self.in_game = true;
+        self.page = MenuPage::None;
+        let (cx, cy) = iso::world_to_iso(
+            self.state.map.width as f32 * 0.5,
+            self.state.map.height as f32 * 0.5,
+        );
+        self.cam.cx = cx;
+        self.cam.cy = cy;
+        self.clamp_camera();
+    }
+
+    /// Observer frame: step whatever complete ticks have arrived from the
+    /// players' streams. No pacing of our own, no commands of our own.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn observe_frame(&mut self, dt: f64) {
+        self.camera_input(dt);
+        if let Some(mut obs) = self.observer.take() {
+            obs.poll();
+            let mut stepped = 0;
+            while stepped < 24 {
+                let t = self.state.tick;
+                let Some(cmds) = obs.take_tick(t) else { break };
+                self.pending.clear(); // observers command no one
+                self.step_sim(cmds);
+                obs.after_step(t, &self.state);
+                stepped += 1;
+            }
+            if obs.desync {
+                self.mp_error = Some("OBSERVER DESYNC - VIEW IS STALE".into());
+            }
+            self.observer = Some(obs);
+        }
+        for e in &mut self.effects {
+            e.age += dt as f32;
+        }
+        self.effects.retain(|e| e.age < e.ttl);
+        for r in &mut self.recoil {
+            *r = (*r - dt as f32).max(0.0);
+        }
+    }
+
     /// Start a 4-seat room match from a completed room handshake.
     pub fn start_room_game(&mut self, rs: orion_sim::net::RoomStarted) {
         crate::weblog(&format!(
@@ -1090,9 +1204,13 @@ impl App {
         self.replay_cursor = 0;
         self.replay_paused = false;
         self.replay_speed = 1.0;
-        self.replay_view = 2;
+        self.replay_view = self.state.players.len() as u8;
         self.record_replay = false;
         self.mp = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.observer = None;
+        }
         self.mp_waiting = None;
         self.human = 0;
         self.reveal_all = true;
@@ -1652,21 +1770,26 @@ impl App {
             return;
         }
 
-        // Replay viewer controls swallow the conflicting game keys.
+        // Viewer controls (replays and live observing) swallow the
+        // conflicting game keys. TAB cycles P1..PN then ALL.
+        let viewing = self.replay.is_some() || self.is_observing();
+        if viewing {
+            if code == KeyCode::Tab {
+                let n = self.state.players.len() as u8;
+                self.replay_view = (self.replay_view + 1) % (n + 1);
+                if self.replay_view == n {
+                    self.reveal_all = true;
+                } else {
+                    self.reveal_all = false;
+                    self.human = self.replay_view;
+                }
+                return;
+            }
+        }
         if self.replay.is_some() {
             match code {
                 KeyCode::Space => {
                     self.replay_paused = !self.replay_paused;
-                    return;
-                }
-                KeyCode::Tab => {
-                    self.replay_view = (self.replay_view + 1) % 3;
-                    if self.replay_view == 2 {
-                        self.reveal_all = true;
-                    } else {
-                        self.reveal_all = false;
-                        self.human = self.replay_view;
-                    }
                     return;
                 }
                 KeyCode::Digit1 => {
@@ -2688,6 +2811,18 @@ impl App {
 
     // ---------------------------------------------------------- update ----
 
+    /// True while watching a live match as an observer (native only).
+    pub fn is_observing(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.observer.is_some()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            false
+        }
+    }
+
     pub(crate) fn step_sim(&mut self, cmds: Vec<(u8, Command)>) {
         self.state.step(&cmds);
         self.step_post();
@@ -3537,6 +3672,16 @@ impl App {
                             "QA".into(),
                         ));
                     }
+                } else if let Some(code) = role.strip_prefix("obs:") {
+                    // Guard on the live observer too — this block re-runs
+                    // every frame and must not re-dial while watching.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if self.obs_waiting.is_none() && self.observer.is_none() {
+                        self.obs_waiting = Some(crate::relay::observe_async(
+                            self.settings.relay_url.clone(),
+                            code.to_string(),
+                        ));
+                    }
                 } else if let Some(code) = role.strip_prefix("join-relay:") {
                     self.mp_waiting = Some(crate::relay::join_relay_async(
                         self.settings.relay_url.clone(),
@@ -3557,6 +3702,34 @@ impl App {
                         format!("127.0.0.1:{}", orion_sim::net::DEFAULT_PORT),
                         1,
                     ));
+                }
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            if self.observer.is_some() && self.state.tick >= 24 * 8 && !self.finished {
+                // Optional visual proof: arm a capture and let this frame
+                // render it; completion happens on the next pass.
+                let armed_shot = std::env::var("ORION_OBS_SHOT")
+                    .ok()
+                    .filter(|_| !self.obs_shot)
+                    .map(|path| {
+                        self.obs_shot = true;
+                        self.gfx.capture = Some(path);
+                    })
+                    .is_some();
+                if !armed_shot {
+                    let ok = self
+                        .observer
+                        .as_ref()
+                        .map(|o| !o.desync && !o.disconnected)
+                        .unwrap_or(false);
+                    println!(
+                        "mp-auto {role}: observed tick {} desync={} -> {}",
+                        self.state.tick,
+                        self.observer.as_ref().map(|o| o.desync).unwrap_or(true),
+                        if ok { "OK" } else { "FAIL" }
+                    );
+                    self.finished = true;
+                    return;
                 }
             }
             if self.mp.is_some() && self.state.tick >= 24 * 10 && !self.finished {
@@ -3623,6 +3796,31 @@ impl App {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.room_waiting = None;
+                }
+            }
+        }
+
+        // Pending observer tap resolved?
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(rx) = &self.obs_waiting {
+            match rx.try_recv() {
+                Ok(Ok(os)) => {
+                    self.obs_waiting = None;
+                    self.start_observe_game(os);
+                }
+                Ok(Err(e)) => {
+                    self.mp_error = Some(format!("WATCH FAILED: {e}").to_uppercase());
+                    if self.mp_auto.is_some() {
+                        // Exit instead of re-dialing forever — a retry loop
+                        // here burns the relay's per-IP connect limiter.
+                        crate::weblog(&format!("mp-auto obs failed: {e}"));
+                        self.finished = true;
+                    }
+                    self.obs_waiting = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.obs_waiting = None;
                 }
             }
         }
@@ -3711,6 +3909,14 @@ impl App {
 
         if self.in_game && self.replay.is_some() {
             self.replay_frame(dt);
+            self.clamp_camera();
+            self.selection.retain(|id| self.state.get(*id).is_some());
+            self.render();
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.in_game && self.observer.is_some() {
+            self.observe_frame(dt);
             self.clamp_camera();
             self.selection.retain(|id| self.state.get(*id).is_some());
             self.render();

@@ -307,6 +307,20 @@ pub fn host_room_async_full(
 }
 
 /// Join a team room by code.
+/// Tap a lobby as a silent observer; resolves when the match starts.
+pub fn observe_async(
+    base: String,
+    code: String,
+) -> Receiver<io::Result<orion_sim::net::ObsStarted>> {
+    let url = ws_url(&base, &code.to_uppercase(), "obs");
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let result = ws_net(&url).and_then(orion_sim::net::observe_handshake);
+        let _ = tx.send(result);
+    });
+    rx
+}
+
 pub fn join_room_async(
     base: String,
     code: String,

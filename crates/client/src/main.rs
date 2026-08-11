@@ -81,7 +81,14 @@ impl ApplicationHandler for Shell {
         // Automated MP runs live in a small corner window: a fullscreen
         // window popping over the desktop gets closed by the human, which
         // reads as a mystery disconnect in the logs.
-        let (win_w, win_h) = if self.mp_auto.is_some() { (480.0, 300.0) } else { (1440.0, 900.0) };
+        // Quiet QA windows stay small — unless this run captures a frame
+        // for visual review, which wants real-game proportions.
+        let obs_shot = std::env::var("ORION_OBS_SHOT").is_ok();
+        let (win_w, win_h) = if self.mp_auto.is_some() && !obs_shot {
+            (480.0, 300.0)
+        } else {
+            (1440.0, 900.0)
+        };
         let window = Arc::new(
             event_loop
                 .create_window(

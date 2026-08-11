@@ -1348,13 +1348,31 @@ impl App {
                 return;
             }
         }
+        // Live-observer chrome: same strip, no speed controls.
+        if self.is_observing() {
+            let w = self.cam.screen_w;
+            let ts = self.ts(1.5);
+            let n = self.state.players.len() as u8;
+            let view = if self.replay_view >= n {
+                "ALL".to_string()
+            } else {
+                format!("P{}", self.replay_view + 1)
+            };
+            let line = format!("OBSERVING LIVE  VIEW {view}   [TAB] VIEW");
+            let tw = self.gfx.text_width(ts, &line);
+            let y0 = 34.0 * self.ui();
+            self.gfx.quad(out, (w - tw) * 0.5 - 10.0, y0, tw + 20.0, 22.0 * self.ui(), [0.02, 0.05, 0.08, 0.7]);
+            self.gfx.text(out, (w - tw) * 0.5, y0 + 4.0, ts, [0.8, 0.9, 1.0, 0.95], &line);
+        }
         // Replay viewer chrome: status strip on top, neutral end banner.
         if let Some(replay) = &self.replay {
             let w = self.cam.screen_w;
             let ts = self.ts(1.5);
-            let view = match self.replay_view {
-                2 => "ALL".to_string(),
-                v => format!("P{}", v + 1),
+            let n = self.state.players.len() as u8;
+            let view = if self.replay_view >= n {
+                "ALL".to_string()
+            } else {
+                format!("P{}", self.replay_view + 1)
             };
             let status = if self.replay_paused { "PAUSED" } else { "PLAYING" };
             let line = format!(

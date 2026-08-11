@@ -568,6 +568,136 @@ pub fn join_auto(mut net: Net, my_race: u8, name: &str) -> std::io::Result<Joine
     }))
 }
 
+/// A match tapped as an observer: everything needed to run the sim,
+/// no seat of our own.
+pub struct ObsStarted {
+    pub net: Net,
+    pub seed: u64,
+    pub races: Vec<u8>,
+    pub teams: Vec<u8>,
+    pub map: String,
+    pub map_ron: Option<String>,
+}
+
+impl ObsStarted {
+    pub fn resolve_map(&self) -> Option<crate::map::Map> {
+        match &self.map_ron {
+            Some(src) => ron::de::from_str(src).ok(),
+            None => crate::map::by_name(&self.map),
+        }
+    }
+}
+
+/// Passive handshake: the relay taps us into a lobby's broadcast, so we
+/// see the players' own handshake fly by. Stash Start/Start2, done at Go.
+/// Works for duels and rooms alike; the observer sends nothing.
+pub fn observe_handshake(net: Net) -> std::io::Result<ObsStarted> {
+    let bad = |m: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, m.to_string());
+    let mut start: Option<(u64, Vec<u8>, Vec<u8>, String, Option<String>)> = None;
+    loop {
+        match net.rx.recv() {
+            Ok(Msg::Start { seed, host_race, join_race, map, map_ron }) => {
+                start = Some((seed, vec![host_race, join_race], vec![0, 1], map, map_ron));
+            }
+            Ok(Msg::Start2 { seed, races, teams, map, map_ron, .. }) => {
+                start = Some((seed, races, teams, map, map_ron));
+            }
+            Ok(Msg::Go { .. }) => break,
+            Ok(Msg::Reject { reason }) => return Err(bad(&reason)),
+            Ok(_) => continue,
+            Err(_) => return Err(bad("the match ended before it began")),
+        }
+    }
+    let (seed, races, teams, map, map_ron) =
+        start.ok_or_else(|| bad("no start data before go"))?;
+    Ok(ObsStarted { net, seed, races, teams, map, map_ron })
+}
+
+/// The observer's stepper: collects every seat's tagged command stream
+/// and steps when a tick is complete. Sends nothing. Cross-checks the
+/// players' periodic checksums against its own sim — a mismatch means
+/// the observed game diverged from ours and the view is a lie.
+pub struct Observer {
+    pub net: Net,
+    n_players: u8,
+    remotes: Vec<BTreeMap<u32, Vec<Command>>>,
+    my_checksums: BTreeMap<u32, u64>,
+    pub disconnected: bool,
+    pub desync: bool,
+}
+
+impl Observer {
+    pub fn new(net: Net, n_players: u8) -> Observer {
+        Observer {
+            net,
+            n_players,
+            remotes: (0..n_players).map(|_| BTreeMap::new()).collect(),
+            my_checksums: BTreeMap::new(),
+            disconnected: false,
+            desync: false,
+        }
+    }
+
+    fn pump(&mut self) {
+        loop {
+            match self.net.rx.try_recv() {
+                Ok(Msg::Cmds2 { player, tick, cmds, checksum }) => {
+                    if (player as usize) < self.remotes.len() {
+                        self.remotes[player as usize].insert(tick, cmds);
+                        if let Some((t, sum)) = checksum {
+                            if let Some(mine) = self.my_checksums.get(&t) {
+                                if *mine != sum {
+                                    self.desync = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    self.disconnected = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Drain the socket. Call once per frame before `take_tick`.
+    pub fn poll(&mut self) {
+        self.pump();
+    }
+
+    /// The complete command set for tick `t`, once every seat's stream
+    /// has reached it. The caller steps the sim (so client-side effects
+    /// and events flow exactly like a played game) and then calls
+    /// `after_step`.
+    pub fn take_tick(&mut self, t: u32) -> Option<Vec<(u8, Command)>> {
+        let ready = (0..self.n_players)
+            .all(|p| self.remotes[p as usize].contains_key(&t));
+        if !ready {
+            return None;
+        }
+        let mut cmds: Vec<(u8, Command)> = Vec::new();
+        for p in 0..self.n_players {
+            if let Some(list) = self.remotes[p as usize].remove(&t) {
+                cmds.extend(list.into_iter().map(|c| (p, c)));
+            }
+        }
+        Some(cmds)
+    }
+
+    /// Record our checksum for the tick just stepped (`t` = pre-step
+    /// tick, same tagging as Lockstep's exchange).
+    pub fn after_step(&mut self, t: u32, state: &State) {
+        if t % 24 == 0 {
+            self.my_checksums.insert(t, state.checksum());
+            let keep = t.saturating_sub(24 * 10);
+            self.my_checksums.retain(|k, _| *k >= keep);
+        }
+    }
+}
+
 /// The lockstep driver: schedules local input, waits for remote input,
 /// steps when both sides of a tick are present, cross-checks checksums.
 pub struct Lockstep {
