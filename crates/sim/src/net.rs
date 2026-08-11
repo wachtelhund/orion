@@ -67,6 +67,9 @@ pub enum Msg {
         seed: u64,
         races: Vec<u8>,
         teams: Vec<u8>,
+        /// Seats the HOST drives with an AI (started before the room
+        /// filled). Bot commands arrive tagged like any player's.
+        bots: Vec<bool>,
         map: String,
         map_ron: Option<String>,
     },
@@ -329,6 +332,8 @@ pub struct RoomStarted {
     pub seed: u64,
     pub races: Vec<u8>,
     pub teams: Vec<u8>,
+    /// Host-driven AI seats (empty seats filled at start).
+    pub bots: Vec<bool>,
     pub map: String,
     pub map_ron: Option<String>,
     pub input_delay: u32,
@@ -350,19 +355,41 @@ impl RoomStarted {
 /// Blocking; run in a thread. `races[0]` is the host's race; joiner races
 /// arrive in their Hellos.
 pub fn room_host_handshake(
-    mut net: Net,
+    net: Net,
     capacity: u8,
     my_race: u8,
     seed: u64,
     map: &str,
     map_ron: Option<String>,
 ) -> std::io::Result<RoomStarted> {
+    // No start signal: waits for a full room (the classic flow).
+    let (_tx, never) = std::sync::mpsc::channel();
+    room_host_handshake_signaled(net, capacity, my_race, seed, map, map_ron, never)
+}
+
+/// Like `room_host_handshake`, but a signal on `start_rx` begins the game
+/// immediately — empty seats are filled with host-driven bots (random
+/// race, seeded deterministically from the match seed).
+pub fn room_host_handshake_signaled(
+    mut net: Net,
+    capacity: u8,
+    my_race: u8,
+    seed: u64,
+    map: &str,
+    map_ron: Option<String>,
+    start_rx: std::sync::mpsc::Receiver<()>,
+) -> std::io::Result<RoomStarted> {
     let bad = |m: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, m.to_string());
     let mut races: Vec<Option<u8>> = vec![None; capacity as usize];
     races[0] = Some(my_race);
-    // Collect Hellos until every seat reported.
-    while races.iter().any(|r| r.is_none()) {
-        match net.rx.recv() {
+    // Collect Hellos until the room fills or the host says go.
+    let mut start_now = false;
+    while races.iter().any(|r| r.is_none()) && !start_now {
+        if start_rx.try_recv().is_ok() {
+            start_now = true;
+            break;
+        }
+        match net.rx.recv_timeout(std::time::Duration::from_millis(100)) {
             Ok(Msg::Hello2 { slot, race, version, .. }) => {
                 if version != PROTOCOL_VERSION {
                     let reason = format!(
@@ -376,16 +403,24 @@ pub fn room_host_handshake(
                 }
             }
             Ok(_) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
             Err(_) => return Err(bad("a player left while the room filled")),
         }
     }
-    let races: Vec<u8> = races.into_iter().map(|r| r.unwrap()).collect();
+    // Empty seats become bots. Race picks derive from the match seed so
+    // every peer could reproduce them (they ride Start2 regardless).
+    let bots: Vec<bool> = races.iter().map(|r| r.is_none()).collect();
+    let races: Vec<u8> = races
+        .into_iter()
+        .enumerate()
+        .map(|(i, r)| r.unwrap_or_else(|| ((seed >> (i * 8)) % 3) as u8))
+        .collect();
     // Adjacent seats team up: 0+1 vs 2+3 (a 3-seat room is 1v2).
     let teams: Vec<u8> = (0..capacity).map(|s| (s >= capacity / 2) as u8).collect();
     // Worst-seat RTT sizes the shared pipeline.
     let t0 = nettime::Instant::now();
     net.send(&Msg::Ping { k: 7 });
-    let mut seen = vec![false; capacity as usize];
+    let mut seen: Vec<bool> = bots.clone(); // bot seats need no probe
     seen[0] = true;
     let mut worst = std::time::Duration::ZERO;
     while seen.iter().any(|s| !s) {
@@ -406,6 +441,7 @@ pub fn room_host_handshake(
         seed,
         races: races.clone(),
         teams: teams.clone(),
+        bots: bots.clone(),
         map: map.to_string(),
         map_ron: map_ron.clone(),
     });
@@ -416,6 +452,7 @@ pub fn room_host_handshake(
         seed,
         races,
         teams,
+        bots,
         map: map.to_string(),
         map_ron,
         input_delay,
@@ -444,14 +481,14 @@ pub fn room_join_handshake(
         name: name.to_string(),
         version: PROTOCOL_VERSION.to_string(),
     });
-    let mut start: Option<(u64, Vec<u8>, Vec<u8>, String, Option<String>)> = None;
+    let mut start: Option<(u64, Vec<u8>, Vec<u8>, Vec<bool>, String, Option<String>)> = None;
     let delay = loop {
         match net.rx.recv() {
             Ok(Msg::Ping { k }) => {
                 net.send(&Msg::Pong2 { slot, k });
             }
-            Ok(Msg::Start2 { seed, races, teams, map, map_ron }) => {
-                start = Some((seed, races, teams, map, map_ron));
+            Ok(Msg::Start2 { seed, races, teams, bots, map, map_ron }) => {
+                start = Some((seed, races, teams, bots, map, map_ron));
             }
             Ok(Msg::Go { delay }) => break delay.clamp(INPUT_DELAY_MIN, INPUT_DELAY_MAX),
             Ok(Msg::Reject { reason }) => return Err(bad(&reason)),
@@ -459,7 +496,7 @@ pub fn room_join_handshake(
             Err(_) => return Err(bad("the host left during the handshake")),
         }
     };
-    let (seed, races, teams, map, map_ron) =
+    let (seed, races, teams, bots, map, map_ron) =
         start.ok_or_else(|| bad("no start data before go"))?;
     Ok(RoomStarted {
         net,
@@ -467,6 +504,7 @@ pub fn room_join_handshake(
         seed,
         races,
         teams,
+        bots,
         map,
         map_ron,
         input_delay: delay,
@@ -500,14 +538,14 @@ pub fn join_auto(mut net: Net, my_race: u8, name: &str) -> std::io::Result<Joine
         name: name.to_string(),
         version: PROTOCOL_VERSION.to_string(),
     });
-    let mut start: Option<(u64, Vec<u8>, Vec<u8>, String, Option<String>)> = None;
+    let mut start: Option<(u64, Vec<u8>, Vec<u8>, Vec<bool>, String, Option<String>)> = None;
     let delay = loop {
         match net.rx.recv() {
             Ok(Msg::Ping { k }) => {
                 net.send(&Msg::Pong2 { slot, k });
             }
-            Ok(Msg::Start2 { seed, races, teams, map, map_ron }) => {
-                start = Some((seed, races, teams, map, map_ron));
+            Ok(Msg::Start2 { seed, races, teams, bots, map, map_ron }) => {
+                start = Some((seed, races, teams, bots, map, map_ron));
             }
             Ok(Msg::Go { delay }) => break delay.clamp(INPUT_DELAY_MIN, INPUT_DELAY_MAX),
             Ok(Msg::Reject { reason }) => return Err(bad(&reason)),
@@ -515,7 +553,7 @@ pub fn join_auto(mut net: Net, my_race: u8, name: &str) -> std::io::Result<Joine
             Err(_) => return Err(bad("the host left during the handshake")),
         }
     };
-    let (seed, races, teams, map, map_ron) =
+    let (seed, races, teams, bots, map, map_ron) =
         start.ok_or_else(|| bad("no start data before go"))?;
     Ok(Joined::Room(RoomStarted {
         net,
@@ -523,6 +561,7 @@ pub fn join_auto(mut net: Net, my_race: u8, name: &str) -> std::io::Result<Joine
         seed,
         races,
         teams,
+        bots,
         map,
         map_ron,
         input_delay: delay,
@@ -581,6 +620,26 @@ impl Lockstep {
         l.n_players = n_players;
         l.remotes = vec![BTreeMap::new(); n_players as usize];
         l
+    }
+
+    /// Host-side: schedule a BOT seat's commands for a future tick and
+    /// broadcast them tagged with that seat — peers receive them exactly
+    /// like a human player's stream.
+    pub fn push_bot(&mut self, player: u8, tick: u32, cmds: Vec<Command>) -> bool {
+        if (player as usize) >= self.remotes.len() {
+            return false;
+        }
+        self.remotes[player as usize].insert(tick, cmds.clone());
+        self.net.send(&Msg::Cmds2 { player, tick, cmds, checksum: None })
+    }
+
+    /// The furthest tick a bot stream has been scheduled to (for the
+    /// host's fill loop).
+    pub fn bot_sent_until(&self, player: u8) -> u32 {
+        self.remotes
+            .get(player as usize)
+            .and_then(|m| m.keys().next_back().map(|k| k + 1))
+            .unwrap_or(0)
     }
 
     /// Drain the receive channel.

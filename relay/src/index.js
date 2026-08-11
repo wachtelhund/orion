@@ -187,7 +187,13 @@ export class Directory {
       if (!(l.code in lobbies) && Object.keys(lobbies).length >= MAX_LISTED) {
         return new Response("directory full", { status: 429 });
       }
-      lobbies[l.code] = { name: l.name, race: l.race, created: now };
+      lobbies[l.code] = {
+        name: l.name,
+        race: l.race,
+        created: lobbies[l.code]?.created ?? now,
+        slots: l.slots || 2,
+        filled: l.filled || 1,
+      };
       await this.save(lobbies);
       return new Response("ok");
     }
@@ -217,6 +223,8 @@ export class Directory {
       name: l.name,
       race: l.race,
       age_s: Math.floor((now - l.created) / 1000),
+      slots: l.slots || 2,
+      filled: l.filled || 1,
     }));
     this.listJson = JSON.stringify(list);
     this.listAt = now;
@@ -282,12 +290,18 @@ export class Lobby {
       mySlot = 0;
       // Public lobbies appear in the directory until the room fills.
       if (url.searchParams.get("private") !== "1") {
-        const name = (url.searchParams.get("name") || "COMMANDER").slice(0, 16);
-        const race = parseInt(url.searchParams.get("race") || "0", 10) || 0;
+        this.hostName = (url.searchParams.get("name") || "COMMANDER").slice(0, 16);
+        this.hostRace = parseInt(url.searchParams.get("race") || "0", 10) || 0;
         try {
           const res = await this.directory().fetch("https://dir/add", {
             method: "POST",
-            body: JSON.stringify({ code: this.code, name, race }),
+            body: JSON.stringify({
+              code: this.code,
+              name: this.hostName,
+              race: this.hostRace,
+              slots: this.capacity,
+              filled: 1,
+            }),
           });
           // Only claim a directory seat we actually got, so unlist() can't
           // remove someone else's entry later.
@@ -301,6 +315,20 @@ export class Lobby {
       this.seats[mySlot] = server;
       if (!this.seats.includes(null)) {
         await this.unlist(); // room filled: stop advertising
+      } else if (this.listed) {
+        // Public room with space left: refresh the fill count.
+        try {
+          await this.directory().fetch("https://dir/add", {
+            method: "POST",
+            body: JSON.stringify({
+              code: this.code,
+              name: this.hostName,
+              race: this.hostRace,
+              slots: this.capacity,
+              filled: this.seats.filter(Boolean).length,
+            }),
+          });
+        } catch (_) {}
       }
     } else {
       return fail("bad role");

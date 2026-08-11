@@ -138,6 +138,14 @@ pub struct App {
     #[cfg(not(target_arch = "wasm32"))]
     pub join_waiting:
         Option<std::sync::mpsc::Receiver<std::io::Result<orion_sim::net::Joined>>>,
+    /// Signals the waiting room host thread to start with bot fill.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub room_start_tx: Option<std::sync::mpsc::Sender<()>>,
+    /// Host-driven bots for unfilled room seats: (seat, brain).
+    pub room_bots: Vec<(u8, Bot)>,
+    /// RON of the active map when it is not a builtin — recorded into
+    /// replays so custom-map games play back anywhere.
+    pub game_map_ron: Option<String>,
     pub shot_focus: Option<(f32, f32)>,
     pub shot_zoom: Option<f32>,
     pub script: Option<String>,
@@ -381,6 +389,10 @@ impl App {
             room_waiting: None,
             #[cfg(not(target_arch = "wasm32"))]
             join_waiting: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            room_start_tx: None,
+            room_bots: Vec::new(),
+            game_map_ron: None,
             shot,
             shot_focus: None,
             shot_zoom: None,
@@ -715,6 +727,12 @@ impl App {
         };
         let names = all_map_names();
         self.game_map = names[self.map_choice % names.len()].clone();
+        self.game_map_ron = if orion_sim::map::MAP_NAMES.contains(&self.game_map.as_str()) {
+            None
+        } else {
+            crate::editor::load_custom(&self.game_map)
+                .and_then(|m| ron::ser::to_string(&m).ok())
+        };
         self.state = new_game_with(self.chosen_race, enemy, &self.game_map);
         let style = crate::clock::SystemTime::now()
             .duration_since(crate::clock::UNIX_EPOCH)
@@ -873,6 +891,7 @@ impl App {
 
     pub fn start_mp_game(&mut self, started: Started) {
         self.tutorial = None;
+        self.room_bots.clear();
         crate::weblog(&format!(
             "orion: start_mp_game local={} delay={}",
             started.local_player, started.input_delay
@@ -881,6 +900,7 @@ impl App {
         self.replay = None;
         self.record_replay = true;
         self.game_map = started.map.clone();
+        self.game_map_ron = started.map_ron.clone();
         self.state = match started.resolve_map() {
             Some(map) => State::new_with_races(
                 GameData::load_default(),
@@ -925,8 +945,9 @@ impl App {
         self.tutorial = None;
         self.mp_lobby_code = None;
         self.replay = None;
-        self.record_replay = false; // room replays need team headers first
+        self.record_replay = true; // replays carry teams since v0.25
         self.game_map = rs.map.clone();
+        self.game_map_ron = rs.map_ron.clone();
         let map = match rs.resolve_map() {
             Some(m) => m,
             None => {
@@ -949,6 +970,19 @@ impl App {
         }
         self.state = state;
         self.human = rs.local_player;
+        self.room_bots.clear();
+        if rs.local_player == 0 {
+            // The host drives the AI for unfilled seats; peers just see
+            // another tagged command stream.
+            for (seat, is_bot) in rs.bots.iter().enumerate() {
+                if *is_bot {
+                    self.room_bots.push((
+                        seat as u8,
+                        Bot::with_style(seat as u8, Difficulty::Hard, rs.seed ^ seat as u64),
+                    ));
+                }
+            }
+        }
         self.mp = Some(Lockstep::new_room(
             rs.net,
             rs.local_player,
@@ -1267,7 +1301,12 @@ impl App {
             vec![me, "BOT".into()]
         };
         let replay =
-            orion_sim::replay::Replay::from_state(&self.state, &self.game_map.clone(), names);
+            orion_sim::replay::Replay::from_state(
+                &self.state,
+                &self.game_map.clone(),
+                self.game_map_ron.clone(),
+                names,
+            );
         if let Err(e) = crate::replays::save(&replay) {
             eprintln!("replay save failed: {e}");
         }
@@ -1373,6 +1412,28 @@ impl App {
                 let mut pend: Vec<Command> =
                     self.pending.drain(..).map(|(_, c)| c).collect();
                 let mut mp = self.mp.take().unwrap();
+                // Host-driven bot seats: schedule their streams exactly
+                // like local input (empty backfill, fresh think at the
+                // pipeline head).
+                if !self.room_bots.is_empty() {
+                    let horizon = self.state.tick + mp.delay;
+                    for (seat, bot) in &mut self.room_bots {
+                        while mp.bot_sent_until(*seat) <= horizon {
+                            let tick = mp.bot_sent_until(*seat);
+                            let cmds: Vec<Command> = if tick == horizon {
+                                bot.think(&self.state)
+                                    .into_iter()
+                                    .map(|(_, c)| c)
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            };
+                            if !mp.push_bot(*seat, tick, cmds) {
+                                break;
+                            }
+                        }
+                    }
+                }
                 let stepped = mp.try_step(&mut self.state, &mut pend);
                 self.mp = Some(mp);
                 if !pend.is_empty() {
@@ -3416,7 +3477,7 @@ impl App {
                         };
                         let map_ron = crate::editor::load_custom(&map)
                             .and_then(|m| ron::ser::to_string(&m).ok());
-                        let (_, rx) = crate::relay::host_room_async(
+                        let (_, rx, start_tx) = crate::relay::host_room_async(
                             self.settings.relay_url.clone(),
                             code,
                             0,
@@ -3424,6 +3485,37 @@ impl App {
                             map_ron,
                         );
                         self.room_waiting = Some(rx);
+                        // room-host-bots: signal an early start once the
+                        // driver notices at least one joiner came (or on a
+                        // timer via the roles below).
+                        self.room_start_tx = Some(start_tx);
+                    }
+                } else if let Some(rest) = role.strip_prefix("room-start-in:") {
+                    // room-start-in:SECS:CODE:map — host that starts with
+                    // bot fill SECS seconds after launch.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if self.room_waiting.is_none() {
+                        let mut parts = rest.splitn(3, ':');
+                        let secs: u64 =
+                            parts.next().and_then(|s| s.parse().ok()).unwrap_or(5);
+                        let code = parts.next().unwrap_or("QBOTS").to_string();
+                        let map = parts.next().unwrap_or("crossfire").to_string();
+                        let map_ron = crate::editor::load_custom(&map)
+                            .and_then(|m| ron::ser::to_string(&m).ok());
+                        let (_, rx, start_tx) = crate::relay::host_room_async_full(
+                            self.settings.relay_url.clone(),
+                            code,
+                            0,
+                            &map,
+                            map_ron,
+                            "QA ROOM",
+                            false,
+                        );
+                        self.room_waiting = Some(rx);
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_secs(secs));
+                            let _ = start_tx.send(());
+                        });
                     }
                 } else if let Some(code) = role.strip_prefix("room-join:") {
                     #[cfg(not(target_arch = "wasm32"))]
@@ -3492,6 +3584,9 @@ impl App {
                 }
                 Ok(Err(e)) => {
                     self.mp_error = Some(format!("CONNECTION FAILED: {e}").to_uppercase());
+                    if self.mp_auto.is_some() {
+                        crate::weblog(&format!("mp-auto join failed: {e}"));
+                    }
                     self.join_waiting = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -3511,6 +3606,9 @@ impl App {
                 }
                 Ok(Err(e)) => {
                     self.mp_error = Some(format!("ROOM FAILED: {e}").to_uppercase());
+                    if self.mp_auto.is_some() {
+                        crate::weblog(&format!("mp-auto room failed: {e}"));
+                    }
                     self.room_waiting = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}

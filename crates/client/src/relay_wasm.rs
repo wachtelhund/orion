@@ -365,6 +365,18 @@ pub struct LobbyInfo {
     pub race: u8,
     #[allow(dead_code)]
     pub age_s: u32,
+    /// Room capacity (2 = classic duel). Older relays omit these.
+    #[serde(default = "two")]
+    pub slots: u8,
+    #[serde(default = "one")]
+    pub filled: u8,
+}
+
+fn two() -> u8 {
+    2
+}
+fn one() -> u8 {
+    1
 }
 
 fn http_base(base: &str) -> String {

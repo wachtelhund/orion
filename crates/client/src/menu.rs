@@ -60,6 +60,7 @@ enum MenuAction {
     FetchMapCode,
     StartTutorial,
     CreateRoom,
+    StartRoomNow,
     OpenUpdate,
     Rebind(Action),
 }
@@ -183,7 +184,16 @@ impl App {
                         h * 0.55,
                     );
                 } else if self.mp_busy() {
-                    stack(vec![("CANCEL".into(), MenuAction::CancelMp)], h * 0.64);
+                    let mut rows = Vec::new();
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if self.room_start_tx.is_some() && self.room_waiting.is_some() {
+                        rows.push((
+                            "START NOW - BOTS FILL EMPTY SEATS".to_string(),
+                            MenuAction::StartRoomNow,
+                        ));
+                    }
+                    rows.push(("CANCEL".into(), MenuAction::CancelMp));
+                    stack(rows, h * 0.58);
                 } else {
                     let name_marker = if self.name_focus { "_" } else { "" };
                     let code_marker = if self.name_focus { "" } else { "_" };
@@ -237,8 +247,13 @@ impl App {
                             .map(|r| r.split_whitespace().next().unwrap_or("").to_string())
                             .unwrap_or_default()
                             .to_uppercase();
+                        let label = if l.slots > 2 {
+                            format!("JOIN 2V2  {}  {}/{}", l.name, l.filled, l.slots)
+                        } else {
+                            format!("JOIN  {}  ({race})", l.name)
+                        };
                         rows.push((
-                            format!("JOIN  {}  ({race})", l.name),
+                            label,
                             MenuAction::JoinListed(k),
                         ));
                     }
@@ -1034,6 +1049,12 @@ impl App {
                 self.mm_queue = None;
                 self.mm_status.clear();
             }
+            MenuAction::StartRoomNow => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(tx) = &self.room_start_tx {
+                    let _ = tx.send(());
+                }
+            }
             MenuAction::CancelMp => {
                 self.mp_waiting = None;
                 self.mp_lobby_code = None;
@@ -1041,6 +1062,7 @@ impl App {
                 {
                     self.room_waiting = None;
                     self.join_waiting = None;
+                    self.room_start_tx = None;
                 }
             }
             MenuAction::CycleMap => {
@@ -1112,15 +1134,18 @@ impl App {
                     };
                     self.settings.save();
                     self.mp_private = true;
-                    let (code, rx) = crate::relay::host_room_async(
+                    let (code, rx, start_tx) = crate::relay::host_room_async_full(
                         self.settings.relay_url.clone(),
                         crate::relay::fresh_code(),
                         self.chosen_race,
                         &chosen,
                         map_ron,
+                        &self.settings.player_name,
+                        false,
                     );
                     self.mp_lobby_code = Some(code);
                     self.room_waiting = Some(rx);
+                    self.room_start_tx = Some(start_tx);
                 }
             }
             MenuAction::PlayReplay(k) => {

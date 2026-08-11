@@ -17,6 +17,13 @@ pub struct Replay {
     pub map: String,
     pub seed: u64,
     pub races: Vec<u8>,
+    /// Team per player. Empty (old replays) = 1v1 identity teams.
+    #[serde(default)]
+    pub teams: Vec<u8>,
+    /// The map itself for custom (editor) maps — same RON the MP
+    /// handshake carries. None for builtins.
+    #[serde(default)]
+    pub map_ron: Option<String>,
     pub player_names: Vec<String>,
     pub winner: Option<u8>,
     pub duration_ticks: u32,
@@ -25,12 +32,19 @@ pub struct Replay {
 
 impl Replay {
     /// Snapshot a finished (or in-progress) game.
-    pub fn from_state(s: &State, map_name: &str, player_names: Vec<String>) -> Replay {
+    pub fn from_state(
+        s: &State,
+        map_name: &str,
+        map_ron: Option<String>,
+        player_names: Vec<String>,
+    ) -> Replay {
         Replay {
             version: REPLAY_VERSION,
             map: map_name.to_string(),
             seed: s.seed,
             races: s.players.iter().map(|p| p.race).collect(),
+            teams: s.players.iter().map(|p| p.team).collect(),
+            map_ron,
             player_names,
             winner: s.winner,
             duration_ticks: s.tick,
@@ -41,8 +55,17 @@ impl Replay {
     /// Fresh state at tick 0 for this replay. Feed it ticks via
     /// `commands_for` (or use `resimulate` to fast-forward headlessly).
     pub fn start_state(&self, data: GameData) -> Option<State> {
-        let map = crate::map::by_name(&self.map)?;
-        Some(State::new_with_races(data, map, self.seed, &self.races))
+        let map = match &self.map_ron {
+            Some(src) => ron::de::from_str(src).ok()?,
+            None => crate::map::by_name(&self.map)?,
+        };
+        let mut s = State::new_with_races(data, map, self.seed, &self.races);
+        for (p, team) in self.teams.iter().enumerate() {
+            if p < s.players.len() {
+                s.players[p].team = *team;
+            }
+        }
+        Some(s)
     }
 
     /// The command slice scheduled for `tick`. `cursor` tracks progress —

@@ -95,3 +95,44 @@ fn no_friendly_fire_between_teammates() {
     let foe_hp = s.get(foe).map(|e| e.hp).unwrap_or(0);
     assert!(foe_hp < full, "enemy team is auto-acquired ({foe_hp} < {full})");
 }
+
+/// A 2v2 game on a non-builtin map must survive the replay round-trip:
+/// teams and the map itself ride inside the file, so playback anywhere
+/// reproduces the exact same simulation.
+#[test]
+fn room_replay_roundtrips_teams_and_custom_map() {
+    use orion_sim::replay::Replay;
+
+    let map = four_start_map();
+    let map_ron = ron::ser::to_string(&map).unwrap();
+    let mut live = state_2v2();
+    for _ in 0..120 {
+        live.step(&[]);
+    }
+
+    let r = Replay::from_state(
+        &live,
+        "qa-2v2",
+        Some(map_ron),
+        vec!["A".into(), "B".into(), "C".into(), "D".into()],
+    );
+    let back = Replay::from_ron(&r.to_ron()).expect("parses");
+    assert_eq!(back.teams, vec![0, 0, 1, 1], "teams recorded");
+
+    let mut replayed = back
+        .start_state(GameData::load_default())
+        .expect("embedded map resolves without a registry entry");
+    for (p, want) in [(0usize, 0u8), (1, 0), (2, 1), (3, 1)] {
+        assert_eq!(replayed.players[p].team, want, "team applied on playback");
+    }
+    let mut cursor = 0usize;
+    while replayed.tick < live.tick {
+        let cmds = back.commands_for(replayed.tick, &mut cursor);
+        replayed.step(&cmds);
+    }
+    assert_eq!(
+        replayed.checksum(),
+        live.checksum(),
+        "playback reproduces the live game bit-for-bit"
+    );
+}

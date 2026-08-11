@@ -125,6 +125,18 @@ pub struct LobbyInfo {
     pub race: u8,
     #[allow(dead_code)]
     pub age_s: u32,
+    /// Room capacity (2 = classic duel). Older relays omit these.
+    #[serde(default = "two")]
+    pub slots: u8,
+    #[serde(default = "one")]
+    pub filled: u8,
+}
+
+fn two() -> u8 {
+    2
+}
+fn one() -> u8 {
+    1
 }
 
 /// Fetch the public lobby list (blocking — call in a thread).
@@ -237,24 +249,61 @@ pub fn host_room_async(
     my_race: u8,
     map: &str,
     map_ron: Option<String>,
-) -> (String, Receiver<io::Result<orion_sim::net::RoomStarted>>) {
-    let url = format!("{}&private=1&slots=4", ws_url(&base, &code, "host"));
+) -> (
+    String,
+    Receiver<io::Result<orion_sim::net::RoomStarted>>,
+    Sender<()>,
+) {
+    host_room_async_full(base, code, my_race, map, map_ron, "COMMANDER", true)
+}
+
+/// Full room host: public rooms appear in the lobby browser with a
+/// live fill count.
+pub fn host_room_async_full(
+    base: String,
+    code: String,
+    my_race: u8,
+    map: &str,
+    map_ron: Option<String>,
+    name: &str,
+    private: bool,
+) -> (
+    String,
+    Receiver<io::Result<orion_sim::net::RoomStarted>>,
+    Sender<()>,
+) {
+    let clean: String = name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == ' ')
+        .take(16)
+        .collect();
+    let url = format!(
+        "{}&private={}&slots=4&name={}&race={}",
+        ws_url(&base, &code, "host"),
+        if private { 1 } else { 0 },
+        clean.replace(' ', "%20"),
+        my_race,
+    );
     let map = map.to_string();
     let (tx, rx) = channel();
+    // A signal on this channel starts the game early — empty seats get
+    // host-driven bots.
+    let (start_tx, start_rx) = channel();
     std::thread::spawn(move || {
         let result = ws_net(&url).and_then(|net| {
-            orion_sim::net::room_host_handshake(
+            orion_sim::net::room_host_handshake_signaled(
                 net,
                 4,
                 my_race,
                 orion_sim::net::fresh_seed(),
                 &map,
                 map_ron,
+                start_rx,
             )
         });
         let _ = tx.send(result);
     });
-    (code, rx)
+    (code, rx, start_tx)
 }
 
 /// Join a team room by code.

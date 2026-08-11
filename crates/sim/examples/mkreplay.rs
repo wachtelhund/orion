@@ -22,7 +22,7 @@ fn main() {
         }
         s.step(&cmds);
     }
-    let r = Replay::from_state(&s, "meridian", vec!["ALPHA BOT".into(), "BETA BOT".into()]);
+    let r = Replay::from_state(&s, "meridian", None, vec!["ALPHA BOT".into(), "BETA BOT".into()]);
     std::fs::write(&out, r.to_ron()).expect("write replay");
     println!(
         "wrote {out}: winner={:?} ticks={} commands={} ({} KB)",
