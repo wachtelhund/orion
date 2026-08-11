@@ -42,13 +42,13 @@
     <div class="hero-scrim"></div>
 
     <div class="hero-inner wrap">
-      <p class="chip" id="hero-eyebrow">v0.26.0 · free · MIT</p>
+      <p class="chip" id="hero-eyebrow">v0.27.0 · free · MIT</p>
       <h1>ORION</h1>
       <p class="tagline">A StarCraft-style RTS built from scratch in Rust</p>
 
       <div class="cta">
         <a class="btn btn-primary" id="hero-download" href="#download">
-          <span class="btn-label">Download v0.26.0</span>
+          <span class="btn-label">Download v0.27.0</span>
           <span class="btn-sub" id="hero-download-sub">Windows · macOS · Linux</span>
         </a>
         <a class="btn btn-ghost play-only" href="/play" rel="noopener">
@@ -70,19 +70,34 @@
   <section class="wrap section" id="download">
     <h2 class="section-title">Download</h2>
     <p class="section-lede">
-      <strong id="release-tag">v0.26.0</strong><span id="release-date"> · Aug 11, 2026</span> —
+      <strong id="release-tag">v0.27.0</strong><span id="release-date"> · Aug 11, 2026</span> —
       precompiled, nothing to install. <a href="#download" rel="noopener">All releases</a> ·
       <a href="https://github.com/wachtelhund/orion" rel="noopener">build from source</a>
     </p>
-    <div class="downloads" id="downloads"><div class="dl frame" data-platform="macos"><h3>macOS (Apple Silicon + Intel)</h3><p class="file">Orion-macOS.zip</p><div class="steps"><p>Unzip → double-click <strong>Orion.app</strong>. First launch only: right-click → Open (it isn&#39;t notarized)</p></div><a class="btn btn-primary" href="/downloads/v0.26.0/Orion-macOS.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.26.0 · 10.4 MB</span></a></div>
-<div class="dl frame" data-platform="windows"><h3>Windows 10/11</h3><p class="file">orion-windows-x86_64.zip</p><div class="steps"><p>Unzip → double-click <strong>orion.exe</strong>. If SmartScreen objects: More info → Run anyway</p></div><a class="btn btn-primary" href="/downloads/v0.26.0/orion-windows-x86_64.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.26.0 · 4.9 MB</span></a></div>
-<div class="dl frame" data-platform="linux"><h3>Linux (x86_64)</h3><p class="file">orion-linux-x86_64.tar.gz</p><div class="steps"><p><code>tar xzf &amp;&amp; ./orion</code> (needs Vulkan drivers + ALSA <code>libasound2</code>)</p></div><a class="btn btn-primary" href="/downloads/v0.26.0/orion-linux-x86_64.tar.gz"><span class="btn-label">Download</span><span class="btn-sub">v0.26.0 · 6.0 MB</span></a></div></div>
+    <div class="downloads" id="downloads"><div class="dl frame" data-platform="macos"><h3>macOS (Apple Silicon + Intel)</h3><p class="file">Orion-macOS.zip</p><div class="steps"><p>Unzip → double-click <strong>Orion.app</strong>. First launch only: right-click → Open (it isn&#39;t notarized)</p></div><a class="btn btn-primary" href="/downloads/v0.27.0/Orion-macOS.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.27.0 · 10.4 MB</span></a></div>
+<div class="dl frame" data-platform="windows"><h3>Windows 10/11</h3><p class="file">orion-windows-x86_64.zip</p><div class="steps"><p>Unzip → double-click <strong>orion.exe</strong>. If SmartScreen objects: More info → Run anyway</p></div><a class="btn btn-primary" href="/downloads/v0.27.0/orion-windows-x86_64.zip"><span class="btn-label">Download</span><span class="btn-sub">v0.27.0 · 4.9 MB</span></a></div>
+<div class="dl frame" data-platform="linux"><h3>Linux (x86_64)</h3><p class="file">orion-linux-x86_64.tar.gz</p><div class="steps"><p><code>tar xzf &amp;&amp; ./orion</code> (needs Vulkan drivers + ALSA <code>libasound2</code>)</p></div><a class="btn btn-primary" href="/downloads/v0.27.0/orion-linux-x86_64.tar.gz"><span class="btn-label">Download</span><span class="btn-sub">v0.27.0 · 6.1 MB</span></a></div></div>
   </section>
 
   <section class="wrap section" id="changelog">
     <h2 class="section-title">Changelog</h2>
     <p class="section-lede">Read live from the <a href="https://github.com/wachtelhund/orion/wiki" rel="noopener">project wiki</a>.</p>
-    <div class="changelog" id="changelog-list"><details class="release" id="v0.26.0"><summary><span class="ver">v0.26.0</span><span class="sum">Observer mode</span><span class="hl">Observer mode: watch live duels and 2v2 rooms through the relay — free camera, TAB fog perspectives, checksum-verified view</span></summary><div class="release-body"><p>Watch live matches. Any lobby or 2v2 room can now be observed through the relay — silently, from the outside, with the full picture.</p>
+    <div class="changelog" id="changelog-list"><details class="release" id="v0.27.0"><summary><span class="ver">v0.27.0</span><span class="sum">The campaign</span><span class="hl">The mini-campaign: five scripted missions (play all three races, survive missions, a 2v2 finale with Marshal Kade) + trooper trim from the meridian taste pass</span></summary><div class="release-body"><p>Five scripted missions, a story to play through, and a measured trim to the Vanguard&#39;s edge.</p>
+<p><img src="/mirror/changelog/images/v027-campaign-page.png" alt="The campaign page — missions unlock in order" loading="lazy" decoding="async"></p>
+<h4>The mini-campaign</h4>
+<p><strong>CAMPAIGN</strong> on the main menu. Five missions, unlocked in order, progress saved between sessions:</p>
+<p>1. <strong>BROKEN DAWN</strong> — rebuild a broken mining line on Meridian and burn out a Kyth warren camp, under scripted skitter raids timed to hit while you&#39;re mustering. 2. <strong>HOLD THE LINE</strong> — the Ferron Compact comes for the Causeway with a war chest. Keep your headquarters standing for eight minutes; the objective panel counts down live. 3. <strong>THE ASSEMBLY</strong> — play as the Kyth for the first time. Swarm cheap, swarm fast. 4. <strong>IRON COMPACT</strong> — play as the Ferron on Thornwood: arclight lines, high ground, trees in the sightlines. 5. <strong>MERIDIAN&#39;S END</strong> — the finale on Crossfire: a 2v2 with an allied commander at your side and Marshal Kade at the front.</p>
+<p><img src="/mirror/changelog/images/v027-mission1.png" alt="Broken Dawn, objective 1 of 3" loading="lazy" decoding="async"></p>
+<p>Missions are built on the tutorial&#39;s machinery: objectives are drawn in a gold mission panel, raids arrive through the same command channel as everything else, and the other seats are driven by real bots — the same brains you skirmish against, at mission-tuned difficulties. Mission replays are off (scripted events aren&#39;t part of a command stream).</p>
+<p>For the beaten path there&#39;s a headless QA harness too: <code>--mission-auto K</code> plays mission K with a Hard bot standing in for you — missions 1–4 all resolve in victory; the finale&#39;s bot-vs-bot stand-in stalemates (three Normal bots counter-punch each other forever), which is exactly the hole Marshal Kade and a human plan are for.</p>
+<h4>Balance</h4>
+<p><strong>Trooper cooldown 0.86s → 0.90s</strong> (−4.4% sustained damage).</p>
+<p>The measured story (all Hard, 8 seeds per matchup, meridian): VC took the cross-race total 23–15–10, beating Kyth 13–3 and Ferron 10–6 — and the combat lab (new VC-vs-Kyth and Ferron-vs-Kyth fixtures in <code>combat_lab</code>) shows cost-matched Kyth ground cores getting wiped by trooper lines even with the lab&#39;s first-mover advantage. The trooper is the one unit in every VC composition, so it takes the trim; Kyth and Ferron numbers are untouched (Kyth already beats Ferron 12–4 there — a Kyth buff would have widened that).</p>
+<p>After the change (same seeds): total <strong>20–16–10</strong>, VC-vs-Kyth 12–4, VC-vs-Ferron 8–6. A modest shave, which is the intent — 8-seed sweeps are noisy and this number is the one in every VC composition. VC still leads against Kyth on meridian; that gap stays on the watchlist rather than getting a second speculative change stacked on top.</p>
+<p>One-line revert if it plays badly: trooper <code>cooldown_s: 0.90 → 0.86</code>.</p>
+<h4>Also in this release</h4>
+<ul><li>The mirror-covariance probe (<code>examples/mirror.rs</code>) now takes a map name. Pointed at Caverns it found a real seat bias (P1 wins mirror matches ~8-0): a non-mirror-covariant tie-break when two units land exactly coincident. Filed for the next patch — Caverns ladder games are affected today.</li><li>Room-host handshake code cleanup (no behavior change).</li></ul></div></details>
+<details class="release" id="v0.26.0"><summary><span class="ver">v0.26.0</span><span class="sum">Observer mode</span><span class="hl">Observer mode: watch live duels and 2v2 rooms through the relay — free camera, TAB fog perspectives, checksum-verified view</span></summary><div class="release-body"><p>Watch live matches. Any lobby or 2v2 room can now be observed through the relay — silently, from the outside, with the full picture.</p>
 <p><img src="/mirror/changelog/images/v026-observer.png" alt="Observing a live 2v2 — revealed map, four corner bases on the minimap" loading="lazy" decoding="async"></p>
 <h4>Watching a match</h4>
 <p>Type a code on the multiplayer page and pick <strong>WATCH THIS CODE</strong> (shown under PRIVATE CODE). You&#39;ll drop into the match the moment it starts: map revealed, free camera, no seat of your own. <strong>TAB</strong> cycles the fog perspective — each player&#39;s own view, then ALL. Works for duels and 2v2 rooms alike, custom maps included; up to eight observers per match.</p>
