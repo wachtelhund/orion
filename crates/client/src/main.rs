@@ -242,10 +242,13 @@ impl Shell {
                             } else if let Some(code) =
                                 grab("join=").filter(|c| !c.is_empty())
                             {
-                                app.mp_waiting = Some(crate::relay::join_relay_async(
+                                // Auto-detects duel vs 2v2 room from the
+                                // relay's seat frame, like the menu path.
+                                app.join_waiting = Some(crate::relay::join_auto_async(
                                     app.settings.relay_url.clone(),
                                     code,
                                     1,
+                                    app.settings.player_name.clone(),
                                 ));
                                 app.page = crate::menu::MenuPage::Multiplayer;
                             }

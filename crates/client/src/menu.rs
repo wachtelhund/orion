@@ -859,24 +859,14 @@ impl App {
             self.mp_error = Some("type the lobby code first".into());
             return;
         }
-        // Native: the relay's seat frame decides duel vs 2v2 room.
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.join_waiting = Some(crate::relay::join_auto_async(
-                self.settings.relay_url.clone(),
-                code,
-                self.chosen_race,
-                self.settings.player_name.clone(),
-            ));
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            self.mp_waiting = Some(crate::relay::join_relay_async(
-                self.settings.relay_url.clone(),
-                code,
-                self.chosen_race,
-            ));
-        }
+        // The relay's seat frame decides duel vs 2v2 room — both native
+        // and browser joiners speak the room handshake.
+        self.join_waiting = Some(crate::relay::join_auto_async(
+            self.settings.relay_url.clone(),
+            code,
+            self.chosen_race,
+            self.settings.player_name.clone(),
+        ));
     }
 
     pub(crate) fn menu_click(&mut self) {

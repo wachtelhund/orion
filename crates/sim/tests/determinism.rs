@@ -425,7 +425,7 @@ fn replay_reproduces_checksum() {
     }
     let live = s.checksum();
 
-    let replay = Replay::from_state(&s, "meridian", vec!["A".into(), "B".into()]);
+    let replay = Replay::from_state(&s, "meridian", None, vec!["A".into(), "B".into()]);
     let ron = replay.to_ron();
     let parsed = Replay::from_ron(&ron).expect("replay round-trips through RON");
     let replayed = parsed.resimulate(GameData::load_default()).expect("known map");

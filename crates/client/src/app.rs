@@ -135,7 +135,6 @@ pub struct App {
     pub room_waiting:
         Option<std::sync::mpsc::Receiver<std::io::Result<orion_sim::net::RoomStarted>>>,
     /// Pending auto-detected join (duel or room).
-    #[cfg(not(target_arch = "wasm32"))]
     pub join_waiting:
         Option<std::sync::mpsc::Receiver<std::io::Result<orion_sim::net::Joined>>>,
     /// Signals the waiting room host thread to start with bot fill.
@@ -387,7 +386,6 @@ impl App {
             tutorial: None,
             #[cfg(not(target_arch = "wasm32"))]
             room_waiting: None,
-            #[cfg(not(target_arch = "wasm32"))]
             join_waiting: None,
             #[cfg(not(target_arch = "wasm32"))]
             room_start_tx: None,
@@ -669,11 +667,12 @@ impl App {
         if self.mp_waiting.is_some() {
             return true;
         }
+        if self.join_waiting.is_some() {
+            return true;
+        }
         #[cfg(not(target_arch = "wasm32"))]
-        {
-            if self.room_waiting.is_some() || self.join_waiting.is_some() {
-                return true;
-            }
+        if self.room_waiting.is_some() {
+            return true;
         }
         false
     }
@@ -934,7 +933,6 @@ impl App {
     }
 
     /// Start a 4-seat room match from a completed room handshake.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn start_room_game(&mut self, rs: orion_sim::net::RoomStarted) {
         crate::weblog(&format!(
             "orion: start_room_game seat={} of {} delay={}",
@@ -3571,7 +3569,6 @@ impl App {
         self.poll_lobbies();
 
         // Pending auto-join resolved?
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(rx) = &self.join_waiting {
             match rx.try_recv() {
                 Ok(Ok(orion_sim::net::Joined::Duel(started))) => {
