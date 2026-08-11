@@ -34,6 +34,7 @@ mod relay;
 #[path = "relay_wasm.rs"]
 mod relay;
 mod replays;
+mod campaign;
 mod tutorial;
 
 use std::sync::Arc;
@@ -59,6 +60,7 @@ struct Shell {
     shot_reveal: bool,
     menu_shot: Option<(String, String)>,
     mp_auto: Option<String>,
+    mission_auto: Option<(usize, u32)>,
     record: Option<(String, u32, u32, u32)>,
     record_follow: bool,
     shot_cross: bool,
@@ -84,7 +86,8 @@ impl ApplicationHandler for Shell {
         // Quiet QA windows stay small — unless this run captures a frame
         // for visual review, which wants real-game proportions.
         let obs_shot = std::env::var("ORION_OBS_SHOT").is_ok();
-        let (win_w, win_h) = if self.mp_auto.is_some() && !obs_shot {
+        let quiet = self.mp_auto.is_some() || self.mission_auto.is_some();
+        let (win_w, win_h) = if quiet && !obs_shot {
             (480.0, 300.0)
         } else {
             (1440.0, 900.0)
@@ -93,7 +96,11 @@ impl ApplicationHandler for Shell {
             event_loop
                 .create_window(
                     Window::default_attributes()
-                        .with_title(if self.mp_auto.is_some() { "Orion MP test" } else { "Orion" })
+                        .with_title(if self.mp_auto.is_some() || self.mission_auto.is_some() {
+                            "Orion QA"
+                        } else {
+                            "Orion"
+                        })
                         .with_inner_size(LogicalSize::new(win_w, win_h)),
                 )
                 .expect("create window"),
@@ -287,6 +294,7 @@ impl Shell {
         }
         app.shot_reveal = self.shot_reveal;
         app.menu_shot = self.menu_shot.clone();
+        app.mission_auto = self.mission_auto;
         app.record = self.record.clone();
         app.shot_cross = self.shot_cross;
         if app.record.is_some() {
@@ -386,6 +394,23 @@ fn main() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let args: Vec<String> = std::env::args().collect();
     let smoke = args.iter().any(|a| a == "--smoke");
+    // --mission-auto K [--mission-ticks N]: play campaign mission K with a
+    // Hard bot in the player seat, print the outcome, exit. Headless QA for
+    // scripted missions.
+    let mission_auto = args
+        .iter()
+        .position(|a| a == "--mission-auto")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|k| k.parse::<usize>().ok())
+        .map(|k| {
+            let ticks = args
+                .iter()
+                .position(|a| a == "--mission-ticks")
+                .and_then(|i| args.get(i + 1))
+                .and_then(|t| t.parse::<u32>().ok())
+                .unwrap_or(24 * 60 * 12);
+            (k, ticks)
+        });
     // --shot out.ppm [--shot-ticks N]: bot-vs-bot fast-forward, capture one
     // frame, exit. Visual verification without a human at the screen.
     let shot = args
@@ -496,6 +521,7 @@ fn main() {
         shot_reveal,
         menu_shot,
         mp_auto,
+        mission_auto,
         record,
         record_follow,
         shot_cross,

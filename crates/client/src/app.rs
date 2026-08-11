@@ -130,6 +130,10 @@ pub struct App {
     pub stage_mode: bool,
     /// Guided first game (objectives over a botless SP state).
     pub tutorial: Option<crate::tutorial::Tutorial>,
+    /// Live campaign mission (scripted SP with local bots + waves).
+    pub campaign: Option<crate::campaign::CampaignRun>,
+    /// Bot-driven seats in the current mission.
+    pub campaign_bots: Vec<(u8, Bot)>,
     /// Pending 4-seat room handshake (native relay only for now).
     #[cfg(not(target_arch = "wasm32"))]
     pub room_waiting:
@@ -161,6 +165,9 @@ pub struct App {
     /// Automated MP smoke: "host" or "join" — connects on localhost, plays
     /// ~10s of lockstep, exits 0.
     pub mp_auto: Option<String>,
+    /// Headless mission QA: (mission, ticks) — Hard bot in the player
+    /// seat, prints the outcome, exits.
+    pub mission_auto: Option<(usize, u32)>,
     pub shot_reveal: bool,
     /// Render a menu page once, capture, exit: "main" | "settings" | "esc".
     pub menu_shot: Option<(String, String)>,
@@ -394,6 +401,8 @@ impl App {
             shot_bot0: shot.is_some().then(|| Bot::new(0)),
             stage_mode: false,
             tutorial: None,
+            campaign: None,
+            campaign_bots: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
             room_waiting: None,
             join_waiting: None,
@@ -412,6 +421,7 @@ impl App {
             shot_zoom: None,
             script: None,
             mp_auto: None,
+            mission_auto: None,
             shot_reveal: false,
             menu_shot: None,
             record: None,
@@ -709,7 +719,7 @@ impl App {
     /// Do AI opponents act this frame? Stage captures and the tutorial
     /// run botless.
     fn bots_active(&self) -> bool {
-        !self.stage_mode && self.tutorial.is_none()
+        !self.stage_mode && self.tutorial.is_none() && self.campaign.is_none()
     }
 
     pub fn smoke_expired(&self) -> bool {
@@ -724,6 +734,8 @@ impl App {
 
     pub fn start_game(&mut self, difficulty: Difficulty) {
         self.tutorial = None;
+        self.campaign = None;
+        self.campaign_bots.clear();
         self.mp = None;
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -780,6 +792,184 @@ impl App {
     /// Guided first game: Vanguard on meridian, no bot, a small Kyth
     /// outpost mid-map as the final objective. Objectives live in
     /// `tutorial.rs`; the sim runs completely normally.
+    /// Launch a campaign mission: scripted SP with local bots.
+    pub fn start_mission(&mut self, k: usize) {
+        use crate::campaign::MISSIONS;
+        if k >= MISSIONS.len() {
+            return;
+        }
+        let m = &MISSIONS[k];
+        self.tutorial = None;
+        self.campaign = None;
+        self.campaign_bots.clear();
+        self.mp = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.observer = None;
+        }
+        self.mp_waiting = None;
+        self.replay = None;
+        self.record_replay = false; // scripted events aren't commands
+        self.human = 0;
+        self.game_map = m.map.into();
+        self.game_map_ron = None;
+        let seed = orion_sim::net::fresh_seed();
+        let mut state = State::new_with_races(
+            GameData::load_default(),
+            crate::app::map_or_meridian(m.map),
+            seed,
+            m.races,
+        );
+        for (p, team) in m.teams.iter().enumerate() {
+            state.players[p].team = *team;
+        }
+        self.state = state;
+        self.campaign_bots = m
+            .bots
+            .iter()
+            .map(|(seat, d)| (*seat, Bot::with_style(*seat, *d, seed ^ *seat as u64)))
+            .collect();
+        self.bot = Bot::with_style(1, Difficulty::Easy, 0); // parked, never thinks
+        self.mission_setup(k);
+        self.campaign = Some(crate::campaign::CampaignRun::new(k));
+        self.pending.clear();
+        self.selection.clear();
+        self.groups = Default::default();
+        self.mode = Mode::Normal;
+        self.effects.clear();
+        self.facings.clear();
+        self.headings.clear();
+        self.subgroup_offset = 0;
+        self.acc = 0.0;
+        self.in_game = true;
+        self.page = MenuPage::None;
+        let start = self.state.map.starts[0];
+        let (cx, cy) = iso::world_to_iso(start.x as f32 + 0.5, start.y as f32 + 0.5);
+        self.cam.cx = cx;
+        self.cam.cy = cy;
+        self.clamp_camera();
+        self.arm_countdown();
+    }
+
+    /// Per-mission state surgery after the standard spawn.
+    fn mission_setup(&mut self, k: usize) {
+        let s = &mut self.state;
+        match k {
+            0 => {
+                // Broken Dawn: clear the Kyth start, raise a static warren
+                // camp mid-map (raids are scripted waves).
+                for i in 0..s.entities.len() {
+                    if s.entities[i].alive && s.entities[i].owner == 1 {
+                        s.kill(i as u32);
+                    }
+                }
+                let warren = s.data.building_tag("warren");
+                let spire = s.data.building_tag("spire");
+                let skitter = s.data.unit_tag("skitter");
+                let (cx, cy) = (s.map.width / 2, s.map.height / 2);
+                let mut spot = |dx: i32, dy: i32| TilePos::new(cx + dx, cy + dy);
+                s.spawn_building(1, warren, spot(-2, -2), false);
+                s.spawn_building(1, spire, spot(2, -1), false);
+                s.spawn_building(1, spire, spot(-1, 2), false);
+                for d in 0..4 {
+                    s.spawn_unit(1, skitter, FxVec2::from_int(cx - 4 + d * 2, cy + 4));
+                }
+            }
+            1 => {
+                // Hold the Line: the Ferron bot starts rich and angry.
+                s.players[1].minerals += 700;
+                s.players[1].gas += 200;
+            }
+            4 => {
+                // Meridian's End: Marshal Kade takes the field with you.
+                let marshal = s.data.unit_tag("marshal");
+                let start = s.map.starts[0];
+                s.spawn_unit(
+                    0,
+                    marshal,
+                    FxVec2::from_int(start.x + 3, start.y + 3),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    /// Campaign per-tick work before the sim step: bot seats think,
+    /// scripted waves land.
+    fn campaign_pre_tick(&mut self, cmds: &mut Vec<(u8, Command)>) {
+        for (_, bot) in &mut self.campaign_bots {
+            cmds.extend(bot.think(&self.state));
+        }
+        let Some(run) = &mut self.campaign else { return };
+        let waves = crate::campaign::waves(run.mission);
+        while run.waves_fired < waves.len() {
+            let w = &waves[run.waves_fired];
+            if self.state.tick < w.at_s * orion_sim::TICKS_PER_SEC {
+                break;
+            }
+            run.waves_fired += 1;
+            let (mw, mh) = (self.state.map.width as f32, self.state.map.height as f32);
+            let spawn = FxVec2::from_int(
+                (mw * w.from.0) as i32,
+                (mh * w.from.1) as i32,
+            );
+            let target = FxVec2::from_int((mw * w.to.0) as i32, (mh * w.to.1) as i32);
+            let mut spawned = Vec::new();
+            for &(tag, n) in w.units {
+                let def = self.state.data.unit_tag(tag);
+                for j in 0..n {
+                    let off = FxVec2::from_int((j % 4) as i32, (j / 4) as i32);
+                    spawned.push(self.state.spawn_unit(w.owner, def, spawn + off));
+                }
+            }
+            // Throw the raid at the target through the command channel so
+            // pathing fields come up exactly like a player order.
+            cmds.push((
+                w.owner,
+                Command::AttackMove { units: spawned, target, queued: false },
+            ));
+        }
+    }
+
+    /// Campaign per-tick work after the step: objectives, survive timer,
+    /// resolution + progress save.
+    fn campaign_post_tick(&mut self) {
+        let human = self.human;
+        let Some(run) = &mut self.campaign else { return };
+        // Objective progression (final objectives resolve via victory).
+        if !run.finished_objectives()
+            && run.step < run.def().objectives.len() - 1
+            && run.current_done(&self.state, human)
+        {
+            run.step += 1;
+            run.flash = 1.4;
+        }
+        // Survive missions: outlasting the clock IS the victory.
+        if let Some(secs) = run.def().survive_s {
+            if self.state.winner.is_none()
+                && self.state.tick >= secs * orion_sim::TICKS_PER_SEC
+            {
+                self.state.winner = Some(human);
+            }
+        }
+        if let Some(winner) = self.state.winner {
+            if !run.resolved {
+                run.resolved = true;
+                let my_team = self.state.players[human as usize].team;
+                let won = self
+                    .state
+                    .players
+                    .get(winner as usize)
+                    .map(|p| p.team == my_team)
+                    .unwrap_or(false);
+                if won && self.settings.campaign_done <= run.mission {
+                    self.settings.campaign_done = run.mission + 1;
+                    self.settings.save();
+                }
+            }
+        }
+    }
+
     pub fn start_tutorial(&mut self) {
         self.mp = None;
         #[cfg(not(target_arch = "wasm32"))]
@@ -914,6 +1104,8 @@ impl App {
 
     pub fn start_mp_game(&mut self, started: Started) {
         self.tutorial = None;
+        self.campaign = None;
+        self.campaign_bots.clear();
         self.room_bots.clear();
         crate::weblog(&format!(
             "orion: start_mp_game local={} delay={}",
@@ -960,6 +1152,8 @@ impl App {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn start_observe_game(&mut self, os: orion_sim::net::ObsStarted) {
         self.tutorial = None;
+        self.campaign = None;
+        self.campaign_bots.clear();
         self.mp_lobby_code = None;
         self.replay = None;
         self.record_replay = false;
@@ -1055,6 +1249,8 @@ impl App {
             rs.input_delay
         ));
         self.tutorial = None;
+        self.campaign = None;
+        self.campaign_bots.clear();
         self.mp_lobby_code = None;
         self.replay = None;
         self.record_replay = true; // replays carry teams since v0.25
@@ -2024,6 +2220,7 @@ impl App {
             }
             MenuPage::EscRoot => self.page = MenuPage::None,
             MenuPage::Difficulty
+            | MenuPage::Campaign
             | MenuPage::Multiplayer
             | MenuPage::Replays
             | MenuPage::UpdatePrompt => self.page = MenuPage::MainRoot,
@@ -3241,6 +3438,21 @@ impl App {
                         Some("REPLAY CODE: KRCAP - SHARE IT".into());
                     self.page = MenuPage::Replays;
                 }
+                "campaign" => {
+                    // Show it mid-arc: two missions cleared.
+                    self.settings.campaign_done = 2;
+                    self.page = MenuPage::Campaign;
+                }
+                "mission1" => {
+                    // Broken Dawn a few seconds in, panel over the base.
+                    self.start_mission(0);
+                    self.countdown = None;
+                    for _ in 0..24 * 8 {
+                        let mut cmds = Vec::new();
+                        self.campaign_pre_tick(&mut cmds);
+                        self.step_sim(cmds);
+                    }
+                }
                 "ladder" => {
                     // Blocking fetch so the capture shows real rows.
                     if let Ok(Some(rows)) = crate::relay::fetch_ladder_async(
@@ -3560,6 +3772,51 @@ impl App {
         let fdt = (now - self.frame_t).as_secs_f32().max(1e-4);
         self.frame_t = now;
         self.fps = self.fps * 0.95 + (1.0 / fdt) * 0.05;
+
+        // Headless campaign-mission QA driver.
+        if let Some((k, ticks)) = self.mission_auto {
+            if self.campaign.is_none() && !self.finished {
+                self.start_mission(k);
+                self.countdown = None;
+                // A Hard bot stands in for the human seat.
+                self.shot_bot0 = Some(Bot::with_style(0, Difficulty::Hard, 0xCA47));
+                if self.campaign.is_none() {
+                    println!("mission-auto {k}: failed to start");
+                    self.finished = true;
+                    return;
+                }
+            }
+            let chunk = 240u32;
+            for _ in 0..chunk {
+                if self.state.tick >= ticks || self.state.winner.is_some() {
+                    break;
+                }
+                let mut cmds = Vec::new();
+                if let Some(b0) = self.shot_bot0.as_mut() {
+                    cmds.extend(b0.think(&self.state));
+                }
+                self.campaign_pre_tick(&mut cmds);
+                self.step_sim(cmds);
+                self.campaign_post_tick();
+            }
+            if self.state.tick >= ticks || self.state.winner.is_some() {
+                let (step, waves) = self
+                    .campaign
+                    .as_ref()
+                    .map(|r| (r.step, r.waves_fired))
+                    .unwrap_or((0, 0));
+                println!(
+                    "mission-auto {k}: tick {} step {} waves {} winner {:?} campaign_done {}",
+                    self.state.tick,
+                    step,
+                    waves,
+                    self.state.winner,
+                    self.settings.campaign_done
+                );
+                self.finished = true;
+            }
+            return;
+        }
 
         // Automated MP smoke driver.
         if let Some(role) = self.mp_auto.clone() {
@@ -3938,6 +4195,9 @@ impl App {
         let playing = self.in_game && self.page == MenuPage::None;
         if playing {
             self.tick_tutorial(dt as f32);
+            if let Some(run) = &mut self.campaign {
+                run.flash = (run.flash - dt as f32).max(0.0);
+            }
         }
 
         if playing {
@@ -3950,9 +4210,15 @@ impl App {
                 while self.acc >= TICK_DT {
                     let mut cmds = std::mem::take(&mut self.pending);
                     if self.bots_active() {
-                    cmds.extend(self.bot.think(&self.state));
-                }
+                        cmds.extend(self.bot.think(&self.state));
+                    }
+                    if self.campaign.is_some() {
+                        self.campaign_pre_tick(&mut cmds);
+                    }
                     self.step_sim(cmds);
+                    if self.campaign.is_some() {
+                        self.campaign_post_tick();
+                    }
                     self.acc -= TICK_DT;
                 }
             }

@@ -363,6 +363,75 @@ impl App {
         self.draw_banner(out);
         self.draw_countdown(out);
         self.draw_tutorial(out);
+        self.draw_mission(out);
+    }
+
+    /// Campaign objective panel — the tutorial panel's shape with a
+    /// mission header and a live survive-timer substitution.
+    fn draw_mission(&self, out: &mut Vec<Inst>) {
+        let Some(run) = &self.campaign else { return };
+        let ui = self.ui();
+        let w = self.cam.screen_w;
+        let m = run.def();
+        if self.state.winner.is_some() {
+            return; // the victory/defeat overlay takes it from here
+        }
+        let step = run.step.min(m.objectives.len() - 1);
+        let (title, hint) = m.objectives[step];
+        let hint_owned;
+        let hint: &str = if hint.contains("{TIME}") {
+            let total = m.survive_s.unwrap_or(0) * orion_sim::TICKS_PER_SEC;
+            let left = total.saturating_sub(self.state.tick) / orion_sim::TICKS_PER_SEC;
+            hint_owned = hint.replace(
+                "{TIME}",
+                &format!("{}:{:02}", left / 60, left % 60),
+            );
+            &hint_owned
+        } else {
+            hint
+        };
+        let counter = format!(
+            "MISSION {}  {}  -  OBJECTIVE {}/{}",
+            run.mission + 1,
+            m.title,
+            step + 1,
+            m.objectives.len()
+        );
+        let ts_c = self.ts(1.3);
+        let ts_t = self.ts(1.9);
+        let ts_h = self.ts(1.3);
+        let tw = self.gfx.text_width(ts_t, title);
+        let hw = self.gfx.text_width(ts_h, hint);
+        let cw = self.gfx.text_width(ts_c, &counter);
+        let pw = tw.max(hw).max(cw) + 44.0 * ui;
+        let ph = 74.0 * ui;
+        let px = (w - pw) * 0.5;
+        let py = 14.0 * ui;
+        self.gfx.quad(out, px, py, pw, ph, [0.04, 0.05, 0.09, 0.88]);
+        self.gold_frame(out, px, py, pw, ph);
+        let gold = [0.95, 0.78, 0.25, 1.0];
+        let white = [0.92, 0.92, 0.88, 1.0];
+        let dim = [0.66, 0.7, 0.76, 1.0];
+        self.gfx
+            .text(out, px + (pw - cw) * 0.5, py + 8.0 * ui, ts_c, gold, &counter);
+        self.gfx
+            .text(out, px + (pw - tw) * 0.5, py + 26.0 * ui, ts_t, white, title);
+        self.gfx
+            .text(out, px + (pw - hw) * 0.5, py + 52.0 * ui, ts_h, dim, hint);
+        if run.flash > 0.0 && run.step > 0 {
+            let a = (run.flash / 1.4).min(1.0);
+            let msg = "OBJECTIVE COMPLETE";
+            let ts_f = self.ts(1.6);
+            let fw = self.gfx.text_width(ts_f, msg);
+            self.gfx.text(
+                out,
+                px + (pw - fw) * 0.5,
+                py + ph + 8.0 * ui,
+                ts_f,
+                [0.5, 1.0, 0.6, a],
+                msg,
+            );
+        }
     }
 
     /// Guided-game objective panel: top center, one objective + hint.

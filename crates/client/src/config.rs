@@ -247,6 +247,9 @@ pub struct Settings {
     /// generated on first launch). The MMR on the relay is keyed by this.
     #[serde(default = "fresh_player_id")]
     pub player_id: String,
+    /// Highest campaign mission completed (0 = none yet).
+    #[serde(default)]
+    pub campaign_done: usize,
     /// action name -> key name; missing entries use defaults.
     pub binds: BTreeMap<String, String>,
 }
@@ -281,6 +284,7 @@ impl Default for Settings {
             relay_url: default_relay(),
             player_name: default_name(),
             player_id: fresh_player_id(),
+            campaign_done: 0,
             binds: BTreeMap::new(),
         }
     }

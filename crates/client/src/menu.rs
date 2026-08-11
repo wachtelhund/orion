@@ -12,6 +12,7 @@ use crate::gfx::Inst;
 pub enum MenuPage {
     None,
     MainRoot,
+    Campaign,
     Difficulty,
     Multiplayer,
     Ladder,
@@ -24,6 +25,8 @@ pub enum MenuPage {
 #[derive(Clone, Copy)]
 enum MenuAction {
     OpenDifficulty,
+    OpenCampaign,
+    StartMission(usize),
     StartGame(Difficulty),
     OpenMultiplayer,
     OpenSettings,
@@ -113,6 +116,7 @@ impl App {
                 stack(
                     vec![
                         ("TUTORIAL".into(), MenuAction::StartTutorial),
+                        ("CAMPAIGN".into(), MenuAction::OpenCampaign),
                         ("PLAY VS AI".into(), MenuAction::OpenDifficulty),
                         (
                             if self.mp_blocked {
@@ -131,6 +135,24 @@ impl App {
                     ],
                     h * 0.40,
                 );
+            }
+            MenuPage::Campaign => {
+                let done = self.settings.campaign_done;
+                let mut rows: Vec<(String, MenuAction)> = Vec::new();
+                for (k, m) in crate::campaign::MISSIONS.iter().enumerate() {
+                    let row = if k <= done {
+                        let mark = if k < done { "  [CLEARED]" } else { "" };
+                        (
+                            format!("{}. {}{}", k + 1, m.title, mark),
+                            MenuAction::StartMission(k),
+                        )
+                    } else {
+                        (format!("{}. [LOCKED]", k + 1), MenuAction::Noop)
+                    };
+                    rows.push(row);
+                }
+                rows.push(("BACK".into(), MenuAction::Back));
+                stack(rows, h * 0.32);
             }
             MenuPage::Difficulty => {
                 let races = &self.state.data.race_names;
@@ -892,6 +914,8 @@ impl App {
         };
         match action {
             MenuAction::OpenDifficulty => self.page = MenuPage::Difficulty,
+            MenuAction::OpenCampaign => self.page = MenuPage::Campaign,
+            MenuAction::StartMission(k) => self.start_mission(k),
             MenuAction::StartGame(d) => self.start_game(d),
             MenuAction::OpenMultiplayer => {
                 if self.mp_blocked {
@@ -939,6 +963,8 @@ impl App {
                 }
                 self.in_game = false;
                 self.tutorial = None;
+                self.campaign = None;
+                self.campaign_bots.clear();
                 self.mp = None; // closes the socket; peer sees a disconnect
                 #[cfg(not(target_arch = "wasm32"))]
                 {
