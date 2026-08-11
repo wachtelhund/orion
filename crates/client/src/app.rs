@@ -3076,7 +3076,19 @@ impl App {
                     self.rebuild_editor_preview();
                     self.page = MenuPage::None;
                 }
-                "mp" => self.page = MenuPage::Multiplayer,
+                "mp" => {
+                    // Blocking lobby fetch so open lobbies/rooms show as
+                    // real rows in the capture (same trick as "ladder").
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if let Ok(Some(list)) = crate::relay::fetch_lobbies_async(
+                        self.settings.relay_url.clone(),
+                    )
+                    .recv()
+                    {
+                        self.lobby_list = list;
+                    }
+                    self.page = MenuPage::Multiplayer;
+                }
                 "tutorial" => {
                     self.start_tutorial();
                 }
