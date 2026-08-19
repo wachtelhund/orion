@@ -2202,11 +2202,11 @@ fn paint_ravager(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
         kleg(&mut c, cx + off, cy + 8.0, cx + off + 14.0, cy + 24.0 + l, cx + off + 18.0, cy + 42.0 - l, 4.0);
     }
     // Massive tiered carapace with scalloped plate rows.
-    c.dome(cx - dx * 8.0, cy - 8.0, 40.0, 30.0, CHITIN);
+    c.dome(cx - dx * 8.0, cy - 8.0, 40.0, 30.0, [78, 42, 62]);
     scallop(&mut c, cx - dx * 8.0, cy - 4.0, 34.0, 40.0);
-    c.dome(cx - dx * 16.0, cy - 20.0, 26.0, 17.0, scale_rgb(CHITIN, 1.15));
+    c.dome(cx - dx * 16.0, cy - 20.0, 26.0, 17.0, scale_rgb([78, 42, 62], 1.15));
     scallop(&mut c, cx - dx * 16.0, cy - 16.0, 22.0, 28.0);
-    c.dome(cx - dx * 20.0, cy - 30.0, 15.0, 9.0, CHITIN_LIGHT);
+    c.dome(cx - dx * 20.0, cy - 30.0, 15.0, 9.0, [150, 92, 120]);
     // Team spine row on the crest.
     for k in 0..4 {
         let sx = cx - 22.0 + k as f32 * 12.0;
@@ -2222,7 +2222,7 @@ fn paint_ravager(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
             (px + dx * 24.0 + 2.0, py + dy * 14.0 - 4.0),
             (px + dx * 28.0, py + dy * 17.0 + 4.0),
             (px + dx * 12.0, py + dy * 9.0 + 8.0),
-        ], rgba(CHITIN_LIGHT));
+        ], rgba([150, 92, 120]));
         c.line(px + dx * 6.0, py + dy * 3.0, px + dx * 26.0, py + dy * 15.0, 2.0, rgba(team));
         // Serration teeth on the inner edge.
         for t in 0..3 {
@@ -2231,7 +2231,7 @@ fn paint_ravager(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
                 (px + dx * 28.0 * f2 - 2.0, py + dy * 17.0 * f2 + 6.0),
                 (px + dx * 28.0 * f2 + 2.0, py + dy * 17.0 * f2 + 6.0),
                 (px + dx * 28.0 * f2, py + dy * 17.0 * f2 + 11.0),
-            ], rgba(CHITIN_LIGHT));
+            ], rgba([150, 92, 120]));
         }
     }
     // Glowing eye cluster + underglow.
@@ -3114,23 +3114,23 @@ fn fer_leg(c: &mut Canvas, hip_x: f32, hip_y: f32, knee_x: f32, knee_y: f32, foo
     let (dx, dy) = (knee_x - hip_x, knee_y - hip_y);
     let len = (dx * dx + dy * dy).sqrt().max(0.01);
     let (px, py) = (-dy / len * t, dx / len * t);
-    c.poly(&[
+    c.poly_shaded(&[
         (hip_x - px, hip_y - py),
         (hip_x + px, hip_y + py),
         (knee_x + px * 0.7, knee_y + py * 0.7),
         (knee_x - px * 0.7, knee_y - py * 0.7),
-    ], rgba(RUST));
+    ], RUST, 1.0);
     c.line(hip_x - px * 0.4, hip_y - py * 0.4, knee_x - px * 0.3, knee_y - py * 0.3, 1.6, rgba(RUST_LIT));
     // Shin: darker plate knee->foot.
     let (dx2, dy2) = (foot_x - knee_x, foot_y - knee_y);
     let len2 = (dx2 * dx2 + dy2 * dy2).sqrt().max(0.01);
     let (qx, qy) = (-dy2 / len2 * t * 0.75, dx2 / len2 * t * 0.75);
-    c.poly(&[
+    c.poly_shaded(&[
         (knee_x - qx, knee_y - qy),
         (knee_x + qx, knee_y + qy),
         (foot_x + qx * 0.8, foot_y + qy * 0.8),
         (foot_x - qx * 0.8, foot_y - qy * 0.8),
-    ], rgba([88, 66, 50]));
+    ], [88, 66, 50], 1.0);
     c.line(knee_x - qx * 0.5, knee_y - qy * 0.5, foot_x - qx * 0.4, foot_y - qy * 0.4, 1.4, rgba(RUST_LIT));
     // Piston shine + knee cap.
     c.line(knee_x, knee_y, foot_x * 0.6 + knee_x * 0.4, foot_y * 0.6 + knee_y * 0.4, 1.4, rgba(STEEL_LIT));
