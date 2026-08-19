@@ -8,6 +8,11 @@ use crate::app::{App, GAS_COLOR, MINERAL_COLOR, TEAM_COLORS};
 use crate::config::{Action, ALL_ACTIONS};
 use crate::gfx::Inst;
 
+/// Keybind grid row geometry, shared between button layout (menu_buttons)
+/// and the action-label draw pass (draw_menu) so they never drift apart.
+const KEYBIND_ROW_H: f32 = 25.0;
+const KEYBIND_ROW_GAP: f32 = 5.0;
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum MenuPage {
     None,
@@ -467,17 +472,18 @@ impl App {
                     }
                     back_y = row_y + 4.0 * (sbh + sgap) + 18.0 * ui;
                 } else {
-                    // Keybind grid: 2 columns.
+                    // Keybind grid: 2 columns. Row geometry is shared with the
+                    // label draw pass in draw_menu — keep both in sync.
                     let ky0 = c0 + 30.0 * ui;
-                    let kbh = 22.0 * ui;
+                    let kbh = KEYBIND_ROW_H * ui;
                     let col_w = 330.0 * ui;
                     for (k, a) in ALL_ACTIONS.iter().enumerate() {
                         let col = k % 2;
                         let row = k / 2;
                         out.push(MBtn {
-                            x: cx - col_w + col as f32 * col_w + col_w - 90.0 * ui,
-                            y: ky0 + row as f32 * (kbh + 4.0 * ui),
-                            w: 84.0 * ui,
+                            x: cx - col_w + col as f32 * col_w + col_w - 92.0 * ui,
+                            y: ky0 + row as f32 * (kbh + KEYBIND_ROW_GAP * ui),
+                            w: 88.0 * ui,
                             h: kbh,
                             label: if self.rebinding == Some(*a) {
                                 "???".into()
@@ -489,7 +495,7 @@ impl App {
                         });
                     }
                     let n_rows = (ALL_ACTIONS.len() as f32 / 2.0).ceil();
-                    back_y = ky0 + n_rows * (kbh + 4.0 * ui) + 18.0 * ui;
+                    back_y = ky0 + n_rows * (kbh + KEYBIND_ROW_GAP * ui) + 18.0 * ui;
                 }
                 out.push(MBtn {
                     x: cx - bw * 0.5,
@@ -666,6 +672,12 @@ impl App {
             let sgap = 6.0 * ui;
             let y0 = h * 0.175;
             let c0 = y0 + sbh + 18.0 * ui;
+            // Persistent gold underline marks the active tab — the bracket
+            // text alone reads weakly next to the hover highlight.
+            let tab_w = 150.0 * ui;
+            let ax = cx - tab_w - 6.0 * ui + self.settings_tab as f32 * (tab_w + 12.0 * ui);
+            self.gfx
+                .quad(out, ax + 8.0 * ui, y0 + sbh - 3.0 * ui, tab_w - 16.0 * ui, 3.0 * ui, gold);
             if self.settings_tab == 0 {
                 let row_y = c0 + 2.0 * (sbh + sgap);
                 let ts = self.ts(1.5);
@@ -680,14 +692,24 @@ impl App {
             } else {
                 let ky0 = c0 + 30.0 * ui;
                 self.gfx.text(out, cx - 330.0 * ui, ky0 - 20.0 * ui, self.ts(1.4), gold, "KEYBINDS (CLICK, THEN PRESS A KEY)");
-                let kbh = 22.0 * ui;
+                let kbh = KEYBIND_ROW_H * ui;
                 let col_w = 330.0 * ui;
+                let ts_l = self.ts(1.3);
+                let label_col = [0.86, 0.89, 0.93, 1.0];
                 for (k, a) in ALL_ACTIONS.iter().enumerate() {
                     let col = k % 2;
                     let row = k / 2;
                     let x = cx - col_w + col as f32 * col_w;
-                    let y = ky0 + row as f32 * (kbh + 4.0 * ui);
-                    self.gfx.text(out, x, y + 5.0 * ui, self.ts(1.1), dim, a.label());
+                    let y = ky0 + row as f32 * (kbh + KEYBIND_ROW_GAP * ui);
+                    // Vertically center the label against its keycap button.
+                    let ty = y + kbh * 0.5 - ts_l * 3.5;
+                    let armed = self.rebinding == Some(*a);
+                    if armed {
+                        // Highlight the row that is waiting for a key press.
+                        self.gfx.quad(out, x - 6.0 * ui, y, 244.0 * ui, kbh, [0.20, 0.17, 0.05, 0.85]);
+                    }
+                    let col_c = if armed { gold } else { label_col };
+                    self.gfx.text(out, x, ty, ts_l, col_c, a.label());
                 }
             }
         }

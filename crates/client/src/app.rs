@@ -5761,8 +5761,20 @@ impl App {
 
     pub(crate) fn bar(&self, out: &mut Vec<Inst>, cx: f32, cy: f32, w: f32, frac: f32, color: [f32; 4]) {
         let frac = frac.clamp(0.0, 1.0);
-        self.gfx.quad(out, cx - w * 0.5 - 1.0, cy - 3.0, w + 2.0, 5.0, [0.05, 0.05, 0.05, 0.85]);
-        self.gfx.quad(out, cx - w * 0.5, cy - 2.0, w * frac, 3.0, color);
+        let x0 = cx - w * 0.5;
+        let fw = w * frac;
+        // Slightly taller track + a bright top edge on the fill so bars read
+        // as more than a sliver against dark terrain at gameplay zoom.
+        self.gfx.quad(out, x0 - 1.0, cy - 3.5, w + 2.0, 6.0, [0.04, 0.04, 0.05, 0.9]);
+        self.gfx.quad(out, x0, cy - 2.5, fw, 4.0, color);
+        self.gfx.quad(
+            out,
+            x0,
+            cy - 2.5,
+            fw,
+            1.0,
+            [(color[0] + 0.28).min(1.0), (color[1] + 0.28).min(1.0), (color[2] + 0.28).min(1.0), color[3]],
+        );
     }
 
     fn draw_placement_ghost(&self, out: &mut Vec<Inst>) {
