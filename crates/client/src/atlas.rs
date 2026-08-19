@@ -1187,8 +1187,11 @@ fn diamond_canvas(w: i32, h: i32, c: Color, outline_only: bool) -> Canvas {
 // macro value-noise patches, hairline cracks, sparse debris and rust —
 // never from bright or busy texture.
 
-const GROUND_LOW: [[u8; 3]; 3] = [[57, 51, 45], [48, 43, 38], [65, 58, 51]];
-const GROUND_HIGH: [[u8; 3]; 3] = [[84, 81, 75], [73, 70, 65], [94, 91, 84]];
+// AoE2-inspired warm palette on an alien world: low ground is warm ochre
+// regolith, high ground is sun-bleached sandstone. Kept earthy (not neon)
+// so the sci-fi blue crystals/pylons still pop as the cool accent.
+const GROUND_LOW: [[u8; 3]; 3] = [[123, 96, 62], [106, 81, 52], [140, 112, 76]];
+const GROUND_HIGH: [[u8; 3]; 3] = [[164, 138, 100], [146, 121, 86], [182, 158, 118]];
 
 /// Ashen wasteland diamond at 4x. Variants differ by salt; some carry
 /// cracks, scorch rings, debris or rust flecks. `high` adds slab seams.
@@ -1308,7 +1311,7 @@ fn scale_rgb(c: [u8; 3], f: f32) -> [u8; 3] {
 fn ramp_tile(salt: u32) -> Canvas {
     let (w, hh) = (128, 64);
     let mut c = Canvas::new(w, hh);
-    let base = [78, 73, 64];
+    let base = [132, 106, 72];
     for y in 0..hh {
         for x in 0..w {
             let dx = (x as f32 + 0.5 - 64.0) / 64.0;
@@ -1353,10 +1356,11 @@ fn rock_tile(salt: u32) -> Canvas {
             }
             let h = hash2(x, y, salt + 80);
             let macro_f = 0.88 + vnoise(x as f32, y as f32, 18.0, salt ^ 91) * 0.24;
+            // Warm ironstone rubble instead of cold basalt.
             let t = match h % 16 {
-                0..=7 => [50, 47, 50],
-                8..=12 => [42, 40, 43],
-                _ => [60, 56, 60],
+                0..=7 => [86, 62, 50],
+                8..=12 => [70, 50, 41],
+                _ => [102, 76, 60],
             };
             c.set(x, y, rgba(scale_rgb(t, macro_f)));
         }
@@ -1376,10 +1380,10 @@ fn rock_tile(salt: u32) -> Canvas {
                     (px + r, py + r * 0.35),
                     (px, py + r * 0.6),
                 ],
-                rgba([66, 62, 66]),
+                rgba([112, 84, 66]),
             );
-            c.line(px - r * 0.4, py - r * 0.55, px + r * 0.6, py - r * 0.4, 1.2, rgba([88, 84, 88]));
-            c.line(px - r * 0.4, py - r * 0.5, px - r * 0.2, py + r * 0.5, 1.0, rgba([44, 41, 44]));
+            c.line(px - r * 0.4, py - r * 0.55, px + r * 0.6, py - r * 0.4, 1.2, rgba([146, 116, 92]));
+            c.line(px - r * 0.4, py - r * 0.5, px - r * 0.2, py + r * 0.5, 1.0, rgba([64, 46, 38]));
         }
     }
     c
@@ -1404,7 +1408,8 @@ fn cliff_face(left: bool) -> Canvas {
         for wy in 0..CLIFF_H {
             let y = edge_y as i32 + wy;
             let h = hash2(x, wy, if left { 7 } else { 8 });
-            let base: [u8; 3] = if left { [58, 52, 46] } else { [74, 66, 57] };
+            // Warm ironstone cliff strata (sunlit right face brighter).
+            let base: [u8; 3] = if left { [96, 72, 52] } else { [124, 96, 66] };
             // Strata bands displaced by noise so they undulate.
             let warp = (vnoise(x as f32, 0.0, 20.0, 313) * 8.0) as i32;
             let strata = ((wy + warp) / 8) % 2 == 0;
@@ -1486,9 +1491,11 @@ fn facing_vec(f: usize) -> (f32, f32) {
     (a.cos(), a.sin())
 }
 
-const GUNMETAL: [u8; 3] = [64, 70, 80];
-const GUNMETAL_DARK: [u8; 3] = [42, 46, 54];
-const STEEL_LIT: [u8; 3] = [126, 134, 148];
+// Warm gunmetal so Vanguard troops read as sun-warmed steel against the
+// ochre world (the cyan VISOR stays as the cool sci-fi accent).
+const GUNMETAL: [u8; 3] = [80, 72, 62];
+const GUNMETAL_DARK: [u8; 3] = [50, 44, 38];
+const STEEL_LIT: [u8; 3] = [152, 136, 110];
 const AMBER: [u8; 3] = [255, 186, 84];
 const VISOR: [u8; 3] = [120, 235, 255];
 const OUTLINE: Color = [10, 11, 15, 255];
@@ -2703,18 +2710,24 @@ fn hazard(c: &mut Canvas, x0: f32, y0: f32, n: i32) {
 
 /// Industrial pipe with a top highlight and end flanges.
 fn pipe(c: &mut Canvas, x0: f32, y0: f32, x1: f32, y1: f32, t: f32) {
-    c.line(x0, y0, x1, y1, t, rgba([58, 61, 70]));
-    c.line(x0, y0 - t * 0.25, x1, y1 - t * 0.25, t * 0.3, rgba([104, 110, 122]));
-    c.rect((x0 - 2.0) as i32, (y0 - t * 0.6) as i32, 4, (t * 1.2) as i32, rgba([76, 80, 92]));
-    c.rect((x1 - 2.0) as i32, (y1 - t * 0.6) as i32, 4, (t * 1.2) as i32, rgba([76, 80, 92]));
+    c.line(x0, y0, x1, y1, t, rgba([66, 58, 50]));
+    c.line(x0, y0 - t * 0.25, x1, y1 - t * 0.25, t * 0.3, rgba([130, 116, 96]));
+    c.rect((x0 - 2.0) as i32, (y0 - t * 0.6) as i32, 4, (t * 1.2) as i32, rgba([94, 84, 70]));
+    c.rect((x1 - 2.0) as i32, (y1 - t * 0.6) as i32, 4, (t * 1.2) as i32, rgba([94, 84, 70]));
 }
+
+// Warm AoE2-style masonry for Vanguard structures: sun-warmed stone-metal
+// walls on a tan-concrete foundation. Windows stay amber and the team trim
+// stays blue, so the buildings read warm but keep their sci-fi identity.
+const VAN_FOUND: [u8; 3] = [106, 94, 76];
+const VAN_HULL: [u8; 3] = [128, 112, 90];
 
 /// Headquarters: fortified command complex. 400x312.
 fn paint_hq(team: [u8; 3]) -> Canvas {
     let mut c = Canvas::new(400, 312);
     let cx = 200.0;
-    let concrete = [92, 90, 86];
-    let hull = [104, 102, 98];
+    let concrete = VAN_FOUND;
+    let hull = VAN_HULL;
     iso_box4(&mut c, cx, 216.0, 192.0, 24.0, concrete, None);
     hazard(&mut c, cx - 64.0, 244.0, 16);
     // Main hall.
@@ -2757,10 +2770,10 @@ fn paint_hq(team: [u8; 3]) -> Canvas {
 fn paint_pylon(team: [u8; 3]) -> Canvas {
     let mut c = Canvas::new(272, 248);
     let cx = 136.0;
-    iso_box4(&mut c, cx, 184.0, 120.0, 24.0, [88, 86, 82], None);
+    iso_box4(&mut c, cx, 184.0, 120.0, 24.0, VAN_FOUND, None);
     hazard(&mut c, cx - 40.0, 212.0, 10);
     // Anchor collar.
-    iso_box4(&mut c, cx, 172.0, 44.0, 20.0, [70, 73, 82], Some(team));
+    iso_box4(&mut c, cx, 172.0, 44.0, 20.0, [92, 80, 66], Some(team));
     // Cables to the plate corners.
     c.line(cx - 36.0, 182.0, cx - 92.0, 196.0, 2.0, rgba([48, 50, 58]));
     c.line(cx + 36.0, 182.0, cx + 92.0, 196.0, 2.0, rgba([48, 50, 58]));
@@ -2795,8 +2808,8 @@ fn paint_pylon(team: [u8; 3]) -> Canvas {
 fn paint_barracks(team: [u8; 3]) -> Canvas {
     let mut c = Canvas::new(400, 280);
     let cx = 200.0;
-    let hull = [100, 96, 90];
-    iso_box4(&mut c, cx, 200.0, 192.0, 24.0, [88, 87, 84], None);
+    let hull = VAN_HULL;
+    iso_box4(&mut c, cx, 200.0, 192.0, 24.0, VAN_FOUND, None);
     iso_box4(&mut c, cx, 136.0, 152.0, 72.0, hull, Some(team));
     windows4(&mut c, cx, 136.0, 152.0, 72.0, [255, 200, 110]);
     // Blast door on the lower-left wall: dark slab, glowing team seam,
@@ -2875,17 +2888,17 @@ fn paint_geyser() -> Canvas {
 fn paint_condenser(team: [u8; 3]) -> Canvas {
     let mut c = Canvas::new(272, 232);
     let cx = 136.0;
-    let hull = [96, 94, 88];
-    iso_box4(&mut c, cx, 168.0, 120.0, 24.0, [86, 85, 82], None);
+    let hull = VAN_HULL;
+    iso_box4(&mut c, cx, 168.0, 120.0, 24.0, VAN_FOUND, None);
     iso_box4(&mut c, cx, 128.0, 88.0, 48.0, hull, Some(team));
     windows4(&mut c, cx, 128.0, 88.0, 48.0, [255, 200, 110]);
-    // Condensation tank: steel dome with a glowing teal sight-glass.
-    c.dome(cx - 24.0, 88.0, 36.0, 26.0, [108, 112, 118]);
+    // Condensation tank: warm-steel dome with a glowing teal sight-glass.
+    c.dome(cx - 24.0, 88.0, 36.0, 26.0, [124, 114, 100]);
     c.ellipse(cx - 24.0, 76.0, 20.0, 12.0, rgba([64, 210, 200]));
     c.ellipse(cx - 30.0, 72.0, 8.0, 5.0, rgba([190, 255, 248]));
     c.glow(cx - 24.0, 76.0, 26.0, [64, 210, 200], 0.4);
     // Secondary tank.
-    c.dome(cx + 40.0, 96.0, 20.0, 14.0, [92, 96, 104]);
+    c.dome(cx + 40.0, 96.0, 20.0, 14.0, [110, 100, 88]);
     // Intake pipework down to the vent side.
     pipe(&mut c, cx + 32.0, 104.0, cx + 80.0, 136.0, 7.0);
     pipe(&mut c, cx + 56.0, 120.0, cx + 56.0, 148.0, 5.0);
@@ -2901,8 +2914,8 @@ fn paint_condenser(team: [u8; 3]) -> Canvas {
 fn paint_forge(team: [u8; 3]) -> Canvas {
     let mut c = Canvas::new(400, 296);
     let cx = 200.0;
-    let hull = [98, 92, 84];
-    iso_box4(&mut c, cx, 200.0, 192.0, 24.0, [86, 85, 82], None);
+    let hull = VAN_HULL;
+    iso_box4(&mut c, cx, 200.0, 192.0, 24.0, VAN_FOUND, None);
     iso_box4(&mut c, cx, 128.0, 152.0, 80.0, hull, Some(team));
     windows4(&mut c, cx, 128.0, 152.0, 80.0, [255, 190, 110]);
     // Furnace maw on the lower-left wall: layered heat glow.
@@ -2936,13 +2949,13 @@ fn paint_forge(team: [u8; 3]) -> Canvas {
 fn paint_aerie(team: [u8; 3]) -> Canvas {
     let mut c = Canvas::new(400, 280);
     let cx = 200.0;
-    iso_box4(&mut c, cx, 192.0, 192.0, 24.0, [86, 85, 82], None);
+    iso_box4(&mut c, cx, 192.0, 192.0, 24.0, VAN_FOUND, None);
     // Raised flight deck.
-    iso_box4(&mut c, cx + 32.0, 152.0, 136.0, 32.0, [76, 80, 88], None);
+    iso_box4(&mut c, cx + 32.0, 152.0, 136.0, 32.0, [102, 92, 76], None);
     hazard(&mut c, cx - 48.0, 220.0, 12);
     // Deck markings: rings + team glow ring + approach chevrons.
-    c.ellipse(cx + 32.0, 152.0, 52.0, 26.0, rgba([96, 102, 112]));
-    c.ellipse(cx + 32.0, 152.0, 40.0, 20.0, rgba([76, 80, 88]));
+    c.ellipse(cx + 32.0, 152.0, 52.0, 26.0, rgba([124, 110, 90]));
+    c.ellipse(cx + 32.0, 152.0, 40.0, 20.0, rgba([102, 92, 76]));
     for k in 0..10 {
         let a = k as f32 * 0.628;
         let lx = cx + 32.0 + a.cos() * 46.0;
@@ -2955,7 +2968,7 @@ fn paint_aerie(team: [u8; 3]) -> Canvas {
         c.poly(&[(x, 148.0), (x + 6.0, 152.0), (x, 156.0), (x - 6.0, 152.0)], rgba(scale_rgb(team, 0.9)));
     }
     // Control tower with a glass band.
-    iso_box4(&mut c, cx - 112.0, 88.0, 48.0, 72.0, [104, 102, 98], Some(team));
+    iso_box4(&mut c, cx - 112.0, 88.0, 48.0, 72.0, VAN_HULL, Some(team));
     let gy = 96;
     c.rect((cx - 136.0) as i32, gy, 48, 10, rgba([110, 220, 245]));
     c.rect((cx - 132.0) as i32, gy + 2, 12, 4, rgba([210, 245, 255]));
@@ -2974,10 +2987,10 @@ fn paint_aerie(team: [u8; 3]) -> Canvas {
 fn paint_archive(team: [u8; 3]) -> Canvas {
     let mut c = Canvas::new(280, 248);
     let cx = 140.0;
-    iso_box4(&mut c, cx, 184.0, 120.0, 24.0, [86, 85, 82], None);
-    iso_box4(&mut c, cx, 148.0, 92.0, 32.0, [100, 98, 94], Some(team));
+    iso_box4(&mut c, cx, 184.0, 120.0, 24.0, VAN_FOUND, None);
+    iso_box4(&mut c, cx, 148.0, 92.0, 32.0, VAN_HULL, Some(team));
     // Dome with horizontal band seams.
-    c.dome(cx, 116.0, 76.0, 52.0, [112, 110, 106]);
+    c.dome(cx, 116.0, 76.0, 52.0, [134, 118, 98]);
     for band in 0..4 {
         let by = 84.0 + band as f32 * 18.0;
         for x in (cx - 74.0) as i32..=(cx + 74.0) as i32 {
