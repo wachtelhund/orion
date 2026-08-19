@@ -1716,14 +1716,14 @@ fn paint_worker(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     }
     c.rect(14, 82, 68, 4, rgba([26, 28, 34]));
 
-    // Cab: mustard industrial box with grime and a hazard band.
-    let mustard = [164, 136, 62];
+    // Cab: dark industrial box with grime and an amber-neon hazard band.
+    let mustard = [58, 54, 48];
     plate(&mut c, &[(26.0, 40.0 + bob), (70.0, 40.0 + bob), (74.0, 68.0), (22.0, 68.0)], mustard, 1.0);
     c.poly(&[(26.0, 40.0 + bob), (34.0, 32.0 + bob), (64.0, 32.0 + bob), (70.0, 40.0 + bob)], rgba(scale_rgb(mustard, 1.2)));
     // Hazard chevrons on the skirt.
     for k in 0..6 {
         let x = 26 + k * 8;
-        let col = if k % 2 == 0 { [30, 30, 34] } else { [190, 158, 60] };
+        let col = if k % 2 == 0 { [26, 24, 28] } else { [255, 146, 48] };
         c.poly(&[(x as f32, 64.0), (x as f32 + 4.0, 64.0), (x as f32 + 8.0, 68.0), (x as f32 + 4.0, 68.0)], rgba(col));
     }
     // Grime streaks.
@@ -3211,7 +3211,7 @@ fn fer_leg(c: &mut Canvas, hip_x: f32, hip_y: f32, knee_x: f32, knee_y: f32, foo
         (knee_x + qx, knee_y + qy),
         (foot_x + qx * 0.8, foot_y + qy * 0.8),
         (foot_x - qx * 0.8, foot_y - qy * 0.8),
-    ], [88, 66, 50], 1.0);
+    ], [56, 52, 54], 1.0);
     c.line(knee_x - qx * 0.5, knee_y - qy * 0.5, foot_x - qx * 0.4, foot_y - qy * 0.4, 1.4, rgba(RUST_LIT));
     // Piston shine + knee cap.
     c.line(knee_x, knee_y, foot_x * 0.6 + knee_x * 0.4, foot_y * 0.6 + knee_y * 0.4, 1.4, rgba(STEEL_LIT));
@@ -3246,7 +3246,7 @@ fn paint_scrapper(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     rust_wear(&mut c, 14, 62, 76, 10, 301);
     // Hull: layered rusted plates with a raised cab.
     plate(&mut c, &[(20.0, 40.0 + bob), (84.0, 40.0 + bob), (90.0, 64.0), (14.0, 64.0)], RUST, 1.0);
-    plate(&mut c, &[(26.0, 28.0 + bob), (58.0, 28.0 + bob), (62.0, 42.0 + bob), (22.0, 42.0 + bob)], [116, 84, 58], 1.0);
+    plate(&mut c, &[(26.0, 28.0 + bob), (58.0, 28.0 + bob), (62.0, 42.0 + bob), (22.0, 42.0 + bob)], [96, 88, 84], 1.0);
     rust_wear(&mut c, 20, (42.0 + bob) as i32, 64, 20, 307);
     // Cab glass + team band.
     if dy > -0.5 {
@@ -3288,7 +3288,7 @@ fn paint_arclight(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     plate(&mut c, &[(cx - 14.0, cy + 2.0), (cx + 14.0, cy + 2.0), (cx + 12.0, cy + 14.0), (cx - 12.0, cy + 14.0)], RUST_DARK, 1.0);
     // Torso pod: broad, layered, armored.
     plate(&mut c, &[(30.0, 18.0), (82.0, 18.0), (88.0, 48.0), (24.0, 48.0)], RUST, 1.0);
-    plate(&mut c, &[(34.0 + dx * 5.0, 22.0), (58.0 + dx * 8.0, 16.0 + dy * 3.0), (58.0 + dx * 8.0, 36.0), (38.0 + dx * 5.0, 42.0)], [124, 90, 62], 1.0);
+    plate(&mut c, &[(34.0 + dx * 5.0, 22.0), (58.0 + dx * 8.0, 16.0 + dy * 3.0), (58.0 + dx * 8.0, 36.0), (38.0 + dx * 5.0, 42.0)], [100, 92, 88], 1.0);
     rust_wear(&mut c, 30, 20, 52, 26, 311);
     c.rect(32, 44, 48, 5, rgba(team));
     // Optic visor band.
@@ -3331,7 +3331,7 @@ fn paint_mauler(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     fer_leg(&mut c, cx + 10.0, cy + 12.0, cx + 16.0, cy + 26.0 - step * 0.3, cx + 12.0 + step, cy + 44.0, 3.6);
     // Carapace: broad domed shell of overlapping plates.
     plate(&mut c, &[(20.0, 34.0), (108.0, 34.0), (100.0, 62.0), (28.0, 62.0)], RUST, 1.0);
-    plate(&mut c, &[(30.0, 22.0), (98.0, 22.0), (104.0, 38.0), (24.0, 38.0)], [120, 88, 60], 1.0);
+    plate(&mut c, &[(30.0, 22.0), (98.0, 22.0), (104.0, 38.0), (24.0, 38.0)], [98, 90, 86], 1.0);
     plate(&mut c, &[(44.0, 12.0), (84.0, 12.0), (92.0, 24.0), (36.0, 24.0)], RUST_LIT, 0.95);
     rust_wear(&mut c, 24, 24, 80, 34, 331);
     c.rect(30, 58, 68, 5, rgba(team));
@@ -3457,7 +3457,7 @@ fn paint_kestrel(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
         (nose.0 - dx * 4.0, nose.1 - dy_i * 4.0 - 5.0),
         (px + dx * 6.0 + wx * 8.0, py + dy_i * 6.0 + wy * 8.0 - 3.0),
         (px + dx * 2.0 - wx * 8.0, py + dy_i * 2.0 - wy * 8.0 - 3.0),
-    ], rgba([124, 90, 62]));
+    ], rgba([100, 92, 88]));
     rust_wear(&mut c, (px - 22.0) as i32, (py - 12.0) as i32, 44, 22, 361);
     // Tail boom + fin.
     c.line(tail.0, tail.1, tail.0 - dx * 12.0, tail.1 - dy_i * 12.0, 5.0, rgba(RUST_DARK));
@@ -3870,7 +3870,7 @@ fn paint_magnus(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     fer_leg(&mut c, cx + 12.0, cy + 12.0, cx + 20.0, cy + 30.0, cx + 14.0 - lift, cy + 52.0, 6.0);
     // Torso: tiered rusted plates with a gold-violet core.
     plate(&mut c, &[(cx - 26.0, cy - 18.0), (cx + 26.0, cy - 18.0), (cx + 22.0, cy + 16.0), (cx - 22.0, cy + 16.0)], RUST, 1.0);
-    plate(&mut c, &[(cx - 20.0, cy - 34.0), (cx + 20.0, cy - 34.0), (cx + 24.0, cy - 16.0), (cx - 24.0, cy - 16.0)], [124, 90, 62], 1.0);
+    plate(&mut c, &[(cx - 20.0, cy - 34.0), (cx + 20.0, cy - 34.0), (cx + 24.0, cy - 16.0), (cx - 24.0, cy - 16.0)], [100, 92, 88], 1.0);
     rust_wear(&mut c, (cx - 22.0) as i32, (cy - 30.0) as i32, 44, 42, 881);
     c.glow(cx + dx * 6.0, cy - 6.0, 10.0, COIL, 0.85);
     c.rect((cx + dx * 6.0 - 4.0) as i32, (cy - 12.0) as i32, 8, 12, rgba(scale_rgb(COIL, 1.3)));
