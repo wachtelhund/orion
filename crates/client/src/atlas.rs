@@ -163,8 +163,11 @@ impl Canvas {
         }
     }
 
-    /// Top-left rim light: brighten body pixels that sit just inside the
-    /// outline on the lit side. Call AFTER outline_t with the same color.
+    /// Directional edge lighting: brighten body pixels just inside the outline
+    /// on the lit (upper-left) side, and darken pixels on the shadow
+    /// (lower-right) side into a self-shadow contour. The two together give
+    /// each sprite a molded, pre-rendered 3D read. Call AFTER outline_t with
+    /// the same color.
     pub fn rim(&mut self, outline: Color, f: f32) {
         let orig = self.px.clone();
         let is_edge = |p: Color| p == outline || p[3] < 40;
@@ -176,8 +179,13 @@ impl Canvas {
                 }
                 let up = if y > 0 { orig[((y - 1) * self.w + x) as usize] } else { outline };
                 let left = if x > 0 { orig[(y * self.w + x - 1) as usize] } else { outline };
+                let down = if y + 1 < self.h { orig[((y + 1) * self.w + x) as usize] } else { outline };
+                let right = if x + 1 < self.w { orig[(y * self.w + x + 1) as usize] } else { outline };
                 if is_edge(up) || is_edge(left) {
                     self.set(x, y, scale([p[0], p[1], p[2]], f));
+                } else if is_edge(down) || is_edge(right) {
+                    // Form shadow on the side facing away from the light.
+                    self.set(x, y, scale([p[0], p[1], p[2]], 0.66));
                 }
             }
         }
@@ -226,10 +234,11 @@ impl Canvas {
         }
     }
 
-    /// Filled polygon with a baked directional light gradient (bright at the
-    /// upper-left, shading down to the lower-right). Gives flat armor plates
-    /// real volume instead of a single dead tone — the workhorse for unit
-    /// depth. `f` is an overall brightness multiplier on `base`.
+    /// Filled polygon shaded as a gently *domed* armor plate: a faked
+    /// cylindrical bulge lit from the upper-left, posterized through the same
+    /// `tone()` ramp the sphere shading uses. This is what gives units the
+    /// pre-rendered, molded 3D look (AoE2-style) instead of a flat tilted
+    /// ramp. `f` is an overall brightness multiplier on `base`.
     pub fn poly_shaded(&mut self, pts: &[(f32, f32)], base: [u8; 3], f: f32) {
         let x0 = pts.iter().map(|p| p.0).fold(f32::MAX, f32::min);
         let x1 = pts.iter().map(|p| p.0).fold(f32::MIN, f32::max);
@@ -253,12 +262,14 @@ impl Canvas {
             for pair in xs.chunks(2) {
                 if let [a, b] = pair {
                     for x in *a as i32..=(*b - 0.01) as i32 {
-                        let u = ((x as f32 + 0.5 - x0) / w_).clamp(0.0, 1.0);
-                        let v = ((y as f32 + 0.5 - y0f) / h_).clamp(0.0, 1.0);
-                        // Upper-left lit, lower-right shaded. Slight center
-                        // bulge keeps plates from reading as flat ramps.
-                        let g = 1.20 - v * 0.44 - u * 0.12;
-                        self.blend(x, y, scale(base, f * g));
+                        // Position in the plate, remapped to [-1, 1].
+                        let u = ((x as f32 + 0.5 - x0) / w_).clamp(0.0, 1.0) * 2.0 - 1.0;
+                        let v = ((y as f32 + 0.5 - y0f) / h_).clamp(0.0, 1.0) * 2.0 - 1.0;
+                        // Fake surface normal of a shallow bulge, then light it
+                        // from the upper-left just like `dome()`.
+                        let nz = (1.0 - (u * u * 0.6 + v * v * 0.6)).max(0.0).sqrt();
+                        let lit = (-u * 0.34 - v * 0.5 + nz * 0.7).clamp(0.0, 1.28) / 1.28;
+                        self.blend(x, y, scale(base, f * tone(lit, x, y)));
                     }
                 }
             }
