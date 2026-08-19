@@ -1491,9 +1491,11 @@ fn facing_vec(f: usize) -> (f32, f32) {
     (a.cos(), a.sin())
 }
 
-const GUNMETAL: [u8; 3] = [64, 70, 80];
-const GUNMETAL_DARK: [u8; 3] = [42, 46, 54];
-const STEEL_LIT: [u8; 3] = [126, 134, 148];
+// Warm gunmetal so Vanguard troops read as sun-warmed steel against the
+// ochre world (the cyan VISOR stays as the cool sci-fi accent).
+const GUNMETAL: [u8; 3] = [80, 72, 62];
+const GUNMETAL_DARK: [u8; 3] = [50, 44, 38];
+const STEEL_LIT: [u8; 3] = [152, 136, 110];
 const AMBER: [u8; 3] = [255, 186, 84];
 const VISOR: [u8; 3] = [120, 235, 255];
 const OUTLINE: Color = [10, 11, 15, 255];
