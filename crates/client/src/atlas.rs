@@ -1187,8 +1187,11 @@ fn diamond_canvas(w: i32, h: i32, c: Color, outline_only: bool) -> Canvas {
 // macro value-noise patches, hairline cracks, sparse debris and rust —
 // never from bright or busy texture.
 
-const GROUND_LOW: [[u8; 3]; 3] = [[57, 51, 45], [48, 43, 38], [65, 58, 51]];
-const GROUND_HIGH: [[u8; 3]; 3] = [[84, 81, 75], [73, 70, 65], [94, 91, 84]];
+// AoE2-inspired warm palette on an alien world: low ground is warm ochre
+// regolith, high ground is sun-bleached sandstone. Kept earthy (not neon)
+// so the sci-fi blue crystals/pylons still pop as the cool accent.
+const GROUND_LOW: [[u8; 3]; 3] = [[123, 96, 62], [106, 81, 52], [140, 112, 76]];
+const GROUND_HIGH: [[u8; 3]; 3] = [[164, 138, 100], [146, 121, 86], [182, 158, 118]];
 
 /// Ashen wasteland diamond at 4x. Variants differ by salt; some carry
 /// cracks, scorch rings, debris or rust flecks. `high` adds slab seams.
@@ -1308,7 +1311,7 @@ fn scale_rgb(c: [u8; 3], f: f32) -> [u8; 3] {
 fn ramp_tile(salt: u32) -> Canvas {
     let (w, hh) = (128, 64);
     let mut c = Canvas::new(w, hh);
-    let base = [78, 73, 64];
+    let base = [132, 106, 72];
     for y in 0..hh {
         for x in 0..w {
             let dx = (x as f32 + 0.5 - 64.0) / 64.0;
@@ -1353,10 +1356,11 @@ fn rock_tile(salt: u32) -> Canvas {
             }
             let h = hash2(x, y, salt + 80);
             let macro_f = 0.88 + vnoise(x as f32, y as f32, 18.0, salt ^ 91) * 0.24;
+            // Warm ironstone rubble instead of cold basalt.
             let t = match h % 16 {
-                0..=7 => [50, 47, 50],
-                8..=12 => [42, 40, 43],
-                _ => [60, 56, 60],
+                0..=7 => [86, 62, 50],
+                8..=12 => [70, 50, 41],
+                _ => [102, 76, 60],
             };
             c.set(x, y, rgba(scale_rgb(t, macro_f)));
         }
@@ -1376,10 +1380,10 @@ fn rock_tile(salt: u32) -> Canvas {
                     (px + r, py + r * 0.35),
                     (px, py + r * 0.6),
                 ],
-                rgba([66, 62, 66]),
+                rgba([112, 84, 66]),
             );
-            c.line(px - r * 0.4, py - r * 0.55, px + r * 0.6, py - r * 0.4, 1.2, rgba([88, 84, 88]));
-            c.line(px - r * 0.4, py - r * 0.5, px - r * 0.2, py + r * 0.5, 1.0, rgba([44, 41, 44]));
+            c.line(px - r * 0.4, py - r * 0.55, px + r * 0.6, py - r * 0.4, 1.2, rgba([146, 116, 92]));
+            c.line(px - r * 0.4, py - r * 0.5, px - r * 0.2, py + r * 0.5, 1.0, rgba([64, 46, 38]));
         }
     }
     c
@@ -1404,7 +1408,8 @@ fn cliff_face(left: bool) -> Canvas {
         for wy in 0..CLIFF_H {
             let y = edge_y as i32 + wy;
             let h = hash2(x, wy, if left { 7 } else { 8 });
-            let base: [u8; 3] = if left { [58, 52, 46] } else { [74, 66, 57] };
+            // Warm ironstone cliff strata (sunlit right face brighter).
+            let base: [u8; 3] = if left { [96, 72, 52] } else { [124, 96, 66] };
             // Strata bands displaced by noise so they undulate.
             let warp = (vnoise(x as f32, 0.0, 20.0, 313) * 8.0) as i32;
             let strata = ((wy + warp) / 8) % 2 == 0;
