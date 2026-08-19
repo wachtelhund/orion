@@ -2708,18 +2708,24 @@ fn hazard(c: &mut Canvas, x0: f32, y0: f32, n: i32) {
 
 /// Industrial pipe with a top highlight and end flanges.
 fn pipe(c: &mut Canvas, x0: f32, y0: f32, x1: f32, y1: f32, t: f32) {
-    c.line(x0, y0, x1, y1, t, rgba([58, 61, 70]));
-    c.line(x0, y0 - t * 0.25, x1, y1 - t * 0.25, t * 0.3, rgba([104, 110, 122]));
-    c.rect((x0 - 2.0) as i32, (y0 - t * 0.6) as i32, 4, (t * 1.2) as i32, rgba([76, 80, 92]));
-    c.rect((x1 - 2.0) as i32, (y1 - t * 0.6) as i32, 4, (t * 1.2) as i32, rgba([76, 80, 92]));
+    c.line(x0, y0, x1, y1, t, rgba([66, 58, 50]));
+    c.line(x0, y0 - t * 0.25, x1, y1 - t * 0.25, t * 0.3, rgba([130, 116, 96]));
+    c.rect((x0 - 2.0) as i32, (y0 - t * 0.6) as i32, 4, (t * 1.2) as i32, rgba([94, 84, 70]));
+    c.rect((x1 - 2.0) as i32, (y1 - t * 0.6) as i32, 4, (t * 1.2) as i32, rgba([94, 84, 70]));
 }
+
+// Warm AoE2-style masonry for Vanguard structures: sun-warmed stone-metal
+// walls on a tan-concrete foundation. Windows stay amber and the team trim
+// stays blue, so the buildings read warm but keep their sci-fi identity.
+const VAN_FOUND: [u8; 3] = [106, 94, 76];
+const VAN_HULL: [u8; 3] = [128, 112, 90];
 
 /// Headquarters: fortified command complex. 400x312.
 fn paint_hq(team: [u8; 3]) -> Canvas {
     let mut c = Canvas::new(400, 312);
     let cx = 200.0;
-    let concrete = [92, 90, 86];
-    let hull = [104, 102, 98];
+    let concrete = VAN_FOUND;
+    let hull = VAN_HULL;
     iso_box4(&mut c, cx, 216.0, 192.0, 24.0, concrete, None);
     hazard(&mut c, cx - 64.0, 244.0, 16);
     // Main hall.
@@ -2762,10 +2768,10 @@ fn paint_hq(team: [u8; 3]) -> Canvas {
 fn paint_pylon(team: [u8; 3]) -> Canvas {
     let mut c = Canvas::new(272, 248);
     let cx = 136.0;
-    iso_box4(&mut c, cx, 184.0, 120.0, 24.0, [88, 86, 82], None);
+    iso_box4(&mut c, cx, 184.0, 120.0, 24.0, VAN_FOUND, None);
     hazard(&mut c, cx - 40.0, 212.0, 10);
     // Anchor collar.
-    iso_box4(&mut c, cx, 172.0, 44.0, 20.0, [70, 73, 82], Some(team));
+    iso_box4(&mut c, cx, 172.0, 44.0, 20.0, [92, 80, 66], Some(team));
     // Cables to the plate corners.
     c.line(cx - 36.0, 182.0, cx - 92.0, 196.0, 2.0, rgba([48, 50, 58]));
     c.line(cx + 36.0, 182.0, cx + 92.0, 196.0, 2.0, rgba([48, 50, 58]));
@@ -2800,8 +2806,8 @@ fn paint_pylon(team: [u8; 3]) -> Canvas {
 fn paint_barracks(team: [u8; 3]) -> Canvas {
     let mut c = Canvas::new(400, 280);
     let cx = 200.0;
-    let hull = [100, 96, 90];
-    iso_box4(&mut c, cx, 200.0, 192.0, 24.0, [88, 87, 84], None);
+    let hull = VAN_HULL;
+    iso_box4(&mut c, cx, 200.0, 192.0, 24.0, VAN_FOUND, None);
     iso_box4(&mut c, cx, 136.0, 152.0, 72.0, hull, Some(team));
     windows4(&mut c, cx, 136.0, 152.0, 72.0, [255, 200, 110]);
     // Blast door on the lower-left wall: dark slab, glowing team seam,
@@ -2880,17 +2886,17 @@ fn paint_geyser() -> Canvas {
 fn paint_condenser(team: [u8; 3]) -> Canvas {
     let mut c = Canvas::new(272, 232);
     let cx = 136.0;
-    let hull = [96, 94, 88];
-    iso_box4(&mut c, cx, 168.0, 120.0, 24.0, [86, 85, 82], None);
+    let hull = VAN_HULL;
+    iso_box4(&mut c, cx, 168.0, 120.0, 24.0, VAN_FOUND, None);
     iso_box4(&mut c, cx, 128.0, 88.0, 48.0, hull, Some(team));
     windows4(&mut c, cx, 128.0, 88.0, 48.0, [255, 200, 110]);
-    // Condensation tank: steel dome with a glowing teal sight-glass.
-    c.dome(cx - 24.0, 88.0, 36.0, 26.0, [108, 112, 118]);
+    // Condensation tank: warm-steel dome with a glowing teal sight-glass.
+    c.dome(cx - 24.0, 88.0, 36.0, 26.0, [124, 114, 100]);
     c.ellipse(cx - 24.0, 76.0, 20.0, 12.0, rgba([64, 210, 200]));
     c.ellipse(cx - 30.0, 72.0, 8.0, 5.0, rgba([190, 255, 248]));
     c.glow(cx - 24.0, 76.0, 26.0, [64, 210, 200], 0.4);
     // Secondary tank.
-    c.dome(cx + 40.0, 96.0, 20.0, 14.0, [92, 96, 104]);
+    c.dome(cx + 40.0, 96.0, 20.0, 14.0, [110, 100, 88]);
     // Intake pipework down to the vent side.
     pipe(&mut c, cx + 32.0, 104.0, cx + 80.0, 136.0, 7.0);
     pipe(&mut c, cx + 56.0, 120.0, cx + 56.0, 148.0, 5.0);
@@ -2906,8 +2912,8 @@ fn paint_condenser(team: [u8; 3]) -> Canvas {
 fn paint_forge(team: [u8; 3]) -> Canvas {
     let mut c = Canvas::new(400, 296);
     let cx = 200.0;
-    let hull = [98, 92, 84];
-    iso_box4(&mut c, cx, 200.0, 192.0, 24.0, [86, 85, 82], None);
+    let hull = VAN_HULL;
+    iso_box4(&mut c, cx, 200.0, 192.0, 24.0, VAN_FOUND, None);
     iso_box4(&mut c, cx, 128.0, 152.0, 80.0, hull, Some(team));
     windows4(&mut c, cx, 128.0, 152.0, 80.0, [255, 190, 110]);
     // Furnace maw on the lower-left wall: layered heat glow.
@@ -2941,13 +2947,13 @@ fn paint_forge(team: [u8; 3]) -> Canvas {
 fn paint_aerie(team: [u8; 3]) -> Canvas {
     let mut c = Canvas::new(400, 280);
     let cx = 200.0;
-    iso_box4(&mut c, cx, 192.0, 192.0, 24.0, [86, 85, 82], None);
+    iso_box4(&mut c, cx, 192.0, 192.0, 24.0, VAN_FOUND, None);
     // Raised flight deck.
-    iso_box4(&mut c, cx + 32.0, 152.0, 136.0, 32.0, [76, 80, 88], None);
+    iso_box4(&mut c, cx + 32.0, 152.0, 136.0, 32.0, [102, 92, 76], None);
     hazard(&mut c, cx - 48.0, 220.0, 12);
     // Deck markings: rings + team glow ring + approach chevrons.
-    c.ellipse(cx + 32.0, 152.0, 52.0, 26.0, rgba([96, 102, 112]));
-    c.ellipse(cx + 32.0, 152.0, 40.0, 20.0, rgba([76, 80, 88]));
+    c.ellipse(cx + 32.0, 152.0, 52.0, 26.0, rgba([124, 110, 90]));
+    c.ellipse(cx + 32.0, 152.0, 40.0, 20.0, rgba([102, 92, 76]));
     for k in 0..10 {
         let a = k as f32 * 0.628;
         let lx = cx + 32.0 + a.cos() * 46.0;
@@ -2960,7 +2966,7 @@ fn paint_aerie(team: [u8; 3]) -> Canvas {
         c.poly(&[(x, 148.0), (x + 6.0, 152.0), (x, 156.0), (x - 6.0, 152.0)], rgba(scale_rgb(team, 0.9)));
     }
     // Control tower with a glass band.
-    iso_box4(&mut c, cx - 112.0, 88.0, 48.0, 72.0, [104, 102, 98], Some(team));
+    iso_box4(&mut c, cx - 112.0, 88.0, 48.0, 72.0, VAN_HULL, Some(team));
     let gy = 96;
     c.rect((cx - 136.0) as i32, gy, 48, 10, rgba([110, 220, 245]));
     c.rect((cx - 132.0) as i32, gy + 2, 12, 4, rgba([210, 245, 255]));
@@ -2979,10 +2985,10 @@ fn paint_aerie(team: [u8; 3]) -> Canvas {
 fn paint_archive(team: [u8; 3]) -> Canvas {
     let mut c = Canvas::new(280, 248);
     let cx = 140.0;
-    iso_box4(&mut c, cx, 184.0, 120.0, 24.0, [86, 85, 82], None);
-    iso_box4(&mut c, cx, 148.0, 92.0, 32.0, [100, 98, 94], Some(team));
+    iso_box4(&mut c, cx, 184.0, 120.0, 24.0, VAN_FOUND, None);
+    iso_box4(&mut c, cx, 148.0, 92.0, 32.0, VAN_HULL, Some(team));
     // Dome with horizontal band seams.
-    c.dome(cx, 116.0, 76.0, 52.0, [112, 110, 106]);
+    c.dome(cx, 116.0, 76.0, 52.0, [134, 118, 98]);
     for band in 0..4 {
         let by = 84.0 + band as f32 * 18.0;
         for x in (cx - 74.0) as i32..=(cx + 74.0) as i32 {
