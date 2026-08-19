@@ -54,8 +54,8 @@ fn short_research(tag: &str) -> String {
 
 const TIP_TITLE: [f32; 4] = [0.95, 0.95, 0.9, 1.0];
 const TIP_COST: [f32; 4] = [0.65, 0.85, 1.0, 1.0];
-const TIP_STAT: [f32; 4] = [0.75, 0.75, 0.72, 1.0];
-const TIP_DESC: [f32; 4] = [0.6, 0.62, 0.66, 1.0];
+const TIP_STAT: [f32; 4] = [0.78, 0.80, 0.76, 1.0];
+const TIP_DESC: [f32; 4] = [0.78, 0.80, 0.84, 1.0];
 const TIP_WARN: [f32; 4] = [1.0, 0.6, 0.3, 1.0];
 
 /// Chrome palette as draw-time tints (atlas bakes the texture, these tint).
@@ -593,6 +593,7 @@ impl App {
         if !blink && age < 1.2 {
             return;
         }
+        let ui = self.ui();
         let ts = self.ts(2.4);
         let w = self.cam.screen_w;
         let tw = self.gfx.text_width(ts, msg);
@@ -600,10 +601,10 @@ impl App {
         let y = self.cam.screen_h * 0.30;
         self.gfx.quad(
             out,
-            x - 14.0,
-            y - 8.0,
-            tw + 28.0,
-            ts * 8.0 + 14.0,
+            x - 14.0 * ui,
+            y - 8.0 * ui,
+            tw + 28.0 * ui,
+            ts * 8.0 + 14.0 * ui,
             [0.05, 0.02, 0.02, 0.75 * fade],
         );
         self.gfx.text(out, x, y, ts, [1.0, 0.45, 0.3, fade], msg);
@@ -936,8 +937,15 @@ impl App {
             let Some(u) = self.state.get(id) else { continue };
             let (bx, by) = (bx2 + 2.0, by2 + 2.0);
             let is_active = active == Some((u.kind, u.def));
+            let hovering = self.mouse.0 >= bx2
+                && self.mouse.0 <= bx2 + tw2
+                && self.mouse.1 >= by2
+                && self.mouse.1 <= by2 + th2;
             let border = if is_active {
                 [0.4, 1.0, 0.4, 1.0]
+            } else if hovering {
+                // Affordance: these tiles are clickable subgroup selectors.
+                [0.9, 0.82, 0.4, 1.0]
             } else {
                 [0.06, 0.06, 0.09, 1.0]
             };
@@ -1236,8 +1244,16 @@ impl App {
                 && self.mouse.0 <= b.x + b.w
                 && self.mouse.1 >= b.y
                 && self.mouse.1 <= b.y + b.h;
-            let plate = if hover { book.btn_plate_hi } else { book.btn_plate };
+            // A slot the player can't use yet: a locked prerequisite, an
+            // already-finished research, etc. These route to CancelMode and
+            // carry a NEEDS/LOCKED/DONE hint. Draw them visibly disabled so
+            // an unavailable option reads at a glance (SC-style greyout).
+            let done = b.hint.contains("DONE");
+            let locked = matches!(b.action, CardAction::CancelMode)
+                && (b.hint.starts_with("NEEDS") || b.hint.contains("LOCKED") || done);
+            let plate = if hover && !locked { book.btn_plate_hi } else { book.btn_plate };
             self.plate(out, plate, b.x, b.y, b.w, b.h);
+            let icon_tint = if locked { [0.5, 0.5, 0.56, 0.8] } else { WHITE };
             // Icon fills the button; hotkey letter overlays the top-left
             // corner; cost/label sits along the bottom (SC2 style).
             let icon_cy = b.y + b.h * 0.44;
@@ -1245,23 +1261,30 @@ impl App {
                 CardIcon::Building(btype) => {
                     let r = book.building(btype, self.human as usize);
                     let s = (b.h * 0.72) / r.h as f32;
-                    self.gfx.sprite(out, r, b.x + b.w * 0.5, icon_cy, r.w as f32 * s, r.h as f32 * s, WHITE);
+                    self.gfx.sprite(out, r, b.x + b.w * 0.5, icon_cy, r.w as f32 * s, r.h as f32 * s, icon_tint);
                 }
                 CardIcon::Unit(utype) => {
                     let r = book.unit(utype, self.human as usize, 2, 0);
                     let s = (b.h * 0.7) / r.h as f32;
-                    self.gfx.sprite(out, r, b.x + b.w * 0.5, icon_cy, r.w as f32 * s, r.h as f32 * s, WHITE);
+                    self.gfx.sprite(out, r, b.x + b.w * 0.5, icon_cy, r.w as f32 * s, r.h as f32 * s, icon_tint);
                 }
                 CardIcon::Letter => {
                     let ts = self.ts(2.5);
                     let tw = self.gfx.text_width(ts, &b.key);
-                    self.gfx.text(out, b.x + b.w * 0.5 - tw * 0.5, b.y + b.h * 0.28, ts, white, &b.key);
+                    let lc = if locked { [0.55, 0.55, 0.6, 1.0] } else { white };
+                    self.gfx.text(out, b.x + b.w * 0.5 - tw * 0.5, b.y + b.h * 0.28, ts, lc, &b.key);
                 }
+            }
+            // Dim scrim over locked slots — sits above the icon so the whole
+            // button reads as unavailable, hover glow suppressed.
+            if locked {
+                self.gfx.quad(out, b.x, b.y, b.w, b.h, [0.02, 0.02, 0.04, 0.45]);
             }
             // Hotkey badge.
             if !matches!(b.icon, CardIcon::Letter) {
                 self.gfx.quad(out, b.x + 2.0 * ui, b.y + 2.0 * ui, 12.0 * ui, 11.0 * ui, [0.02, 0.02, 0.04, 0.85]);
-                self.gfx.text(out, b.x + 4.0 * ui, b.y + 4.0 * ui, self.ts(1.2), [1.0, 0.9, 0.4, 1.0], &b.key);
+                let kc = if locked { [0.7, 0.65, 0.4, 1.0] } else { [1.0, 0.9, 0.4, 1.0] };
+                self.gfx.text(out, b.x + 4.0 * ui, b.y + 4.0 * ui, self.ts(1.2), kc, &b.key);
             }
             // Clip the hint to the button width — tooltips carry the rest.
             let hs = self.ts(0.9);
@@ -1270,12 +1293,21 @@ impl App {
                 hint.pop();
             }
             let hw = self.gfx.text_width(hs, &hint);
+            // Costs read brighter now; unavailable slots warn (or confirm, for
+            // completed research) instead of blending into the plate.
+            let hint_col = if done {
+                [0.5, 0.9, 0.55, 1.0]
+            } else if locked {
+                [1.0, 0.6, 0.42, 1.0]
+            } else {
+                [0.82, 0.92, 1.0, 1.0]
+            };
             self.gfx.text(
                 out,
                 b.x + b.w * 0.5 - hw * 0.5,
                 b.y + b.h - 10.0 * ui,
                 hs,
-                [0.72, 0.86, 0.95, 1.0],
+                hint_col,
                 &hint,
             );
         }
@@ -1300,10 +1332,11 @@ impl App {
             hint
         };
         if let Some(hint) = hint {
+            let ui = self.ui();
             let ts = self.ts(1.5);
             let tw = self.gfx.text_width(ts, hint);
-            self.chrome_panel(out, w * 0.5 - tw * 0.5 - 12.0, cy - 36.0, tw + 24.0, 26.0, true);
-            self.gfx.text(out, w * 0.5 - tw * 0.5, cy - 29.0, ts, GOLD_TXT, hint);
+            self.chrome_panel(out, w * 0.5 - tw * 0.5 - 12.0 * ui, cy - 36.0 * ui, tw + 24.0 * ui, 26.0 * ui, true);
+            self.gfx.text(out, w * 0.5 - tw * 0.5, cy - 29.0 * ui, ts, GOLD_TXT, hint);
         }
     }
 
@@ -1323,36 +1356,39 @@ impl App {
         self.chrome_panel(out, w - 340.0 * ui, 4.0 * ui, 334.0 * ui, 28.0 * ui, true);
         self.plate(out, book.gold_h, w - 340.0 * ui, 30.0 * ui, 334.0 * ui, 2.0 * ui);
 
-        // Right-aligned: minerals | gas | supply.
+        // Right-aligned: minerals | gas | supply. Icons share one on-screen
+        // height and a uniform gap from their number so the readout scans as
+        // an even row (the three source sprites have different native sizes,
+        // so a per-icon scale is derived from a common target height).
+        let icon_h = 20.0 * ui;
+        let icon = |gfx: &crate::gfx::Gfx, out: &mut Vec<Inst>, r: crate::atlas::Region, cx: f32| {
+            let s = icon_h / (r.h as f32 / r.scale);
+            gfx.sprite(out, r, cx, icon_y, r.w as f32 / r.scale * s, icon_h, WHITE);
+        };
         let sup_s = format!("{used}/{prov}");
         let sup_col = if used >= prov { [1.0, 0.45, 0.3, 1.0] } else { white };
         let mut x = w - 16.0 * ui - self.gfx.text_width(ts, &sup_s);
         self.gfx.text(out, x, 10.0 * ui, ts, sup_col, &sup_s);
-        let pr = book.building(1, self.human as usize);
-        self.gfx.sprite(out, pr, x - 12.0 * ui, icon_y, pr.w as f32 / pr.scale * 0.3 * ui, pr.h as f32 / pr.scale * 0.3 * ui, WHITE);
+        icon(&self.gfx, out, book.building(1, self.human as usize), x - 13.0 * ui);
 
         let gas_s = format!("{gas}");
         x -= 70.0 * ui + self.gfx.text_width(ts, &gas_s);
         self.gfx.text(out, x, 10.0 * ui, ts, [GAS_COLOR[0], GAS_COLOR[1], GAS_COLOR[2], 1.0], &gas_s);
-        let gr = book.geyser;
-        self.gfx.sprite(out, gr, x - 14.0 * ui, icon_y, gr.w as f32 / gr.scale * 0.28 * ui, gr.h as f32 / gr.scale * 0.28 * ui, WHITE);
+        icon(&self.gfx, out, book.geyser, x - 13.0 * ui);
 
         let min_s = format!("{minerals}");
         x -= 70.0 * ui + self.gfx.text_width(ts, &min_s);
         self.gfx.text(out, x, 10.0 * ui, ts, [0.75, 0.93, 1.0, 1.0], &min_s);
-        let mr = book.minerals[0];
-        self.gfx.sprite(out, mr, x - 13.0 * ui, icon_y, mr.w as f32 / mr.scale * 0.5 * ui, mr.h as f32 / mr.scale * 0.5 * ui, WHITE);
+        icon(&self.gfx, out, book.minerals[0], x - 13.0 * ui);
 
-        // Clock + FPS, top-left, subtle.
+        // Clock + FPS, top-left. A faint backing plate keeps it legible over
+        // bright terrain (it used to wash out on pale tiles).
         let secs = self.state.tick / 24;
-        self.gfx.text(
-            out,
-            10.0 * ui,
-            10.0 * ui,
-            self.ts(1.0),
-            [0.5, 0.5, 0.5, 0.8],
-            &format!("{:02}:{:02}  FPS {:.0}", secs / 60, secs % 60, self.fps),
-        );
+        let clock = format!("{:02}:{:02}  FPS {:.0}", secs / 60, secs % 60, self.fps);
+        let cts = self.ts(1.2);
+        let cw = self.gfx.text_width(cts, &clock);
+        self.gfx.quad(out, 6.0 * ui, 7.0 * ui, cw + 8.0 * ui, cts * 7.0 + 6.0 * ui, [0.03, 0.04, 0.06, 0.5]);
+        self.gfx.text(out, 10.0 * ui, 10.0 * ui, cts, [0.80, 0.82, 0.80, 0.95], &clock);
         // Idle-worker badge: appears when workers stand around; click (or
         // F1) jumps to one. Reads as a small alert chip under the clock.
         let idle = (0..self.state.entities.len()).filter(|&i| {
