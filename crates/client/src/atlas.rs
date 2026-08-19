@@ -226,6 +226,45 @@ impl Canvas {
         }
     }
 
+    /// Filled polygon with a baked directional light gradient (bright at the
+    /// upper-left, shading down to the lower-right). Gives flat armor plates
+    /// real volume instead of a single dead tone — the workhorse for unit
+    /// depth. `f` is an overall brightness multiplier on `base`.
+    pub fn poly_shaded(&mut self, pts: &[(f32, f32)], base: [u8; 3], f: f32) {
+        let x0 = pts.iter().map(|p| p.0).fold(f32::MAX, f32::min);
+        let x1 = pts.iter().map(|p| p.0).fold(f32::MIN, f32::max);
+        let y0f = pts.iter().map(|p| p.1).fold(f32::MAX, f32::min);
+        let y1f = pts.iter().map(|p| p.1).fold(f32::MIN, f32::max);
+        let w_ = (x1 - x0).max(1.0);
+        let h_ = (y1f - y0f).max(1.0);
+        let y0 = y0f as i32;
+        let y1 = y1f as i32 + 1;
+        for y in y0..=y1 {
+            let sy = y as f32 + 0.5;
+            let mut xs: Vec<f32> = Vec::new();
+            for i in 0..pts.len() {
+                let (ax, ay) = pts[i];
+                let (bx, by) = pts[(i + 1) % pts.len()];
+                if (ay <= sy) != (by <= sy) {
+                    xs.push(ax + (sy - ay) / (by - ay) * (bx - ax));
+                }
+            }
+            xs.sort_by(|a, b| a.total_cmp(b));
+            for pair in xs.chunks(2) {
+                if let [a, b] = pair {
+                    for x in *a as i32..=(*b - 0.01) as i32 {
+                        let u = ((x as f32 + 0.5 - x0) / w_).clamp(0.0, 1.0);
+                        let v = ((y as f32 + 0.5 - y0f) / h_).clamp(0.0, 1.0);
+                        // Upper-left lit, lower-right shaded. Slight center
+                        // bulge keeps plates from reading as flat ramps.
+                        let g = 1.20 - v * 0.44 - u * 0.12;
+                        self.blend(x, y, scale(base, f * g));
+                    }
+                }
+            }
+        }
+    }
+
     /// Ellipse shaded as a lit dome: fake sphere normal, light from the
     /// upper-left, quantized to 5 tones with ordered dithering.
     pub fn dome(&mut self, cx: f32, cy: f32, rx: f32, ry: f32, base: [u8; 3]) {
@@ -1500,13 +1539,16 @@ const AMBER: [u8; 3] = [255, 186, 84];
 const VISOR: [u8; 3] = [120, 235, 255];
 const OUTLINE: Color = [10, 11, 15, 255];
 
-/// Angular armor plate: quad with a lit top-left edge and shadowed bottom.
+/// Angular armor plate: a directionally-shaded quad with a bright lit edge
+/// along the top and a shadowed bottom edge. The gradient fill gives it
+/// volume; the edges sharpen the read.
 fn plate(c: &mut Canvas, pts: &[(f32, f32)], base: [u8; 3], f: f32) {
-    c.poly(pts, rgba(scale_rgb(base, f)));
-    // Lit edge along the first segment.
-    c.line(pts[0].0, pts[0].1, pts[1].0, pts[1].1, 1.6, rgba(scale_rgb(base, f * 1.45)));
+    c.poly_shaded(pts, base, f);
+    // Bright specular lip along the first (top) segment.
+    c.line(pts[0].0, pts[0].1, pts[1].0, pts[1].1, 1.6, rgba(scale_rgb(base, (f * 1.6).min(1.9))));
     let n = pts.len();
-    c.line(pts[n - 2].0, pts[n - 2].1, pts[n - 1].0, pts[n - 1].1, 1.4, rgba(scale_rgb(base, f * 0.6)));
+    // Deep shadow along the last (bottom) segment.
+    c.line(pts[n - 2].0, pts[n - 2].1, pts[n - 1].0, pts[n - 1].1, 1.5, rgba(scale_rgb(base, f * 0.5)));
 }
 
 /// Trooper: hard-shell infantry. 104x112.
@@ -1663,10 +1705,10 @@ fn paint_vanguard(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
 
     let lift = if frame == 0 { 0.0 } else { 4.0 };
     // Wide-stance legs: massive greaves.
-    plate(&mut c, &[(38.0, 92.0 + lift), (54.0, 92.0 + lift), (52.0, 118.0 - lift * 0.5), (40.0, 118.0 - lift * 0.5)], GUNMETAL_DARK, 1.0);
-    plate(&mut c, &[(74.0, 96.0 - lift), (90.0, 96.0 - lift), (92.0, 120.0 + lift * 0.3), (78.0, 120.0 + lift * 0.3)], GUNMETAL_DARK, 0.9);
-    c.poly(&[(39.0, 94.0 + lift), (53.0, 94.0 + lift), (46.0, 104.0 + lift)], rgba(GUNMETAL));
-    c.poly(&[(75.0, 98.0 - lift), (89.0, 98.0 - lift), (82.0, 108.0 - lift)], rgba(GUNMETAL));
+    plate(&mut c, &[(38.0, 92.0 + lift), (54.0, 92.0 + lift), (52.0, 118.0 - lift * 0.5), (40.0, 118.0 - lift * 0.5)], [72, 54, 30], 1.0);
+    plate(&mut c, &[(74.0, 96.0 - lift), (90.0, 96.0 - lift), (92.0, 120.0 + lift * 0.3), (78.0, 120.0 + lift * 0.3)], [72, 54, 30], 0.9);
+    c.poly(&[(39.0, 94.0 + lift), (53.0, 94.0 + lift), (46.0, 104.0 + lift)], rgba([120, 92, 50]));
+    c.poly(&[(75.0, 98.0 - lift), (89.0, 98.0 - lift), (82.0, 108.0 - lift)], rgba([120, 92, 50]));
     c.rect(36, 114, 20, 10, rgba([30, 32, 38]));
     c.rect(76, 118, 20, 9, rgba([28, 30, 36]));
 
@@ -1678,7 +1720,7 @@ fn paint_vanguard(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
             let px = cx + dx * 12.0 + ox;
             let py = cy + dy * 8.0 + oy;
             // Forearm housing.
-            plate(c, &[(px - 6.0, py - 5.0), (px + 6.0, py - 5.0), (px + 5.0, py + 5.0), (px - 5.0, py + 5.0)], scale_rgb(GUNMETAL, 1.1), 1.0);
+            plate(c, &[(px - 6.0, py - 5.0), (px + 6.0, py - 5.0), (px + 5.0, py + 5.0), (px - 5.0, py + 5.0)], scale_rgb([120, 92, 50], 1.1), 1.0);
             // Blade: team edge, white-hot core, halo.
             let bx = px + dx * 34.0;
             let by = py + dy * 20.0;
@@ -1694,25 +1736,25 @@ fn paint_vanguard(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     }
 
     // Torso: broad faceted carapace with a vertical power core.
-    plate(&mut c, &[(32.0, 46.0), (96.0, 46.0), (88.0, 88.0), (40.0, 88.0)], GUNMETAL, 0.96);
-    c.poly(&[(38.0 + dx * 5.0, 50.0), (64.0 + dx * 10.0, 44.0 + dy * 4.0), (64.0 + dx * 10.0, 74.0), (44.0 + dx * 5.0, 82.0)], rgba(scale_rgb(GUNMETAL, 1.18)));
-    c.rect(42, 84, 44, 6, rgba(GUNMETAL_DARK));
+    plate(&mut c, &[(32.0, 46.0), (96.0, 46.0), (88.0, 88.0), (40.0, 88.0)], [120, 92, 50], 0.96);
+    c.poly(&[(38.0 + dx * 5.0, 50.0), (64.0 + dx * 10.0, 44.0 + dy * 4.0), (64.0 + dx * 10.0, 74.0), (44.0 + dx * 5.0, 82.0)], rgba(scale_rgb([120, 92, 50], 1.18)));
+    c.rect(42, 84, 44, 6, rgba([72, 54, 30]));
     // Core slit.
     let corex = cx + dx * 9.0;
     c.glow(corex, 64.0, 11.0, team, 0.8);
     c.rect((corex - 2.5) as i32, 54, 5, 20, rgba(scale_rgb(team, 1.3)));
 
     // Massive pauldrons.
-    plate(&mut c, &[(8.0, 36.0), (40.0, 30.0), (44.0, 52.0), (14.0, 58.0)], STEEL_LIT, 0.95);
-    plate(&mut c, &[(88.0, 30.0), (120.0, 36.0), (114.0, 58.0), (84.0, 52.0)], GUNMETAL, 0.88);
+    plate(&mut c, &[(8.0, 36.0), (40.0, 30.0), (44.0, 52.0), (14.0, 58.0)], [190, 150, 84], 0.95);
+    plate(&mut c, &[(88.0, 30.0), (120.0, 36.0), (114.0, 58.0), (84.0, 52.0)], [120, 92, 50], 0.88);
     c.line(14.0, 42.0, 36.0, 37.0, 3.5, rgba(team));
     c.line(92.0, 37.0, 114.0, 42.0, 3.5, rgba(team));
     // Pauldron kill-spikes.
-    c.poly(&[(10.0, 38.0), (16.0, 26.0), (20.0, 37.0)], rgba(STEEL_LIT));
-    c.poly(&[(108.0, 37.0), (112.0, 26.0), (118.0, 38.0)], rgba(GUNMETAL));
+    c.poly(&[(10.0, 38.0), (16.0, 26.0), (20.0, 37.0)], rgba([190, 150, 84]));
+    c.poly(&[(108.0, 37.0), (112.0, 26.0), (118.0, 38.0)], rgba([120, 92, 50]));
 
     // Helm with crest fin.
-    plate(&mut c, &[(52.0, 26.0), (76.0, 26.0), (78.0, 42.0), (50.0, 42.0)], scale_rgb(GUNMETAL, 1.14), 1.0);
+    plate(&mut c, &[(52.0, 26.0), (76.0, 26.0), (78.0, 42.0), (50.0, 42.0)], scale_rgb([120, 92, 50], 1.14), 1.0);
     c.poly(&[(62.0, 8.0), (66.0, 8.0), (68.0, 28.0), (60.0, 28.0)], rgba(team));
     c.glow(64.0, 10.0, 5.0, team, 0.6);
     if dy > -0.5 {
@@ -1721,7 +1763,7 @@ fn paint_vanguard(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
         c.line(vx - 7.0, vy, vx + 7.0, vy, 3.0, rgba([255, 150, 70]));
         c.glow(vx, vy, 8.0, [255, 150, 70], 0.7);
     } else {
-        c.rect(56, 30, 16, 12, rgba(GUNMETAL_DARK));
+        c.rect(56, 30, 16, 12, rgba([72, 54, 30]));
         c.glow(64.0, 44.0, 6.0, AMBER, 0.5);
     }
 
