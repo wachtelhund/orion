@@ -1779,22 +1779,22 @@ fn paint_vanguard(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c.rect(36, 114, 20, 10, rgba([30, 32, 38]));
     c.rect(76, 118, 20, 9, rgba([28, 30, 36]));
 
-    // Energy blades on both forearms.
+    // Twin energy blades held high in a battle-stance V: anchored at the
+    // shoulders and sweeping up-and-out above the head (never across the
+    // body's centerline), so the silhouette reads as a bladed warrior.
     let blades = |c: &mut Canvas| {
         for side in [-1.0f32, 1.0] {
-            let ox = -dy * side * 28.0;
-            let oy = dx * side * 18.0;
-            let px = cx + dx * 12.0 + ox;
-            let py = cy + dy * 8.0 + oy;
-            // Forearm housing.
-            plate(c, &[(px - 6.0, py - 5.0), (px + 6.0, py - 5.0), (px + 5.0, py + 5.0), (px - 5.0, py + 5.0)], scale_rgb([44, 40, 56], 1.1), 1.0);
-            // Blade: team edge, white-hot core, halo.
-            let bx = px + dx * 34.0;
-            let by = py + dy * 20.0;
-            c.line(px + dx * 6.0, py + dy * 4.0, bx, by, 8.0, [team[0], team[1], team[2], 110]);
-            c.line(px + dx * 6.0, py + dy * 4.0, bx, by, 4.5, rgba(team));
-            c.line(px + dx * 9.0, py + dy * 6.0, bx - dx * 1.5, by - dy * 1.0, 2.0, rgba([255, 255, 255]));
-            c.glow(bx, by, 7.0, team, 0.8);
+            let sx = cx + side * 30.0;
+            let sy = cy - 20.0;
+            let tx = cx + side * 44.0 + dx * 8.0;
+            let ty = cy - 56.0 + dy * 3.0;
+            // Wrist gauntlet at the shoulder anchor.
+            plate(c, &[(sx - 5.0, sy - 4.0), (sx + 5.0, sy - 4.0), (sx + 4.0, sy + 6.0), (sx - 4.0, sy + 6.0)], scale_rgb([44, 40, 56], 1.1), 1.0);
+            // Blade: halo, team edge, white-hot core, tip glow.
+            c.line(sx, sy - 2.0, tx, ty, 8.0, [team[0], team[1], team[2], 90]);
+            c.line(sx, sy - 2.0, tx, ty, 4.0, rgba(team));
+            c.line(sx, sy - 3.0, tx, ty, 1.6, rgba([255, 255, 255]));
+            c.glow(tx, ty, 6.0, team, 0.85);
         }
     };
     let behind = dy < -0.3;
