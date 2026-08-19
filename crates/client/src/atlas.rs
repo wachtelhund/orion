@@ -191,6 +191,52 @@ impl Canvas {
         }
     }
 
+    /// Emissive neon rim (cyberpunk signature): a bright colored line along the
+    /// lit (upper-left) silhouette plus a soft halo bleeding onto the dark
+    /// outline all around. Gives matte-dark bodies their form and a glowing
+    /// edge. Call AFTER `outline_t` + `rim` (it reads the baked `OUTLINE`).
+    pub fn neon_edge(&mut self, color: [u8; 3], strength: f32) {
+        let orig = self.px.clone();
+        let (w, h) = (self.w, self.h);
+        let is_bg = |p: Color| p[3] < 40 || p == OUTLINE;
+        let at = |x: i32, y: i32| -> Color {
+            if x < 0 || y < 0 || x >= w || y >= h {
+                OUTLINE
+            } else {
+                orig[(y * w + x) as usize]
+            }
+        };
+        // Bright core: body pixels on the lit edge glow the neon color.
+        for y in 0..h {
+            for x in 0..w {
+                let p = orig[(y * w + x) as usize];
+                if is_bg(p) {
+                    continue;
+                }
+                if is_bg(at(x, y - 1)) || is_bg(at(x - 1, y)) {
+                    let a = (215.0 * strength) as u8;
+                    self.blend(x, y, [color[0], color[1], color[2], a]);
+                }
+            }
+        }
+        // Halo: dark outline/background pixels touching the body pick up a
+        // softer neon bleed, stronger on the lit side.
+        for y in 0..h {
+            for x in 0..w {
+                let p = orig[(y * w + x) as usize];
+                if !is_bg(p) {
+                    continue;
+                }
+                let lit_side = !is_bg(at(x, y + 1)) || !is_bg(at(x + 1, y));
+                let touches = lit_side || !is_bg(at(x, y - 1)) || !is_bg(at(x - 1, y));
+                if touches {
+                    let a = ((if lit_side { 120.0 } else { 70.0 }) * strength) as u8;
+                    self.blend(x, y, [color[0], color[1], color[2], a]);
+                }
+            }
+        }
+    }
+
     /// Soft radial glow: quadratic falloff alpha blend. The emissive
     /// workhorse — windows, engines, plasma, bio-lights.
     pub fn glow(&mut self, cx: f32, cy: f32, r: f32, c: [u8; 3], strength: f32) {
@@ -270,6 +316,12 @@ impl Canvas {
                         let nz = (1.0 - (u * u * 0.6 + v * v * 0.6)).max(0.0).sqrt();
                         let lit = (-u * 0.34 - v * 0.5 + nz * 0.7).clamp(0.0, 1.28) / 1.28;
                         self.blend(x, y, scale(base, f * tone(lit, x, y)));
+                        // Cool specular glint on the lit pole so matte-dark
+                        // cyberpunk plates still catch the light.
+                        let sheen = (lit * lit * lit * 72.0) as u8;
+                        if sheen > 5 {
+                            self.blend(x, y, [188, 208, 246, sheen]);
+                        }
                     }
                 }
             }
@@ -1543,12 +1595,14 @@ fn facing_vec(f: usize) -> (f32, f32) {
 
 // Warm gunmetal so Vanguard troops read as sun-warmed steel against the
 // ochre world (the cyan VISOR stays as the cool sci-fi accent).
-const GUNMETAL: [u8; 3] = [80, 72, 62];
-const GUNMETAL_DARK: [u8; 3] = [50, 44, 38];
-const STEEL_LIT: [u8; 3] = [152, 136, 110];
-const AMBER: [u8; 3] = [255, 186, 84];
-const VISOR: [u8; 3] = [120, 235, 255];
-const OUTLINE: Color = [10, 11, 15, 255];
+// Cyberpunk repalette: matte near-black carbon bodies read by their glowing
+// neon edges + emissive accents rather than by body shading.
+const GUNMETAL: [u8; 3] = [38, 42, 54];
+const GUNMETAL_DARK: [u8; 3] = [22, 25, 34];
+const STEEL_LIT: [u8; 3] = [120, 138, 172];
+const AMBER: [u8; 3] = [255, 146, 48];
+const VISOR: [u8; 3] = [95, 240, 255];
+const OUTLINE: Color = [7, 8, 12, 255];
 
 /// Angular armor plate: a directionally-shaded quad with a bright lit edge
 /// along the top and a shadowed bottom edge. The gradient fill gives it
@@ -1640,6 +1694,7 @@ fn paint_trooper(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     }
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.3);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -1704,6 +1759,7 @@ fn paint_worker(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
 
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.25);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -1716,10 +1772,10 @@ fn paint_vanguard(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
 
     let lift = if frame == 0 { 0.0 } else { 4.0 };
     // Wide-stance legs: massive greaves.
-    plate(&mut c, &[(38.0, 92.0 + lift), (54.0, 92.0 + lift), (52.0, 118.0 - lift * 0.5), (40.0, 118.0 - lift * 0.5)], [72, 54, 30], 1.0);
-    plate(&mut c, &[(74.0, 96.0 - lift), (90.0, 96.0 - lift), (92.0, 120.0 + lift * 0.3), (78.0, 120.0 + lift * 0.3)], [72, 54, 30], 0.9);
-    c.poly(&[(39.0, 94.0 + lift), (53.0, 94.0 + lift), (46.0, 104.0 + lift)], rgba([120, 92, 50]));
-    c.poly(&[(75.0, 98.0 - lift), (89.0, 98.0 - lift), (82.0, 108.0 - lift)], rgba([120, 92, 50]));
+    plate(&mut c, &[(38.0, 92.0 + lift), (54.0, 92.0 + lift), (52.0, 118.0 - lift * 0.5), (40.0, 118.0 - lift * 0.5)], [26, 24, 34], 1.0);
+    plate(&mut c, &[(74.0, 96.0 - lift), (90.0, 96.0 - lift), (92.0, 120.0 + lift * 0.3), (78.0, 120.0 + lift * 0.3)], [26, 24, 34], 0.9);
+    c.poly(&[(39.0, 94.0 + lift), (53.0, 94.0 + lift), (46.0, 104.0 + lift)], rgba([44, 40, 56]));
+    c.poly(&[(75.0, 98.0 - lift), (89.0, 98.0 - lift), (82.0, 108.0 - lift)], rgba([44, 40, 56]));
     c.rect(36, 114, 20, 10, rgba([30, 32, 38]));
     c.rect(76, 118, 20, 9, rgba([28, 30, 36]));
 
@@ -1731,7 +1787,7 @@ fn paint_vanguard(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
             let px = cx + dx * 12.0 + ox;
             let py = cy + dy * 8.0 + oy;
             // Forearm housing.
-            plate(c, &[(px - 6.0, py - 5.0), (px + 6.0, py - 5.0), (px + 5.0, py + 5.0), (px - 5.0, py + 5.0)], scale_rgb([120, 92, 50], 1.1), 1.0);
+            plate(c, &[(px - 6.0, py - 5.0), (px + 6.0, py - 5.0), (px + 5.0, py + 5.0), (px - 5.0, py + 5.0)], scale_rgb([44, 40, 56], 1.1), 1.0);
             // Blade: team edge, white-hot core, halo.
             let bx = px + dx * 34.0;
             let by = py + dy * 20.0;
@@ -1747,25 +1803,25 @@ fn paint_vanguard(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     }
 
     // Torso: broad faceted carapace with a vertical power core.
-    plate(&mut c, &[(32.0, 46.0), (96.0, 46.0), (88.0, 88.0), (40.0, 88.0)], [120, 92, 50], 0.96);
-    c.poly(&[(38.0 + dx * 5.0, 50.0), (64.0 + dx * 10.0, 44.0 + dy * 4.0), (64.0 + dx * 10.0, 74.0), (44.0 + dx * 5.0, 82.0)], rgba(scale_rgb([120, 92, 50], 1.18)));
-    c.rect(42, 84, 44, 6, rgba([72, 54, 30]));
+    plate(&mut c, &[(32.0, 46.0), (96.0, 46.0), (88.0, 88.0), (40.0, 88.0)], [44, 40, 56], 0.96);
+    c.poly(&[(38.0 + dx * 5.0, 50.0), (64.0 + dx * 10.0, 44.0 + dy * 4.0), (64.0 + dx * 10.0, 74.0), (44.0 + dx * 5.0, 82.0)], rgba(scale_rgb([44, 40, 56], 1.18)));
+    c.rect(42, 84, 44, 6, rgba([26, 24, 34]));
     // Core slit.
     let corex = cx + dx * 9.0;
     c.glow(corex, 64.0, 11.0, team, 0.8);
     c.rect((corex - 2.5) as i32, 54, 5, 20, rgba(scale_rgb(team, 1.3)));
 
     // Massive pauldrons.
-    plate(&mut c, &[(8.0, 36.0), (40.0, 30.0), (44.0, 52.0), (14.0, 58.0)], [190, 150, 84], 0.95);
-    plate(&mut c, &[(88.0, 30.0), (120.0, 36.0), (114.0, 58.0), (84.0, 52.0)], [120, 92, 50], 0.88);
+    plate(&mut c, &[(8.0, 36.0), (40.0, 30.0), (44.0, 52.0), (14.0, 58.0)], [214, 170, 92], 0.95);
+    plate(&mut c, &[(88.0, 30.0), (120.0, 36.0), (114.0, 58.0), (84.0, 52.0)], [44, 40, 56], 0.88);
     c.line(14.0, 42.0, 36.0, 37.0, 3.5, rgba(team));
     c.line(92.0, 37.0, 114.0, 42.0, 3.5, rgba(team));
     // Pauldron kill-spikes.
-    c.poly(&[(10.0, 38.0), (16.0, 26.0), (20.0, 37.0)], rgba([190, 150, 84]));
-    c.poly(&[(108.0, 37.0), (112.0, 26.0), (118.0, 38.0)], rgba([120, 92, 50]));
+    c.poly(&[(10.0, 38.0), (16.0, 26.0), (20.0, 37.0)], rgba([214, 170, 92]));
+    c.poly(&[(108.0, 37.0), (112.0, 26.0), (118.0, 38.0)], rgba([44, 40, 56]));
 
     // Helm with crest fin.
-    plate(&mut c, &[(52.0, 26.0), (76.0, 26.0), (78.0, 42.0), (50.0, 42.0)], scale_rgb([120, 92, 50], 1.14), 1.0);
+    plate(&mut c, &[(52.0, 26.0), (76.0, 26.0), (78.0, 42.0), (50.0, 42.0)], scale_rgb([44, 40, 56], 1.14), 1.0);
     c.poly(&[(62.0, 8.0), (66.0, 8.0), (68.0, 28.0), (60.0, 28.0)], rgba(team));
     c.glow(64.0, 10.0, 5.0, team, 0.6);
     if dy > -0.5 {
@@ -1774,7 +1830,7 @@ fn paint_vanguard(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
         c.line(vx - 7.0, vy, vx + 7.0, vy, 3.0, rgba([255, 150, 70]));
         c.glow(vx, vy, 8.0, [255, 150, 70], 0.7);
     } else {
-        c.rect(56, 30, 16, 12, rgba([72, 54, 30]));
+        c.rect(56, 30, 16, 12, rgba([26, 24, 34]));
         c.glow(64.0, 44.0, 6.0, AMBER, 0.5);
     }
 
@@ -1783,6 +1839,7 @@ fn paint_vanguard(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     }
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.3);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -1832,6 +1889,7 @@ fn paint_breaker(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c.set((tx - 18.0) as i32, (ty - 23.0) as i32, rgba([255, 90, 80]));
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.28);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -1873,6 +1931,7 @@ fn paint_breaker_sieged(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c.set(108, 52, rgba(AMBER));
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.28);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -1926,6 +1985,7 @@ fn paint_skywing(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     }
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.25);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -1980,6 +2040,7 @@ fn paint_stormcaller(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c.line(cx + dx * 8.0, cy - 14.0, ox - dx * 6.0, oy + 2.0, 3.5, rgba(scale_rgb(robe, 1.1)));
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.3);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -2012,6 +2073,7 @@ fn paint_bulwark(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c.ellipse(cx + dx * 6.0, cy - 2.0 + dy * 4.0, 3.5, 3.0, rgba(scale_rgb(team, 1.35)));
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.28);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -2053,16 +2115,17 @@ fn paint_bulwark_deployed(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c.ellipse(cx, 62.0, 4.5, 3.5, rgba([250, 252, 255]));
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.25);
+    c.neon_edge(team, 0.9);
     c
 }
 
 // ----------------------------------------------------- Kyth Assembly ----
 
-const CHITIN: [u8; 3] = [58, 46, 70];
-const CHITIN_LIGHT: [u8; 3] = [110, 90, 128];
-const MEMBRANE: [u8; 3] = [142, 88, 70];
-const KYTH_GLOW: [u8; 3] = [158, 255, 96];
-const LEG: Color = [38, 30, 44, 255];
+const CHITIN: [u8; 3] = [28, 22, 42];
+const CHITIN_LIGHT: [u8; 3] = [92, 62, 128];
+const MEMBRANE: [u8; 3] = [74, 26, 60];
+const KYTH_GLOW: [u8; 3] = [140, 255, 110];
+const LEG: Color = [20, 16, 28, 255];
 
 /// Jointed insect leg: coxa -> knee -> sharp tip.
 fn kleg(c: &mut Canvas, x0: f32, y0: f32, kx: f32, ky: f32, tx: f32, ty: f32, t: f32) {
@@ -2116,6 +2179,7 @@ fn paint_kdrone(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     }
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.3);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -2159,6 +2223,7 @@ fn paint_skitter(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     }
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.3);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -2195,6 +2260,7 @@ fn paint_spitter(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c.glow(cx - dx * 2.0, cy + 2.0, 7.0, KYTH_GLOW, 0.4);
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.28);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -2213,11 +2279,11 @@ fn paint_ravager(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
         kleg(&mut c, cx + off, cy + 8.0, cx + off + 14.0, cy + 24.0 + l, cx + off + 18.0, cy + 42.0 - l, 4.0);
     }
     // Massive tiered carapace with scalloped plate rows.
-    c.dome(cx - dx * 8.0, cy - 8.0, 40.0, 30.0, [78, 42, 62]);
+    c.dome(cx - dx * 8.0, cy - 8.0, 40.0, 30.0, [52, 24, 46]);
     scallop(&mut c, cx - dx * 8.0, cy - 4.0, 34.0, 40.0);
-    c.dome(cx - dx * 16.0, cy - 20.0, 26.0, 17.0, scale_rgb([78, 42, 62], 1.15));
+    c.dome(cx - dx * 16.0, cy - 20.0, 26.0, 17.0, scale_rgb([52, 24, 46], 1.15));
     scallop(&mut c, cx - dx * 16.0, cy - 16.0, 22.0, 28.0);
-    c.dome(cx - dx * 20.0, cy - 30.0, 15.0, 9.0, [150, 92, 120]);
+    c.dome(cx - dx * 20.0, cy - 30.0, 15.0, 9.0, [176, 72, 146]);
     // Team spine row on the crest.
     for k in 0..4 {
         let sx = cx - 22.0 + k as f32 * 12.0;
@@ -2233,7 +2299,7 @@ fn paint_ravager(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
             (px + dx * 24.0 + 2.0, py + dy * 14.0 - 4.0),
             (px + dx * 28.0, py + dy * 17.0 + 4.0),
             (px + dx * 12.0, py + dy * 9.0 + 8.0),
-        ], rgba([150, 92, 120]));
+        ], rgba([176, 72, 146]));
         c.line(px + dx * 6.0, py + dy * 3.0, px + dx * 26.0, py + dy * 15.0, 2.0, rgba(team));
         // Serration teeth on the inner edge.
         for t in 0..3 {
@@ -2242,7 +2308,7 @@ fn paint_ravager(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
                 (px + dx * 28.0 * f2 - 2.0, py + dy * 17.0 * f2 + 6.0),
                 (px + dx * 28.0 * f2 + 2.0, py + dy * 17.0 * f2 + 6.0),
                 (px + dx * 28.0 * f2, py + dy * 17.0 * f2 + 11.0),
-            ], rgba([150, 92, 120]));
+            ], rgba([176, 72, 146]));
         }
     }
     // Glowing eye cluster + underglow.
@@ -2257,6 +2323,7 @@ fn paint_ravager(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c.glow(cx, cy + 12.0, 14.0, KYTH_GLOW, 0.25);
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.3);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -2293,6 +2360,7 @@ fn paint_wisp(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     }
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.25);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -2333,6 +2401,7 @@ fn paint_weaver(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     }
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.3);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -2384,6 +2453,7 @@ fn paint_burrower(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     }
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.3);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -3099,11 +3169,11 @@ fn star_flash() -> Canvas {
 // Salvager machine-cult: rusted iron plates, exposed frames, magnet-violet
 // coils and amber furnace light.
 
-const RUST: [u8; 3] = [104, 74, 52];
-const RUST_DARK: [u8; 3] = [70, 52, 40];
-const RUST_LIT: [u8; 3] = [152, 112, 78];
-const SCRAP: [u8; 3] = [92, 86, 80];
-const COIL: [u8; 3] = [168, 138, 255];
+const RUST: [u8; 3] = [48, 42, 44];
+const RUST_DARK: [u8; 3] = [26, 23, 24];
+const RUST_LIT: [u8; 3] = [108, 96, 90];
+const SCRAP: [u8; 3] = [72, 76, 86];
+const COIL: [u8; 3] = [190, 130, 255];
 
 /// Rust wear pass: streaks + bright chips over a plate region.
 fn rust_wear(c: &mut Canvas, x0: i32, y0: i32, w: i32, h: i32, salt: u32) {
@@ -3200,6 +3270,7 @@ fn paint_scrapper(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c.ellipse(ax, ay + 7.0, 4.0, 2.2, rgba(scale_rgb(COIL, 1.2)));
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.28);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -3242,6 +3313,7 @@ fn paint_arclight(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c.line(cx - 22.0, 22.0, cx - 12.0, 40.0, 1.6, rgba([60, 50, 46]));
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.3);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -3289,6 +3361,7 @@ fn paint_mauler(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     }
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.28);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -3336,6 +3409,7 @@ fn paint_lodestone(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c.glow(bx, by, 9.0, COIL, chg);
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.26);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -3399,6 +3473,7 @@ fn paint_kestrel(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c.glow(px + dx * 29.0, py + dy_i * 29.0 + 7.0, 5.0, COIL, 0.6);
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.25);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -3438,6 +3513,7 @@ fn paint_resonant(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c.glow(cx, cy - 54.0, 10.0, COIL, 0.6);
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.3);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -3715,6 +3791,7 @@ fn paint_marshal(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c.glow(gx, gy, 5.0, team, 0.6);
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.3);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -3777,6 +3854,7 @@ fn paint_broodmother(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     }
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.3);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -3823,6 +3901,7 @@ fn paint_magnus(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c.glow(hx + dx * 4.0, hy + dy * 2.0, 11.0, COIL, 0.7);
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.28);
+    c.neon_edge(team, 0.9);
     c
 }
 
@@ -3851,6 +3930,7 @@ fn paint_broodling(f: usize, frame: usize, team: [u8; 3]) -> Canvas {
     c.glow(cx, cy, 10.0, KYTH_GLOW, 0.25);
     c.outline_t(OUTLINE, 2);
     c.rim(OUTLINE, 1.25);
+    c.neon_edge(team, 0.9);
     c
 }
 
